@@ -90,7 +90,7 @@ export const WEAPONS: Weapon[] = [
   // Lightning strikes in a cross around you, all four directions at once.
   make('talisman', 'Thunder Talisman', '雷符', cross(34), 0.9),
   // A staff swung through both ends at once: hits in front and behind.
-  make('staff', 'Bō Staff', '棍', twin(34), 0.65),
+  make('staff', 'Bō Staff', '棍', twin(40), 0.65),
   // Three kunai thrown in a fan: long reach, but with gaps between them.
   make('kunai', 'Kunai Volley', '苦無', rays(17, 20), 0.75),
 ];

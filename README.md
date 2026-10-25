@@ -26,6 +26,7 @@ and toggles sound effects and music. All UI text lives in `src/i18n.ts`.
   hits 60% harder, bigger, hard to knock back, plus a few grunts). Enemy numbers and tower / boss HP scale with the
   party. Between stages the fallen come back and everyone heals; items, soul and stats carry over. If the whole party
   falls you can retry the stage or start over. The underworld has its own music, with a boss theme for the last stage.
+  The party fights with 120% of its role's max HP.
 
 **Watchtowers (箭塔)** appear in every team mode: two front towers per team (one smaller and weaker; the small ones sit diagonally) plus a
 bigger main tower (本陣) at the back. Towers shoot the nearest enemy in range (arrows fly over obstacles); teammates inside a tower's aura recover PE
@@ -78,10 +79,10 @@ Start positions are fixed but shuffled every round, and in team modes red's side
   棍 Bō Staff (a bar through you: hits in front and behind at once) · 苦無 Kunai Volley (three thin rays fanning out:
   long reach, gaps between them).
 - **Skills**: each fighter equips up to 3 skills from one shared pool, in any combination, in the loadout window:
-  調息 Meditate, 回春 Second Wind, 飛箭 Arrow, 火球 Fireball, 疾走 Sprint, 閃步 Blink Dash, 霸氣 Fury (+50% attack),
-  金鐘罩 Golden Bell (−50% damage taken), 隱身術 Vanish (nearly invisible, +25% move speed; CPUs lose you), 替身術 Substitution
+  調息 Meditate, 回春 Second Wind, 飛箭 Arrow, 火球 Fireball, 疾走 Sprint, 閃步 Blink Dash, 霸氣 Fury (+35% attack, 8 s),
+  金鐘罩 Golden Bell (−35% damage taken, 7 s), 隱身術 Vanish (nearly invisible, +25% move speed; CPUs lose you), 替身術 Substitution
   (the next hit lands on a log), 撒菱 Caltrops (spikes that slow and hurt enemies), 捨身 Self-Sacrifice (charge for 0.7 s, rooted, with the blast area shown on the ground; then spend 30 of your own HP for a blast that deals 60 to every enemy around you; with 30 HP or less it costs your life, but still hits for 60), 瞬身術 Body Flicker (teleport far from enemies), 癒之陣 Healing Circle
-  (heal the whole team), 回氣陣 Spirit Circle (team PE), 戰鼓 War Drum (team +30% damage), 聖火 Holy Fire / 天雷 Thunder / 死神 Reaper (see 魂 below),
+  (heal the whole team), 回氣陣 Spirit Circle (team PE), 戰鼓 War Drum (team +20% damage, 10 s), 聖火 Holy Fire / 天雷 Thunder / 死神 Reaper (see 魂 below),
   續命 Lifeline (revive a fallen
   teammate from anywhere, beside you; your HP is split between you).
 - **魂 Soul**: hurting enemy fighters fills a 4-level meter (24 damage per level); being hurt fills it too, at 40% of
@@ -127,6 +128,8 @@ and press any key to rebind it. Bindings are saved in the browser. Movement keys
 | Switch Pro / Joy-Con pair | Left stick / D-pad (right stick aims) | B or R | X / A / Y (or L) | ZR / ZL |
 | Joy-Con (L), sideways | Stick | ← | → / ↓ / ↑ | SR / SL |
 | Joy-Con (R), sideways | Stick | A | Y / X / B | SR / SL |
+| Joy-Con (L) half of a joined pair | Left stick | ← | → / ↓ / ↑ | ZL / L |
+| Joy-Con (R) half of a joined pair | Right stick | A | Y / X / B | ZR / R |
 
 Esc returns to the menu. Enter rematches after a round.
 
@@ -135,6 +138,12 @@ A / B on a Switch Pro Controller or Joy-Con pair, A / X on a sideways Joy-Con (R
 and the bottom / right face buttons on other gamepads. To use Joy-Cons, pair them with the computer over Bluetooth first, then press
 a button so the browser sees them. Each single Joy-Con, held sideways, is its own player (手把 1, 手把 2, …), and the
 lobby card shows which controller is on that slot. A single Joy-Con has no aiming stick, so you aim where you move.
+**Controller Setup (手把設定)**, from the title screen or the 🎮 button in the fighter setup, lists every controller the browser reports (Chrome has 8 gamepad slots; slots 5–8 show up in the lobby's control selector once something is plugged in there) with a live readout of every button and stick axis the browser reports (so you can see exactly what your Joy-Con sends), and what each one is doing in the game. For each controller you can:
+- pick **用法 (use as)**: *automatic* (by its name), *one player*, or *two players (left / right)*, which splits a joined Joy-Con pair into a left and a right Joy-Con (offered in the fighter setup's control selector as `手把 N・左 Joy-Con` / `右 Joy-Con`). Use this when the browser names your pair something the game doesn't recognise;
+- **握法 (grip)**, for split pads: *sideways* (the default, one Joy-Con per player) turns each stick and arrow set 90° the way the Joy-Con is held, the left one counter-clockwise and the right one clockwise, so "up" on the stick is "up" for you; *upright* leaves them as they are;
+- **設定按鍵 / 設定左邊 / 設定右邊 (set buttons)**: press the stick or button for move, attack, skill 1–3, use item and next item, one step at a time (Enter skips a step, Esc cancels), and the game remembers it for that controller. **重設** clears it.
+Settings are stored per controller name in the browser.
+Joy-Cons fall asleep and can come back in a different slot, so each "Gamepad N" choice remembers which controller model it had and follows it if it reappears elsewhere. If a player's controller drops out mid-fight the game freezes with a "controller disconnected, press a button to reconnect" message and carries on when it is back; the lobby won't start a fight while a chosen gamepad is missing. (Browsers only list a controller after a button press on the current page, so press one after reloading.)
 
 ## Where things live
 - `src/config.ts`: tuning numbers (HP, PE regen, balance budgets)
@@ -143,6 +152,7 @@ lobby card shows which controller is on that slot. A single Joy-Con has no aimin
 - `src/Fighter.ts`: fighter state machine (attack, skills, hits, PE)
 - `src/controls.ts`: keyboard, gamepad and CPU AI controllers
 - `src/gamepads.ts`: gamepad reading, including Switch Pro Controllers and single sideways Joy-Cons
+- `src/padconfig.ts` + `src/scenes/PadScene.ts`: the Controller Setup page: per-controller mode (whole / split Joy-Con halves) and custom button maps
 - `src/i18n.ts`: Traditional Chinese / English UI text
 - `src/maps/`: the thirty-six maps, the three Quest-only underworld maps (`hell.ts`), shared map helpers and spawn points
 - `src/art.ts`: ninja characters, held weapons, weapon / item icons (all drawn in code)

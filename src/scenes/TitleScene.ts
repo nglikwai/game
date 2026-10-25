@@ -28,6 +28,7 @@ export class TitleScene extends UIScene {
     const items: [string, () => void][] = [
       [T().startGame, () => this.scene.start('Mode')],
       [T().howToPlay, () => this.openHowTo()],
+      [T().padSetup, () => this.scene.start('Pads', { from: 'Title' })],
       [T().settings, () => this.openSettings()],
     ];
     items.forEach(([label, onPress], i) => {

@@ -1,5 +1,5 @@
 import { GAME_MODES, MAX_HUMANS, MAX_PLAYERS, QUEST, type GameMode } from './config';
-import { KEY_SETS, isKeySet, keyLabel, type Binds, type ControlId } from './controls';
+import { KEY_SETS, isKeySet, keyLabel, parsePad, type Binds, type ControlId } from './controls';
 import { T } from './i18n';
 import { MAPS, type MapId } from './maps';
 import type { RoleId } from './roles';
@@ -148,6 +148,9 @@ export function validate(s: GameSettings): string | null {
   const humans = active.map((x) => x.control).filter((c) => c !== 'cpu');
   if (humans.length > MAX_HUMANS) return T().tooManyHumans(MAX_HUMANS);
   if (new Set(humans).size !== humans.length) return T().sameControls;
+  // A whole gamepad and one of its Joy-Con halves would fight over the same buttons.
+  const pads = humans.map(parsePad).filter((p): p is NonNullable<typeof p> => !!p);
+  if (pads.some((p) => p.side && pads.some((q) => !q.side && q.index === p.index))) return T().sameControls;
   if (usesTeams(s.mode) && new Set(active.map((x) => x.team)).size < 2) return T().needTeams;
   const keys = active.flatMap(keysOf);
   const dup = keys.find((k, n) => keys.indexOf(k) !== n);

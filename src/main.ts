@@ -4,6 +4,7 @@ import { HEIGHT, RES, WIDTH } from './config';
 import { BattleScene } from './scenes/BattleScene';
 import { LobbyScene } from './scenes/LobbyScene';
 import { MapScene } from './scenes/MapScene';
+import { PadScene } from './scenes/PadScene';
 import { ModeScene } from './scenes/ModeScene';
 import { TitleScene } from './scenes/TitleScene';
 
@@ -16,7 +17,7 @@ const game = new Phaser.Game({
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
   physics: { default: 'arcade', arcade: { debug: false } },
   input: { gamepad: true },
-  scene: [TitleScene, ModeScene, MapScene, LobbyScene, BattleScene],
+  scene: [TitleScene, ModeScene, MapScene, LobbyScene, BattleScene, PadScene],
 });
 
 // Handy for poking at state from the browser console during development.

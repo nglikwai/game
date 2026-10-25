@@ -1,5 +1,6 @@
 import * as Phaser from 'phaser';
-import { padKind, padLabels, readPad } from './gamepads';
+import { halfLabels, padKind, padLabels, type PadSide } from './gamepads';
+import { readController, resolvePad } from './padconfig';
 import type { Fighter } from './Fighter';
 import type { Projectile } from './scenes/BattleScene';
 import type { SkillEffect } from './skills';
@@ -46,12 +47,28 @@ export interface Controller {
   read(self: Fighter, world: WorldView, dt: number): Intent;
   /** Short key labels for attack, 3 skills, use item, next item; shown in the HUD. */
   labels: Labels;
+  /** Gamepads only: false while the controller is not connected (asleep, out of range). */
+  readonly connected?: boolean;
 }
 
 // ---------- control options shown in the menu ----------
 
-export type ControlId = 'off' | 'kb1' | 'kb2' | 'kb3' | 'kb4' | 'pad1' | 'pad2' | 'pad3' | 'pad4' | 'cpu';
+/** Chrome offers up to 8 gamepad slots. */
+export const MAX_PAD_SLOTS = 8;
+export type PadSlot = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+export type ControlId =
+  | 'off' | 'kb1' | 'kb2' | 'kb3' | 'kb4' | 'cpu'
+  | `pad${PadSlot}`
+  /** One half of a Joy-Con pair that the system joined into a single controller (so the two halves are two players). */
+  | `pad${PadSlot}${'L' | 'R'}`;
 
+/** 'pad2R' → { index: 1, side: 'R' }; 'pad3' → { index: 2 }; anything else → null. */
+export function parsePad(id: string): { index: number; side?: PadSide } | null {
+  const m = /^pad(\d)([LR])?$/.exec(id);
+  return m ? { index: Number(m[1]) - 1, side: m[2] as PadSide | undefined } : null;
+}
+
+/** The usual choices; the lobby adds gamepads beyond the first four (and Joy-Con halves) as they show up. */
 export const CONTROL_OPTIONS: ControlId[] = ['off', 'kb1', 'kb2', 'kb3', 'kb4', 'pad1', 'pad2', 'pad3', 'pad4', 'cpu'];
 
 const K = Phaser.Input.Keyboard.KeyCodes;
@@ -102,7 +119,8 @@ export function keyLabel(code: number): string {
 export function createController(scene: Phaser.Scene, id: ControlId, binds: Binds): Controller | null {
   if (id === 'off') return null;
   if (id === 'cpu') return new AIController();
-  if (id.startsWith('pad')) return new GamepadController(Number(id.slice(3)) - 1);
+  const pad = parsePad(id);
+  if (pad) return new GamepadController(pad.index, pad.side);
   return new KeyboardController(scene, KEY_SETS[id as KeySetId].move, binds);
 }
 
@@ -140,22 +158,25 @@ class KeyboardController implements Controller {
 class GamepadController implements Controller {
   private prev = [false, false, false, false, false, false];
 
-  constructor(private index: number) {}
+  constructor(private index: number, private side?: PadSide) {}
 
   private get pad(): Gamepad | null {
-    const p = navigator.getGamepads ? navigator.getGamepads()[this.index] : null;
-    return p && p.connected ? p : null;
+    return resolvePad(this.index);
+  }
+
+  get connected() {
+    return !!this.pad;
   }
 
   /** Button names follow whatever is plugged in (Xbox-style, Switch, or a sideways Joy-Con). */
   get labels(): Labels {
-    return padLabels(padKind(this.pad?.id ?? ''));
+    return this.side ? halfLabels(this.side) : padLabels(padKind(this.pad?.id ?? ''));
   }
 
   read(): Intent {
     const pad = this.pad;
     if (!pad) return emptyIntent();
-    const st = readPad(pad);
+    const st = readController(pad, this.side);
     const edge = st.actions.map((v, i) => v && !this.prev[i]);
     this.prev = [...st.actions];
     return {

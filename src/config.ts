@@ -63,6 +63,8 @@ export const GAME_MODES: GameMode[] = ['ffa', 'team', 'princess', 'siege', 'ques
 export const QUEST = {
   /** Lobby slots that make up the party. */
   partySlots: 4,
+  /** The party fights with this much more max HP than usual. */
+  partyHp: 1.2,
   /** Map for each stage. */
   maps: ['sanzu', 'yama', 'onihall'] as const,
   /** Stage 1 (殲滅): enemies per wave = party + 1 (max 4), this many waves. */

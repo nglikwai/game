@@ -43,13 +43,13 @@ export const ITEMS: Item[] = [
   },
   {
     id: 'fury-pill', name: 'Fury Pill', zh: '霸氣丹', glyph: '霸', color: 0xb8322a, weight: 12,
-    desc: 'Fury for 5s.', descZh: '霸氣5秒。',
-    effect: { kind: 'powerUp', multiplier: 1.5, duration: 5 },
+    desc: 'Fury (+35%) for 8s.', descZh: '霸氣（+35%）8秒。',
+    effect: { kind: 'powerUp', multiplier: 1.35, duration: 8 },
   },
   {
     id: 'bell-charm', name: 'Golden Bell Charm', zh: '金鐘符', glyph: '金', color: 0xa8842c, weight: 12,
-    desc: 'Golden Bell for 4s.', descZh: '金鐘罩4秒。',
-    effect: { kind: 'guard', reduction: 0.5, duration: 4 },
+    desc: 'Golden Bell (−35%) for 7s.', descZh: '金鐘罩（−35%）7秒。',
+    effect: { kind: 'guard', reduction: 0.35, duration: 7 },
   },
   {
     id: 'wind-charm', name: 'Wind Charm', zh: '疾風符', glyph: '風', color: 0x2f8fa8, weight: 12,

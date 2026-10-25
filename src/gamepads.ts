@@ -38,6 +38,33 @@ export function padLabels(kind: PadKind): [string, string, string, string, strin
   }
 }
 
+export type PadSide = 'L' | 'R';
+
+/**
+ * A Joy-Con pair that the system joined into ONE controller (named "Joy-Con (L+R)" or
+ * similar, never a lone "(L)" / "(R)"). It can be split so each half is its own player.
+ */
+export function isJoyConPair(id: string): boolean {
+  const s = id.toLowerCase();
+  return (/joy-con/.test(s) && !/joy-con \(l\)|joy-con \(r\)|joy-con l|joy-con r/.test(s)) || /product: 200e/.test(s);
+}
+
+/** Button names for one half of a split pair, held sideways: attack, skill 1–3, use item, next item. */
+export function halfLabels(side: PadSide): [string, string, string, string, string, string] {
+  return side === 'L' ? ['←', '→', '↓', '↑', 'ZL', 'L'] : ['A', 'Y', 'X', 'B', 'ZR', 'R'];
+}
+
+/**
+ * A Joy-Con held sideways has its stick (and arrow buttons) turned 90°: the left one is
+ * turned counter-clockwise, the right one clockwise. Turns a movement vector read from the
+ * pad back into the direction the player means on screen.
+ */
+export function sidewaysMove(side: PadSide, mx: number, my: number): [number, number] {
+  return side === 'L' ? [my, -mx] : [-my, mx];
+}
+
+export const halfName = (side: PadSide) => (side === 'L' ? 'Joy-Con (L) ✂' : 'Joy-Con (R) ✂');
+
 export interface PadState {
   mx: number;
   my: number;
@@ -112,4 +139,31 @@ export function readPad(pad: Gamepad): PadState {
 export function connectedPads(): Gamepad[] {
   const list = navigator.getGamepads ? navigator.getGamepads() : [];
   return Array.from(list).filter((p): p is Gamepad => !!p && p.connected);
+}
+
+/**
+ * One half of a joined Joy-Con pair (standard mapping: left stick axes 0/1, right stick 2/3,
+ * B/A/Y/X = buttons 0–3, L/R = 4/5, ZL/ZR = 6/7, arrow buttons 12–15). The left Joy-Con uses
+ * its stick and arrow buttons, the right one its stick and A/B/X/Y, like a sideways single one.
+ */
+export function readPadHalf(pad: Gamepad, side: PadSide): PadState {
+  const b = (i: number) => {
+    const x = pad.buttons[i];
+    return !!x && (x.pressed || x.value > 0.5);
+  };
+  const ax = (i: number) => pad.axes[i] ?? 0;
+  const left = side === 'L';
+  const mx = dz(ax(left ? 0 : 2));
+  const my = dz(ax(left ? 1 : 3));
+  const actions: PadState['actions'] = left
+    ? [b(14), b(15), b(13), b(12), b(6), b(4)]
+    : [b(1), b(2), b(3), b(0), b(7), b(5)];
+  return {
+    mx, my,
+    ax: 0, ay: 0,
+    actions,
+    confirm: left ? b(14) : b(1),
+    back: left ? b(13) : b(0),
+    start: left ? b(8) : b(9),
+  };
 }

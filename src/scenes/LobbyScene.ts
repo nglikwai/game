@@ -1,7 +1,8 @@
 import * as Phaser from 'phaser';
-import { connectedPads, padKind, padLabels, padName } from '../gamepads';
+import { connectedPads, halfLabels, halfName, padKind, padLabels, padName } from '../gamepads';
+import { isSplit, resolvePad } from '../padconfig';
 import { HEIGHT, MAX_PLAYERS, PLAYER_COLORS, QUEST, RES, TEAM_COLORS, WEAPON_AREA, WIDTH } from '../config';
-import { CONTROL_OPTIONS, KEY_SETS, isKeySet, keyLabel, type ControlId } from '../controls';
+import { KEY_SETS, MAX_PAD_SLOTS, isKeySet, keyLabel, parsePad, type ControlId } from '../controls';
 import { T } from '../i18n';
 import { getSettings, keysOf, saveSettings, setControl, toggleSkill, usesTeams, validate, type SlotConfig } from '../settings';
 import { sfx } from '../sfx';
@@ -29,6 +30,24 @@ const cardY = (i: number) => CARD_Y + Math.floor(i / CARD_COLS) * (CARD_H + CARD
 const K = Phaser.Input.Keyboard.KeyCodes;
 /** Keys the menus / battle already use, so they can't be bound. */
 const RESERVED_KEYS = new Set<number>([K.ENTER, K.ESC]);
+
+/**
+ * The control choices to cycle through. A Joy-Con pair that the system joined into one controller
+ * also offers its left and right halves as two separate players (listed right after that pad).
+ */
+export function controlOptions(current: ControlId): ControlId[] {
+  const connected = new Set(connectedPads().map((p) => p.index + 1));
+  const split = new Set(connectedPads().filter((p) => isSplit(p)).map((p) => p.index + 1));
+  const out: ControlId[] = ['off', 'kb1', 'kb2', 'kb3', 'kb4'];
+  for (let n = 1; n <= MAX_PAD_SLOTS; n++) {
+    // Gamepads 1–4 are always offered; the others only once the browser actually reports one there (or it's already chosen).
+    const here = current.startsWith(`pad${n}`);
+    if (n <= 4 || connected.has(n) || here) out.push(`pad${n}` as ControlId);
+    if (split.has(n) || (here && current.length === 5)) out.push(`pad${n}L` as ControlId, `pad${n}R` as ControlId);
+  }
+  out.push('cpu');
+  return out;
+}
 
 export class LobbyScene extends UIScene {
   private layer!: Phaser.GameObjects.Container;
@@ -105,6 +124,7 @@ export class LobbyScene extends UIScene {
       : T().noPads;
     this.layer.add(txt(this, WIDTH / 2, 640, `🎮 ${list}`, 12, C.dim, { origin: 0.5, wrap: 760, align: 'center' }));
 
+    addButton(this, this.layer, this.nav, { id: 'pads', x: WIDTH / 2, y: 678, w: 240, h: 30, label: `🎮  ${T().padOpen}`, size: 14, onPress: () => this.scene.start('Pads', { from: 'Lobby' }) });
     addButton(this, this.layer, this.nav, { id: 'back', x: 110, y: 640, w: 150, h: 46, label: T().back, onPress: () => this.scene.start('Mode') });
     addButton(this, this.layer, this.nav, { id: 'fight', x: WIDTH - 160, y: 640, w: 240, h: 58, label: `${T().fightStart}  ▶`, primary: true, size: 30, onPress: () => this.startBattle() });
     this.nav.done('c0-control');
@@ -150,15 +170,17 @@ export class LobbyScene extends UIScene {
     addSelector(this, L, this.nav, {
       id: `c${i}-control`, x: x + 10, y: y + 44, w: inner, h: 30, labelW: 0, label: '', value: T().controls(slot.control),
       onAdjust: (d) => {
-        const ci = CONTROL_OPTIONS.indexOf(slot.control);
-        setControl(slot, CONTROL_OPTIONS[(ci + d + CONTROL_OPTIONS.length) % CONTROL_OPTIONS.length]);
+        const options = controlOptions(slot.control);
+        const ci = options.indexOf(slot.control);
+        setControl(slot, options[(ci + d + options.length) % options.length]);
         rebuild();
       },
     });
-    if (slot.control.startsWith('pad')) {
+    const padSel = parsePad(slot.control);
+    if (padSel) {
       // Which controller is on this slot (or a hint to wake one up).
-      const pad = navigator.getGamepads?.()[Number(slot.control.slice(3)) - 1];
-      const label = pad?.connected ? padName(padKind(pad.id)) : T().pressPadButton;
+      const pad = resolvePad(padSel.index);
+      const label = pad?.connected ? (padSel.side ? halfName(padSel.side) : padName(padKind(pad.id))) : T().pressPadButton;
       L.add(txt(this, x + CARD_W / 2, y + 79, label, 10, C.goldHex, { origin: 0.5 }));
     }
     if (off) {
@@ -211,16 +233,22 @@ export class LobbyScene extends UIScene {
 
   private bindLabel(slot: SlotConfig, n: number) {
     if (isKeySet(slot.control)) return keyLabel(slot.binds[n]);
-    if (slot.control.startsWith('pad')) {
-      const pad = navigator.getGamepads?.()[Number(slot.control.slice(3)) - 1];
-      return padLabels(padKind(pad?.id ?? ''))[n];
+    const sel = parsePad(slot.control);
+    if (sel) {
+      if (sel.side) return halfLabels(sel.side)[n];
+      return padLabels(padKind(resolvePad(sel.index)?.id ?? ''))[n];
     }
     return '';
   }
 
   private startBattle() {
     const s = getSettings();
-    const err = validate(s);
+    // Every player on a gamepad needs it connected (press a button on it so the browser sees it).
+    const active = s.mode === 'quest' ? s.slots.slice(0, QUEST.partySlots) : s.slots;
+    const missing = active
+      .map((sl, i) => ({ sel: parsePad(sl.control), i, off: sl.control === 'off' }))
+      .filter((x) => !x.off && x.sel && !resolvePad(x.sel.index));
+    const err = validate(s) ?? (missing.length ? T().padLost(missing.map((x) => `P${x.i + 1}`).join(' ')) : null);
     if (err) {
       sfx.menuError();
       toast(this, err);

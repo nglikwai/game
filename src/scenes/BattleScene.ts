@@ -317,6 +317,18 @@ export class BattleScene extends UIScene implements Arena {
   }
 
   create() {
+    // The pause menu freezes the clock, tweens and physics. Leaving it by Restart / Back skips the unpause,
+    // and the clock outlives the scene, so a frozen clock would carry into the next round
+    // (timed things like summon strikes then never fire). Always start unfrozen.
+    this.paused = false;
+    this.padHold = false;
+    this.padOverlay = null;
+    this.time.paused = false;
+    this.tweens.resumeAll();
+    // (The physics world is rebuilt for every round, so it never starts frozen.)
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.time.paused = false;
+    });
     this.setupUI();
     this.physics.world.setBounds(ARENA.x, ARENA.y, ARENA.w, ARENA.h);
     const world = this.add.container(0, HUD_HEIGHT).setScale(1 / S).setDepth(1);
@@ -374,6 +386,8 @@ export class BattleScene extends UIScene implements Arena {
       const color = isBoss ? BOSS_COLOR : PLAYER_COLORS[i];
       const f = new Fighter(i, color, WEAPONS[gear.weapon], skills, role, controller, body, this);
       if (teams) f.team = slot.team;
+      // Quest: the party is sturdier than usual.
+      if (this.quest && i < QUEST.partySlots) f.maxHp = f.hp = Math.round(role.maxHp * QUEST.partyHp);
       if (isBoss) {
         f.boss = true;
         f.radius = r;
@@ -509,6 +523,7 @@ export class BattleScene extends UIScene implements Arena {
 
   update(_time: number, deltaMs: number) {
     const dt = Math.min(deltaMs / 1000, 0.05);
+    if (this.holdForLostPads()) return;
     if (this.paused) return;
 
     // Frozen during the pre-round countdown and on the end-of-round screen.
@@ -678,6 +693,38 @@ export class BattleScene extends UIScene implements Arena {
   }
 
   // ---------- pause & results ----------
+
+  /** A player's controller dropped out (Joy-Cons fall asleep): freeze the fight and say so until it's back. */
+  private padHold = false;
+  private padHoldPaused = false;
+  private padOverlay: Phaser.GameObjects.Container | null = null;
+
+  private holdForLostPads(): boolean {
+    const lost = this.over ? [] : this.fighters.filter((f) => f.controller.connected === false);
+    if (lost.length === 0) {
+      if (this.padHold) {
+        this.padHold = false;
+        this.padOverlay?.destroy();
+        this.padOverlay = null;
+        if (this.padHoldPaused) this.setPaused(false);
+      }
+      return false;
+    }
+    if (!this.padHold) {
+      this.padHold = true;
+      this.padHoldPaused = !this.paused;
+      if (this.padHoldPaused) this.setPaused(true);
+    }
+    const who = lost.map((f) => `P${f.index + 1}`).join(' ');
+    if (!this.padOverlay) {
+      const dim = this.add.rectangle(0, 0, WIDTH, HEIGHT, 0x000000, 0.55).setOrigin(0, 0);
+      const msg = txt(this, WIDTH / 2, HEIGHT / 2, T().padLost(who), 28, '#ffd27a', { title: true, bold: true, origin: 0.5, stroke: '#000000', strokeThickness: 5, wrap: 900, align: 'center' });
+      this.padOverlay = this.add.container(0, 0, [dim, msg]).setDepth(900);
+    } else {
+      (this.padOverlay.list[1] as Phaser.GameObjects.Text).setText(T().padLost(who));
+    }
+    return true;
+  }
 
   private setPaused(on: boolean) {
     this.paused = on;

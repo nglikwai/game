@@ -58,7 +58,7 @@ export interface Arena {
 }
 
 export class Fighter {
-  readonly maxHp: number;
+  maxHp: number;
   readonly maxPe: number;
   hp: number;
   pe: number;
