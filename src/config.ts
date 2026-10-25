@@ -38,8 +38,8 @@ export const PE_REGEN_MOVING = 0.6;
 /** Seconds after spending PE before regen resumes. */
 export const PE_REGEN_DELAY = 0.5;
 
-// Weapon balance budgets. Every weapon has the same hit area, and the same
-// damage / knockback / PE spent per second when swinging nonstop.
+// Weapon balance budgets. Hit area uses a common baseline (shuriken +25%, flail +15%).
+// Damage / knockback / PE spent per second are equal when swinging nonstop.
 // Fast weapons therefore hit softly; slow weapons hit hard.
 export const WEAPON_AREA = 9000; // px²
 export const DAMAGE_PER_SEC = 16;
@@ -58,30 +58,61 @@ export const GAME_MODES: GameMode[] = ['ffa', 'team', 'princess', 'siege', 'ques
 
 /**
  * 闖關 Quest: up to 4 players (P1–P4, humans or CPU allies) on one side against
- * enemies set by the stage. Three stages in a row; enemy numbers scale with the party.
+ * enemies set by the stage. Four stages in a row; enemy numbers scale with the party.
  */
 export const QUEST = {
   /** Lobby slots that make up the party. */
   partySlots: 4,
   /** The party fights with this much more max HP than usual. */
   partyHp: 1.2,
+  /** Natural PE recovery is 10% faster for the party, including CPU allies; enemies use normal rates. */
+  partyPeRegen: 1.1,
+  /** Party movement is 5% faster, including CPU allies; enemies keep their normal speed. */
+  partySpeed: 1.05,
   /** Map for each stage. */
-  maps: ['sanzu', 'yama', 'onihall'] as const,
+  maps: ['sanzu', 'yama', 'prison', 'onihall'] as const,
+  rescueStage: 2,
+  bossStage: 3,
   /** Stage 1 (殲滅): enemies per wave = party + 1 (max 4), this many waves. */
   waves: 2,
   /** Stage 2 (破塔): two big enemy towers; HP each = base + perPlayer × party size. */
   tower: { base: 300, perPlayer: 150, size: 64 },
-  /** Stage 3 (討伐): the boss. HP = base + perPlayer × party size. */
-  boss: { hpBase: 300, hpPerPlayer: 150, damage: 1.6, radius: 27, speed: 0.9, knockbackTaken: 0.25 },
-  /** Seconds before the next wave walks in. */
-  waveDelay: 2,
+  /** Stage 3 (救援): two reinforced princess walls and a hostile summoning tree. */
+  rescue: {
+    wallBase: 900, wallPerPlayer: 250,
+    tree: {
+      x: WIDTH - 150, y: (HUD_HEIGHT + HEIGHT) / 2, initialDelay: 3, interval: 5,
+      lightWarn: 0.8, thunderWarn: 1.1, warn: 1.6, radius: 90, damage: 1.25,
+      hpBase: 600, hpPerPlayer: 200, aura: 170,
+    },
+  },
+  /** Stage 4 (討伐): the boss. HP = base + perPlayer × party size. */
+  boss: {
+    hpBase: 300, hpPerPlayer: 150, damage: 1.6, radius: 27, speed: 1.05, knockbackTaken: 0.25,
+    skillCooldown: 0.75, maxParalysis: 1,
+    /** Includes the boss; each reinforcement costs 8% of the boss's max HP. */
+    maxEnemies: 4, respawnInterval: 10, respawnHpCost: 0.08,
+  },
+  /** Enemy towers and the prison tree use this multiplier on the normal respawn wait. */
+  towerRespawnFactor: 2.5,
+  /** Recovery time in seconds after clearing a wave in stage 1. */
+  waveDelay: 5,
 };
+
+/**
+ * How smart the CPU fighters are. Standard is the original behaviour; Hard reacts faster, picks its
+ * targets and distances more cleverly, punishes openings and dodges better.
+ */
+export type Difficulty = 'standard' | 'hard';
+export const DIFFICULTIES: Difficulty[] = ['standard', 'hard'];
+/** On Hard, CPU fighters also have this much more max HP (in Quest only the enemies, never your party or the boss). */
+export const HARD_CPU_HP = 1.3;
 
 /** Team mode: index 0 = red team, 1 = blue team. */
 export const TEAM_COLORS = [0xe8473c, 0x3b82f6];
 
-/** Save the Princess: wall HP for a 2-player team (scaled by team size), and how long fallen players wait to come back. */
-export const PRINCESS_WALL_HP = 340;
+/** Save the Princess: HP per princess wall for a 2-player team (scaled by team size). */
+export const PRINCESS_WALL_HP = 680;
 export const RESPAWN_DELAY = 3;
 
 /**
@@ -112,6 +143,8 @@ export const SOUL_LEVELS = 4;
  * (paralysed fighters can't act, and nothing can hurt them).
  */
 export const SOUL_THUNDER = { hitChance: [0.55, 0.65, 0.75, 0.85], minDamage: 5, maxDamage: 30, paralyze: 2, stagger: 0.15 };
+/** A paralysed fighter can't act or move, but is still hurt, for this share of the damage. */
+export const PARALYZED_DAMAGE_TAKEN = 0.4;
 /** Every summon strike paralyses its target for at least this long, even when it misses (hits paralyse longer). */
 export const SOUL_MISS_PARALYZE = 0.8;
 /** 死神 Reaper: rarely lands, but when it does it's a huge blow (most wounded fighters die). */
@@ -119,7 +152,7 @@ export const SOUL_REAPER = { hitChance: [0.1, 0.15, 0.2, 0.25], damage: 80, para
 /** 聖火 Holy Fire: almost always lands, but only a small burn. */
 export const SOUL_FIRE = { hitChance: [0.85, 0.9, 0.95, 1], minDamage: 5, maxDamage: 12, paralyze: 1.2, stagger: 0.12 };
 /** 神樹 Sacred Tree: hits `perLevel` enemies per soul level, 75% to land on each target (whatever the soul level), 5 damage, the longest paralysis. */
-export const SOUL_TREE = { perLevel: 3, hitChance: 0.75, damage: 5, paralyze: 3.5, stagger: 0.08 };
+export const SOUL_TREE = { perLevel: 2, hitChance: 0.75, damage: 5, paralyze: 3.5, stagger: 0.08 };
 /**
  * Summoning skills (天雷, 死神) take this long to call: the caster is frozen and can't be
  * hurt meanwhile, and the strikes land when the call finishes.
@@ -139,7 +172,7 @@ export const SMALL_TOWER = { hp: 180, size: 26, range: 190, fireInterval: 1.1, d
  * starts short and grows as the battle goes on: base + elapsed seconds × growth, capped.
  */
 export const TEAM_RESPAWN = { base: 4, growthPerSec: 1 / 15, max: 14 };
-/** Each respawn costs the tower that does it this share of its max HP (it can't drop below 1 this way). */
+/** Each respawn costs this share of tower max HP. Normal modes retain 1 HP; Quest enemy towers/tree can be exhausted. */
 export const RESPAWN_TOWER_COST = 0.1;
 /** Players brought back by a tower return with this share of their max HP. */
 export const TOWER_RESPAWN_HP = 0.75;
@@ -161,8 +194,12 @@ export const randomChestInterval = (n: number) => 16 - 1.5 * n;
 export const maxRandomChests = (n: number) => Math.ceil(n / 2) + 1;
 export const startRandomChests = (n: number) => Math.max(0, n - 2);
 
-/** Seconds of 3-2-1 before a round starts; nobody can move until it ends. */
-export const COUNTDOWN = 3;
+/** Loading screen shown between fighter setup and the battle countdown. */
+export const BATTLE_LOADING_MS = 5000;
+/** Time to view the frozen battlefield before the numbered countdown begins. */
+export const BATTLE_READY_SECONDS = 3;
+/** Seconds of 5-4-3-2-1 before a round starts; nobody can move until it ends. */
+export const COUNTDOWN = 5;
 
 /**
  * Render scale. Game logic always uses WIDTH x HEIGHT units, but the canvas is

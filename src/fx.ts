@@ -129,35 +129,75 @@ export class Fx {
       const sy = y + s * from;
       const px = x + c * d;
       const py = y + s * d;
-      g.lineStyle(3, color, 0.5 * (1 - t)).lineBetween(sx, sy, px, py);
-      g.lineStyle(1.5, 0xffffff, 0.9 * (1 - t)).lineBetween(sx, sy, px, py);
-      if (k < 1) drawShurikenStar(g, px, py, 7, t * 40);
+      g.lineStyle(5, color, 0.5 * (1 - t)).lineBetween(sx, sy, px, py);
+      g.lineStyle(2.5, 0xffffff, 0.9 * (1 - t)).lineBetween(sx, sy, px, py);
+      if (k < 1) drawShurikenStar(g, px, py, 10, t * 40);
     });
     const ex = x + c * to;
     const ey = y + s * to;
     setTimeout(() => this.sparks(ex, ey, 0xe8ecf4, 8), life * 1000);
   }
 
-  /** 棍: the staff whips through both ends at once, with a pale swoosh at each tip. */
+  /** 冰棍: the staff whips through both ends, trailing frost and leaving ice crystals at the tips. */
   staffSweep(getPos: () => { x: number; y: number }, facing: number, length: number, width: number) {
     this.effect('over', 0.3, (g, t) => {
       const { x, y } = getPos();
       const a = facing + Math.PI / 2 - t * Math.PI;
       const c = Math.cos(a);
       const s = Math.sin(a);
-      g.lineStyle(width * 0.5 * (1 - t), 0xe8dcc0, 0.35 * (1 - t)).lineBetween(x - c * length, y - s * length, x + c * length, y + s * length);
+      g.lineStyle(width * 0.5 * (1 - t), 0xbfe9ff, 0.4 * (1 - t)).lineBetween(x - c * length, y - s * length, x + c * length, y + s * length);
+      g.lineStyle(2, 0xffffff, 0.7 * (1 - t)).lineBetween(x - c * length, y - s * length, x + c * length, y + s * length);
       for (const d of [1, -1]) {
-        g.lineStyle(4 * (1 - t), 0xffffff, 0.8 * (1 - t));
+        g.lineStyle(5 * (1 - t), 0x9fe0ff, 0.85 * (1 - t));
         g.beginPath();
         g.arc(x, y, length * 0.9, a - (d > 0 ? 0 : Math.PI) - 0.6, a - (d > 0 ? 0 : Math.PI), false);
         g.strokePath();
+        // A snowflake riding the tip.
+        this.snowflake(g, x + d * c * length * 0.92, y + d * s * length * 0.92, 7 * (1 - t * 0.5), (1 - t) * 0.9);
       }
     });
     const c = Math.cos(facing);
     const s = Math.sin(facing);
     const { x, y } = getPos();
-    this.sparks(x + c * length, y + s * length, 0xe8dcc0, 4);
-    this.sparks(x - c * length, y - s * length, 0xe8dcc0, 4);
+    for (const d of [1, -1]) {
+      this.sparks(x + d * c * length, y + d * s * length, 0xdff6ff, 6);
+      this.frostMark(x + d * c * length * 0.8, y + d * s * length * 0.8);
+    }
+  }
+
+  /** A six-armed snowflake. */
+  private snowflake(g: Phaser.GameObjects.Graphics, x: number, y: number, r: number, alpha: number) {
+    g.lineStyle(1.5, 0xe8fbff, alpha);
+    for (let k = 0; k < 3; k++) {
+      const a = (k * Math.PI) / 3;
+      g.lineBetween(x - Math.cos(a) * r, y - Math.sin(a) * r, x + Math.cos(a) * r, y + Math.sin(a) * r);
+    }
+  }
+
+  /** A patch of frost on the ground that melts away. */
+  private frostMark(x: number, y: number) {
+    this.effect('floor', 1.2, (g, t) => {
+      g.fillStyle(0xcdeeff, 0.28 * (1 - t)).fillCircle(x, y, 16);
+      g.lineStyle(1.5, 0xeaf9ff, 0.6 * (1 - t));
+      for (let k = 0; k < 6; k++) {
+        const a = (k * Math.PI) / 3;
+        g.lineBetween(x + Math.cos(a) * 5, y + Math.sin(a) * 5, x + Math.cos(a) * 15, y + Math.sin(a) * 15);
+      }
+    });
+  }
+
+  /** 冰棍 hit: a burst of ice crystals on whoever it struck. */
+  frostBurst(x: number, y: number) {
+    const rot = Math.random() * Math.PI;
+    this.effect('glow', 0.45, (g, t) => {
+      g.lineStyle(3 * (1 - t), 0xbfe9ff, 0.9 * (1 - t)).strokeCircle(x, y, 8 + t * 26);
+      for (let k = 0; k < 6; k++) {
+        const a = rot + (k * Math.PI) / 3;
+        this.snowflake(g, x + Math.cos(a) * (10 + t * 26), y + Math.sin(a) * (10 + t * 26), 5 * (1 - t * 0.6), 1 - t);
+      }
+    });
+    this.sparks(x, y, 0xdff6ff, 10);
+    this.frostMark(x, y);
   }
 
   /** 苦無: three kunai streaking out along their rays. */
@@ -213,6 +253,26 @@ export class Fx {
       const sp = 40 + Math.random() * 90;
       this.add({ kind: 'dust', x: cx + Math.cos(a) * 10, y: cy + Math.sin(a) * 10, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.5 + Math.random() * 0.4, size: 4 + Math.random() * 5, drag: 0.05, color: 0x9c8f78 });
     }
+  }
+
+  /** 長槍: a straight, pointed thrust trail, fading inside the narrow hit lane. */
+  spearThrust(x: number, y: number, facing: number, offset: number, length: number, width: number, color: number) {
+    const c = Math.cos(facing), s = Math.sin(facing);
+    const at = (f: number, side = 0) => ({ x: x + c * f - s * side, y: y + s * f + c * side });
+    this.effect('glow', 0.18, (g, t) => {
+      const tip = at(offset + length);
+      const base = offset + length * t * 0.65;
+      g.fillStyle(color, 0.3 * (1 - t)).fillPoints([
+        at(base, -width * 0.45), tip, at(base, width * 0.45),
+      ] as Phaser.Math.Vector2[], true);
+      const start = at(base);
+      g.lineStyle(3 * (1 - t), 0xfff3d4, 0.9 * (1 - t)).lineBetween(start.x, start.y, tip.x, tip.y);
+      for (const side of [-1, 1]) {
+        const from = at(offset + length * 0.2, side * width * 0.35);
+        const to = at(offset + length * 0.8, side * width * 0.35);
+        g.lineStyle(1, 0xd8e9ff, 0.5 * (1 - t)).lineBetween(from.x, from.y, to.x, to.y);
+      }
+    });
   }
 
   /** 雙匕: two crossing crescent slashes. */

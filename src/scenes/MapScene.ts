@@ -4,7 +4,8 @@ import { T } from '../i18n';
 import { MAPS, addArenaTexture } from '../maps';
 import { getSettings, saveSettings } from '../settings';
 import { sfx } from '../sfx';
-import { C, FocusNav, Petals, UIScene, addBackdrop, addButton, drawFrame, txt } from '../ui';
+import { C, FocusNav, Petals, UIScene, addBackdrop, addButton, addMenuHeader, txt } from '../ui';
+import { drawRosterFrame } from '../lobbyArt';
 
 // Six maps per page (3 × 2); ◀ ▶ buttons (or the mouse wheel) flip pages.
 const COLS = 3;
@@ -12,8 +13,8 @@ const PER_PAGE = 6;
 const SIDE = 96;
 const CARD_GAP = 22;
 const CARD_W = Math.floor((WIDTH - SIDE * 2 - (COLS - 1) * CARD_GAP) / COLS);
-const PREVIEW_H = Math.round((CARD_W - 24) * ((HEIGHT - 92) / WIDTH));
-const CARD_H = PREVIEW_H + 92;
+const PREVIEW_H = Math.round((CARD_W - 48) * ((HEIGHT - 92) / WIDTH));
+const CARD_H = PREVIEW_H + 104;
 const ROW_Y = [100, 100 + CARD_H + 20];
 const PAGES = Math.ceil(MAPS.length / PER_PAGE);
 
@@ -32,8 +33,11 @@ export class MapScene extends UIScene {
     this.setupUI();
     addBackdrop(this, 0.75);
     this.petals = new Petals(this, { x: 0, y: 0, w: WIDTH, h: HEIGHT }, 14);
-    txt(this, WIDTH / 2, 50, T().selectMap, 40, C.goldHex, { title: true, bold: true, origin: 0.5, stroke: '#2a0a06', strokeThickness: 6 });
-    txt(this, WIDTH - 40, HEIGHT - 32, T().confirmHint, 13, C.faint, { origin: [1, 0.5] });
+    addMenuHeader(this, T().selectMap);
+    txt(this, WIDTH - 40, 40, T().mapCount(MAPS.length), 13, '#bba983', { bold: true, origin: [1, 0.5] });
+    const footer = this.add.graphics();
+    footer.fillStyle(0x121b29, 0.98).fillRoundedRect(30, 652, WIDTH - 60, 49, 10);
+    txt(this, WIDTH / 2, 712, T().confirmHint, 10, C.faint, { origin: 0.5 });
 
     this.nav = new FocusNav(this);
     this.pushNav(this.nav);
@@ -69,16 +73,26 @@ export class MapScene extends UIScene {
       const x = cx - CARD_W / 2;
       const y = ROW_Y[Math.floor(i / COLS)];
       const g = this.add.graphics();
-      drawFrame(g, x, y, CARD_W, CARD_H, { fill: C.panel, fillAlpha: 0.95, border: C.gold, radius: 14, ornate: true });
+      const selected = getSettings().mapId === map.id;
+      drawRosterFrame(g, x, y, CARD_W, CARD_H, selected ? C.gold : 0x677f95);
+      if (selected) g.lineStyle(1, C.gold, 0.7).strokeRoundedRect(x, y, CARD_W, CARD_H, 12);
       layer.add(g);
       // Preview: the map's own painted arena, scaled down.
-      const pw = CARD_W - 24;
+      const pw = CARD_W - 48;
       layer.add(this.add.image(cx, y + 12 + PREVIEW_H / 2, addArenaTexture(this, map)).setDisplaySize(pw, PREVIEW_H));
       const frame = this.add.graphics();
-      frame.lineStyle(2, C.border, 1).strokeRect(cx - pw / 2, y + 12, pw, PREVIEW_H);
+      frame.lineStyle(1, 0xb9c9dc, 0.16).strokeRect(cx - pw / 2, y + 12, pw, PREVIEW_H);
+      frame.fillStyle(0x0b1019, 0.85).fillRoundedRect(cx - pw / 2 + 6, y + 18, 34, 19, 4);
       layer.add(frame);
-      layer.add(txt(this, cx, y + PREVIEW_H + 34, T().mapName(map), 24, C.text, { title: true, bold: true, origin: 0.5 }));
-      layer.add(txt(this, cx, y + PREVIEW_H + 54, T().mapDesc(map), 13, C.dim, { origin: [0.5, 0], wrap: CARD_W - 28, align: 'center' }));
+      layer.add(txt(this, cx - pw / 2 + 23, y + 28, String(this.page * PER_PAGE + i + 1).padStart(2, '0'), 11, '#dfd6c4', { bold: true, origin: 0.5 }));
+      if (selected) {
+        frame.fillStyle(0x0b1019, 0.9).fillRoundedRect(cx + pw / 2 - 84, y + 18, 78, 19, 4);
+        layer.add(txt(this, cx + pw / 2 - 45, y + 28, `✓ ${T().mapSelected}`, 10, C.goldHex, { bold: true, origin: 0.5 }));
+      }
+      const name = txt(this, cx, y + PREVIEW_H + 31, T().mapName(map), 22, C.text, { title: true, bold: true, origin: 0.5 });
+      name.setScale(Math.min(1, (CARD_W - 40) / name.width));
+      layer.add(name);
+      layer.add(txt(this, cx, y + PREVIEW_H + 52, T().mapDesc(map), 12, C.dim, { origin: [0.5, 0], wrap: CARD_W - 42, align: 'center' }));
       nav.add({
         id: map.id, x, y, w: CARD_W, h: CARD_H, radius: 14,
         onEnter: () => {
@@ -94,9 +108,9 @@ export class MapScene extends UIScene {
     const arrow = (id: string, x: number, d: number, on: boolean) => {
       const g = this.add.graphics();
       g.fillStyle(C.panel, on ? 0.95 : 0.4).fillRoundedRect(x - 30, midY - 50, 60, 100, 12);
-      g.lineStyle(2, C.gold, on ? 1 : 0.3).strokeRoundedRect(x - 30, midY - 50, 60, 100, 12);
+      g.lineStyle(1, C.gold, on ? 0.65 : 0.15).strokeRoundedRect(x - 30, midY - 50, 60, 100, 12);
       layer.add(g);
-      layer.add(txt(this, x, midY, d < 0 ? '◀' : '▶', 30, on ? C.goldHex : C.faint, { origin: 0.5 }));
+      layer.add(txt(this, x, midY, d < 0 ? '‹' : '›', 36, on ? C.goldHex : C.faint, { origin: 0.5 }));
       if (on) nav.add({ id, x: x - 30, y: midY - 50, w: 60, h: 100, radius: 12, onEnter: () => this.flip(d, id) });
     };
     arrow('prev', SIDE / 2, -1, this.page > 0);

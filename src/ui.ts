@@ -3,8 +3,9 @@ import { HEIGHT, RES, WIDTH } from './config';
 import { addArenaTexture, type AmbientKind } from './maps';
 import { sfx } from './sfx';
 import { playMusic, type Track } from './music';
-import { connectedPads, readPad } from './gamepads';
+import { menuPadSources, type MenuPadKey } from './menuPads';
 import type { Skill, SkillEffect } from './skills';
+import { drawLobbyBackdrop, drawLobbyCrest } from './lobbyArt';
 
 // ---------- theme ----------
 
@@ -70,18 +71,19 @@ export interface FrameOpts {
   ornate?: boolean;
 }
 
-/** Lacquer-panel frame: dark fill, double border, optional corner ornaments. */
+/** Ink-blue panel with a soft shadow and short brass corner fittings. */
 export function drawFrame(g: Phaser.GameObjects.Graphics, x: number, y: number, w: number, h: number, o: FrameOpts = {}) {
   const r = o.radius ?? 10;
   const border = o.border ?? C.border;
+  g.fillStyle(0x000000, 0.22).fillRoundedRect(x + 2, y + 4, w, h, r);
   g.fillStyle(o.fill ?? C.panel, o.fillAlpha ?? 1).fillRoundedRect(x, y, w, h, r);
-  g.lineStyle(2, border, 1).strokeRoundedRect(x, y, w, h, r);
-  g.lineStyle(1, border, 0.35).strokeRoundedRect(x + 5, y + 5, w - 10, h - 10, Math.max(2, r - 4));
+  g.lineStyle(1, border, 0.65).strokeRoundedRect(x, y, w, h, r);
+  g.lineStyle(1, 0xb9c9dc, 0.06).lineBetween(x + r, y + 1, x + w - r, y + 1);
   if (o.ornate) {
-    g.fillStyle(C.gold, 1);
-    for (const [cx, cy] of [[x, y], [x + w, y], [x, y + h], [x + w, y + h]]) {
-      g.fillTriangle(cx - 6, cy, cx, cy - 6, cx + 6, cy);
-      g.fillTriangle(cx - 6, cy, cx, cy + 6, cx + 6, cy);
+    for (const sx of [x + 12, x + w - 12]) {
+      const d = sx < x + w / 2 ? 1 : -1;
+      g.lineStyle(2, border, 0.8).lineBetween(sx, y, sx + d * 24, y);
+      g.lineStyle(1, border, 0.4).lineBetween(sx, y + h, sx + d * 16, y + h);
     }
   }
 }
@@ -95,6 +97,14 @@ export function addBackdrop(scene: Phaser.Scene, dim = 0.62) {
   const key = addArenaTexture(scene);
   scene.add.image(0, 0, key).setOrigin(0, 0).setDisplaySize(WIDTH, HEIGHT);
   scene.add.rectangle(0, 0, WIDTH, HEIGHT, C.bg, dim).setOrigin(0, 0);
+  drawLobbyBackdrop(scene.add.graphics());
+}
+
+/** Shared navigation header, leaving room for page-specific status at the right. */
+export function addMenuHeader(scene: Phaser.Scene, title: string) {
+  drawLobbyCrest(scene.add.graphics(), 55, 39, 25);
+  txt(scene, 94, 30, title, 28, C.text, { title: true, bold: true, origin: [0, 0.5] });
+  txt(scene, 96, 56, 'S H A D O W  &  S T E E L', 10, C.dim, { origin: [0, 0.5] });
 }
 
 // ---------- petals ----------
@@ -191,6 +201,7 @@ const KIND_COLORS: Record<SkillEffect['kind'], number> = {
   teamHeal: 0x2f8a6a,
   teamPe: 0x3f7fd9,
   teamFury: 0xc0532a,
+  teamGuard: 0xa8842c,
   soulThunder: 0x7a5ad9,
   soulReaper: 0x4a2a5a,
   soulFire: 0xd98a2a,
@@ -230,7 +241,7 @@ export interface Focusable {
   w: number;
   h: number;
   onEnter?: () => void;
-  /** If set, ←/→ change this item's value instead of moving focus. */
+  /** Keyboard ←/→ adjust the value; controller directions move focus and confirm cycles it. */
   onAdjust?: (d: number) => void;
   radius?: number;
 }
@@ -329,7 +340,7 @@ export class FocusNav {
     if (!it || !this.enabled) return;
     const r = it.radius ?? 8;
     this.hl.fillStyle(C.gold, 0.1).fillRoundedRect(it.x - 3, it.y - 3, it.w + 6, it.h + 6, r + 2);
-    this.hl.lineStyle(2, C.gold, 1).strokeRoundedRect(it.x - 3, it.y - 3, it.w + 6, it.h + 6, r + 2);
+    this.hl.lineStyle(1, C.gold, 0.9).strokeRoundedRect(it.x - 3, it.y - 3, it.w + 6, it.h + 6, r + 2);
     // Little marker on the left edge.
     this.hl.fillStyle(C.gold, 1).fillTriangle(it.x - 12, it.y + it.h / 2 - 6, it.x - 12, it.y + it.h / 2 + 6, it.x - 5, it.y + it.h / 2);
   }
@@ -346,14 +357,14 @@ export class FocusNav {
   }
 
   /** Returns true if the key was handled. */
-  key(e: KeyboardEvent): boolean {
+  key(e: KeyboardEvent, source: 'keyboard' | 'gamepad' = 'keyboard'): boolean {
     const K = Phaser.Input.Keyboard.KeyCodes;
     const it = this.current ? this.items.get(this.current) : undefined;
     switch (e.keyCode) {
       case K.LEFT:
       case K.RIGHT: {
         const d = e.keyCode === K.LEFT ? -1 : 1;
-        if (it?.onAdjust) {
+        if (it?.onAdjust && source === 'keyboard') {
           sfx.menuChange();
           it.onAdjust(d);
         } else this.move(d, 0);
@@ -370,6 +381,9 @@ export class FocusNav {
         if (it?.onEnter) {
           sfx.menuConfirm();
           it.onEnter();
+        } else if (it?.onAdjust) {
+          sfx.menuChange();
+          it.onAdjust(1);
         }
         return true;
       case K.ESC:
@@ -428,9 +442,11 @@ export function addButton(scene: Phaser.Scene, layer: Phaser.GameObjects.Contain
   const x = o.x - o.w / 2;
   const y = o.y - o.h / 2;
   if (o.primary) {
-    g.fillStyle(0x8f2a20, 1).fillRoundedRect(x, y, o.w, o.h, 8);
-    g.fillStyle(0xffffff, 0.08).fillRoundedRect(x + 3, y + 3, o.w - 6, o.h / 2 - 3, 6);
-    g.lineStyle(2, C.gold, 1).strokeRoundedRect(x, y, o.w, o.h, 8);
+    g.fillStyle(0x000000, 0.25).fillRoundedRect(x + 2, y + 4, o.w, o.h, 8);
+    g.fillStyle(0x81342e, 1).fillRoundedRect(x, y, o.w, o.h, 8);
+    g.fillStyle(0xffffff, 0.035).fillRoundedRect(x + 2, y + 2, o.w - 4, o.h / 2 - 2, 6);
+    g.lineStyle(1, C.gold, 0.65).strokeRoundedRect(x, y, o.w, o.h, 8);
+    g.fillStyle(C.gold, 0.6).fillRoundedRect(x + 7, y + 10, 2, o.h - 20, 1);
   } else {
     drawFrame(g, x, y, o.w, o.h, { fill: C.panelHi, radius: 8 });
   }
@@ -472,11 +488,11 @@ export class UIScene extends Phaser.Scene {
   }
 
   /** Per pad: what was held last frame, and when a held direction repeats next. */
-  private padPrev = new Map<number, { dir: string; confirm: boolean; back: boolean; start: boolean; repeatAt: number }>();
+  private padPrev = new Map<MenuPadKey, { dir: string; confirm: boolean; back: boolean; start: boolean; repeatAt: number }>();
 
   /**
-   * Turn gamepad input into the same key presses the keyboard sends: stick / d-pad =
-   * arrows, bottom face button = Enter, right face button = Esc, +/− = Esc (pause).
+   * Stick / d-pad moves focus; confirm activates a button or cycles a setting.
+   * Back closes a menu; +/− pauses. Keep the source so sticks cannot adjust settings.
    * During a fight (no menu open) only +/− does anything here.
    */
   private pollPads() {
@@ -484,28 +500,34 @@ export class UIScene extends Phaser.Scene {
     const inMenu = this.navs.length > 0;
     const K = Phaser.Input.Keyboard.KeyCodes;
     const now = performance.now();
-    for (const pad of connectedPads()) {
-      const st = readPad(pad);
+    const sources = menuPadSources();
+    const activeKeys = new Set(sources.map((p) => p.key));
+    for (const key of this.padPrev.keys()) if (!activeKeys.has(key)) this.padPrev.delete(key);
+    let confirm = false, back = false, start = false;
+    const press = (keyCode: number) => this.routeKey({ keyCode, preventDefault() {} } as KeyboardEvent, 'gamepad');
+    for (const { key, st } of sources) {
       const dir = Math.abs(st.mx) > 0.6 || Math.abs(st.my) > 0.6
         ? Math.abs(st.mx) > Math.abs(st.my) ? (st.mx > 0 ? 'R' : 'L') : st.my > 0 ? 'D' : 'U'
         : '';
-      const prev = this.padPrev.get(pad.index) ?? { dir: '', confirm: false, back: false, start: false, repeatAt: 0 };
-      const press = (keyCode: number) => this.routeKey({ keyCode, preventDefault() {} } as KeyboardEvent);
+      const prev = this.padPrev.get(key) ?? { dir: '', confirm: false, back: false, start: false, repeatAt: 0 };
       if (inMenu) {
         // A new direction moves at once; holding it repeats after a short pause.
         if (dir && (dir !== prev.dir || now >= prev.repeatAt)) {
           press({ L: K.LEFT, R: K.RIGHT, U: K.UP, D: K.DOWN }[dir]!);
           prev.repeatAt = now + (dir !== prev.dir ? 380 : 120);
         }
-        if (st.confirm && !prev.confirm) press(K.ENTER);
-        if (st.back && !prev.back) press(K.ESC);
+        confirm ||= st.confirm && !prev.confirm;
+        back ||= st.back && !prev.back;
       }
-      if (st.start && !prev.start) press(K.ESC);
-      this.padPrev.set(pad.index, { dir, confirm: st.confirm, back: st.back, start: st.start, repeatAt: prev.repeatAt });
+      start ||= st.start && !prev.start;
+      this.padPrev.set(key, { dir, confirm: st.confirm, back: st.back, start: st.start, repeatAt: prev.repeatAt });
     }
+    // One button action per frame: confirming a dialog must not also dismiss its parent.
+    if (confirm) press(K.ENTER);
+    else if (back || start) press(K.ESC);
   }
 
-  private routeKey(e: KeyboardEvent) {
+  private routeKey(e: KeyboardEvent, source: 'keyboard' | 'gamepad' = 'keyboard') {
     if (performance.now() < this.keysReadyAt) return;
     if (this.keyCapture) {
       e.preventDefault();
@@ -513,7 +535,7 @@ export class UIScene extends Phaser.Scene {
       return;
     }
     const nav = this.navs[this.navs.length - 1];
-    if (nav && nav.key(e)) {
+    if (nav && nav.key(e, source)) {
       e.preventDefault();
       return;
     }
@@ -601,7 +623,7 @@ export interface SelectorOpts {
   onAdjust: (d: number) => void;
 }
 
-/** "Label   ◀ value ▶" row. ←/→ (or clicking either half) changes the value. */
+/** "Label   ◀ value ▶" row. Keyboard arrows / mouse halves adjust; confirm cycles forward. */
 export function addSelector(scene: Phaser.Scene, layer: Phaser.GameObjects.Container, nav: FocusNav, o: SelectorOpts) {
   const h = o.h ?? 34;
   const labelW = o.labelW ?? 70;

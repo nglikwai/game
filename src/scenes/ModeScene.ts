@@ -2,7 +2,8 @@ import * as Phaser from 'phaser';
 import { GAME_MODES, HEIGHT, TEAM_COLORS, WIDTH, type GameMode } from '../config';
 import { T } from '../i18n';
 import { getSettings, saveSettings } from '../settings';
-import { C, FocusNav, Petals, UIScene, addBackdrop, addButton, drawFrame, txt } from '../ui';
+import { C, FocusNav, Petals, UIScene, addBackdrop, addButton, addMenuHeader, toHex, txt } from '../ui';
+import { drawRosterFrame } from '../lobbyArt';
 
 const CARD_GAP = 24;
 const CARD_W = Math.floor((WIDTH - 80 - (GAME_MODES.length - 1) * CARD_GAP) / GAME_MODES.length);
@@ -20,7 +21,8 @@ export class ModeScene extends UIScene {
     this.setupUI();
     addBackdrop(this, 0.72);
     this.petals = new Petals(this, { x: 0, y: 0, w: WIDTH, h: HEIGHT }, 18);
-    txt(this, WIDTH / 2, 66, T().selectMode, 46, C.goldHex, { title: true, bold: true, origin: 0.5, stroke: '#2a0a06', strokeThickness: 6 });
+    addMenuHeader(this, T().selectMode);
+    txt(this, WIDTH - 40, 40, T().lobbyTagline, 13, '#bba983', { origin: [1, 0.5] });
 
     const layer = this.add.container(0, 0);
     const nav = new FocusNav(this);
@@ -31,14 +33,22 @@ export class ModeScene extends UIScene {
       const cx = WIDTH / 2 + (i - (GAME_MODES.length - 1) / 2) * (CARD_W + CARD_GAP);
       const x = cx - CARD_W / 2;
       const g = this.add.graphics();
-      drawFrame(g, x, CARD_Y, CARD_W, CARD_H, { fill: C.panel, fillAlpha: 0.94, border: C.gold, radius: 14, ornate: true });
-      g.fillStyle(C.well, 1).fillRoundedRect(x + 20, CARD_Y + 20, CARD_W - 40, 190, 10);
+      const tint = [0xc09b69, 0x8fa6c3, 0xcc8baf, 0xada18b, 0xa78bba][i];
+      drawRosterFrame(g, x, CARD_Y, CARD_W, CARD_H, tint);
+      g.fillStyle(tint, 0.07).fillCircle(cx, CARD_Y + 122, 82);
+      g.lineStyle(1, tint, 0.15).strokeCircle(cx, CARD_Y + 122, 89);
+      g.lineStyle(1, tint, 0.2).lineBetween(x + 20, CARD_Y + 219, x + CARD_W - 20, CARD_Y + 219);
+      g.fillStyle(tint, 0.12).fillCircle(cx, CARD_Y + CARD_H - 25, 12);
       layer.add(g);
+      layer.add(txt(this, x + 17, CARD_Y + 19, `0${i + 1}`, 11, toHex(tint), { bold: true, origin: [0, 0.5] }));
       const icon = this.add.graphics();
       drawModeIcon(icon, mode, cx, CARD_Y + 115);
       layer.add(icon);
-      layer.add(txt(this, cx, CARD_Y + 254, T().modeNames(mode), 34, C.text, { title: true, bold: true, origin: 0.5 }));
-      layer.add(txt(this, cx, CARD_Y + 296, T().modeDesc(mode), 15, C.dim, { origin: [0.5, 0], wrap: CARD_W - 60, align: 'center' }));
+      const name = txt(this, cx, CARD_Y + 253, T().modeNames(mode), 25, C.text, { title: true, bold: true, origin: 0.5 });
+      name.setScale(Math.min(1, (CARD_W - 28) / name.width));
+      layer.add(name);
+      layer.add(txt(this, cx, CARD_Y + 285, T().modeDesc(mode), 13, C.dim, { origin: [0.5, 0], wrap: CARD_W - 34, align: 'center' }));
+      layer.add(txt(this, cx, CARD_Y + CARD_H - 26, '›', 21, toHex(tint), { origin: 0.5 }));
       nav.add({
         id: mode, x, y: CARD_Y, w: CARD_W, h: CARD_H, radius: 14,
         onEnter: () => {
@@ -108,7 +118,7 @@ function drawModeIcon(g: Phaser.GameObjects.Graphics, mode: GameMode, cx: number
     g.fillStyle(TEAM_COLORS[0], 1).fillTriangle(cx - 60, cy - 70, cx - 60, cy - 40, cx - 30, cy - 55);
     g.fillStyle(TEAM_COLORS[1], 1).fillTriangle(cx + 60, cy - 70, cx + 60, cy - 40, cx + 30, cy - 55);
   } else if (mode === 'quest') {
-    // A torii gate with three stage lanterns, and the boss's horned mask beyond it.
+    // A torii gate with four stage lanterns and the boss's horned mask beyond it.
     g.fillStyle(0x8a1a14, 1).fillRect(cx - 62, cy - 48, 124, 12);
     g.fillStyle(0x1e1e22, 1).fillRect(cx - 72, cy - 60, 144, 10);
     g.fillStyle(0x8a1a14, 1).fillRect(cx - 50, cy - 36, 12, 110).fillRect(cx + 38, cy - 36, 12, 110);
@@ -118,9 +128,9 @@ function drawModeIcon(g: Phaser.GameObjects.Graphics, mode: GameMode, cx: number
     g.fillStyle(0xf2e6d0, 1).fillTriangle(cx - 20, cy + 2, cx - 14, cy - 18, cx - 8, cy + 2).fillTriangle(cx + 20, cy + 2, cx + 14, cy - 18, cx + 8, cy + 2);
     g.fillStyle(0xffd23a, 1).fillCircle(cx - 9, cy + 16, 4).fillCircle(cx + 9, cy + 16, 4);
     g.fillStyle(0x1e1e22, 1).fillRect(cx - 12, cy + 32, 24, 5);
-    for (const [k, lit] of [[-1, 1], [0, 1], [1, 1]] as const) {
-      g.fillStyle(0xf2c94c, lit).fillCircle(cx + k * 30, cy + 84, 8);
-      g.lineStyle(2, 0x6b3f1f, 1).strokeCircle(cx + k * 30, cy + 84, 8);
+    for (const k of [-1.5, -0.5, 0.5, 1.5]) {
+      g.fillStyle(0xf2c94c, 0.8).fillCircle(cx + k * 26, cy + 84, 6);
+      g.lineStyle(1, 0x6b3f1f, 1).strokeCircle(cx + k * 26, cy + 84, 6);
     }
   } else {
     // Crown over a walled-in heart.

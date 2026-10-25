@@ -1,11 +1,12 @@
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '../config';
+import { PRISON } from './prison';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, mirrored, paintShadow, paintVignette,
   type ChestSpot, type Ctx, type GameMap, type Obstacle,
 } from './common';
 
 /**
- * 地獄 The Underworld: the three 闖關 Quest stages. They aren't offered in map
+ * 地獄 The Underworld: the four 闖關 Quest stages. They aren't offered in map
  * select; each stage always uses its own.
  */
 
@@ -153,7 +154,7 @@ export const YAMA: GameMap = {
   },
 };
 
-// ---------- stage 3: 鬼王殿 Oni King's Hall ----------
+// ---------- stage 4: 鬼王殿 Oni King's Hall ----------
 
 const ONIHALL_OBSTACLES: Obstacle[] = [
   { kind: 'blood', low: true, x: CX, y: MID, w: 200, h: 110 },
@@ -194,7 +195,7 @@ export const ONIHALL: GameMap = {
   },
 };
 
-export const QUEST_MAPS: GameMap[] = [SANZU, YAMA, ONIHALL];
+export const QUEST_MAPS: GameMap[] = [SANZU, YAMA, PRISON, ONIHALL];
 
 // ---------- painting ----------
 

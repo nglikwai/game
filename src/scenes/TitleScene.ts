@@ -3,6 +3,7 @@ import { T, getLang, setLang } from '../i18n';
 import { isMuted, toggleMute } from '../sfx';
 import { isMusicOn, toggleMusic } from '../music';
 import { C, FocusNav, Petals, UIScene, addBackdrop, addButton, addSelector, txt } from '../ui';
+import { drawLobbyCrest, drawLobbyPortrait } from '../lobbyArt';
 
 export class TitleScene extends UIScene {
   private petals!: Petals;
@@ -16,11 +17,18 @@ export class TitleScene extends UIScene {
     addBackdrop(this, 0.5);
     this.petals = new Petals(this, { x: 0, y: 0, w: WIDTH, h: HEIGHT }, 28);
 
-    txt(this, WIDTH / 2, 200, '競技場', 136, C.goldHex, { title: true, bold: true, origin: 0.5, stroke: '#3a0d08', strokeThickness: 12 });
     const g = this.add.graphics();
-    g.lineStyle(2, 0xd9ae4a, 0.8).lineBetween(WIDTH / 2 - 300, 296, WIDTH / 2 - 150, 296).lineBetween(WIDTH / 2 + 150, 296, WIDTH / 2 + 300, 296);
-    g.fillStyle(0xd9ae4a, 1).fillCircle(WIDTH / 2 - 306, 296, 3).fillCircle(WIDTH / 2 + 306, 296, 3);
-    txt(this, WIDTH / 2, 296, 'A R E N A   D U E L', 22, C.text, { origin: 0.5 });
+    // Illustrated hero medallions echo the portraits on the fighter roster.
+    g.lineStyle(1, C.gold, 0.08).strokeCircle(947, 315, 243).strokeCircle(947, 315, 226);
+    drawLobbyCrest(g, 956, 321, 190);
+    drawLobbyPortrait(g, 1066, 439, 95, 0x6d83ae, 'shinobi');
+    drawLobbyPortrait(g, 902, 301, 150, 0xb65e56, 'samurai');
+    drawLobbyCrest(g, 104, 79, 20);
+    g.lineStyle(1, C.gold, 0.3).lineBetween(82, 286, 490, 286);
+    txt(this, 138, 79, T().titleTagline, 12, C.dim, { origin: [0, 0.5] });
+    txt(this, 80, 192, '影刃亂鬥', 102, '#e2c48b', { title: true, bold: true, origin: [0, 0.5], stroke: '#11141c', strokeThickness: 5 });
+    txt(this, 86, 266, 'S H A D O W   &   S T E E L', 20, C.text, { origin: [0, 0.5] });
+    txt(this, 86, 310, T().lobbyTagline, 14, '#9faabc', { origin: [0, 0.5] });
 
     const layer = this.add.container(0, 0);
     const nav = new FocusNav(this);
@@ -32,7 +40,7 @@ export class TitleScene extends UIScene {
       [T().settings, () => this.openSettings()],
     ];
     items.forEach(([label, onPress], i) => {
-      addButton(this, layer, nav, { id: `b${i}`, x: WIDTH / 2, y: 410 + i * 72, w: 300, h: 56, label, primary: i === 0, size: i === 0 ? 28 : 22, onPress });
+      addButton(this, layer, nav, { id: `b${i}`, x: 286, y: 374 + i * 64, w: 400, h: 49, label, primary: i === 0, size: i === 0 ? 25 : 18, onPress });
     });
     nav.done('b0');
 

@@ -1,3 +1,5 @@
+import type { Role } from './roles';
+
 /**
  * One shared skill pool. Each fighter equips up to 3 different skills, in any
  * combination (a slot may also be left empty).
@@ -34,13 +36,15 @@ export type SkillEffect =
   | { kind: 'teamPe'; amount: number }
   /** Fury for the whole team. */
   | { kind: 'teamFury'; multiplier: number; duration: number }
+  /** Golden-Bell style damage reduction for the whole team. */
+  | { kind: 'teamGuard'; reduction: number; duration: number }
   /** Spends all full soul levels: lightning on that many nearest enemies, anywhere. */
   | { kind: 'soulThunder' }
   /** Spends soul like Thunder; each strike rarely lands, but hits very hard. */
   | { kind: 'soulReaper' }
   /** Spends soul like Thunder; each strike almost always lands, but burns only a little. */
   | { kind: 'soulFire' }
-  /** Spends soul: each level strikes THREE enemies, hitting 75% of the time for a little damage and a long paralysis. */
+  /** Spends soul: each level strikes TWO enemies, hitting 75% of the time for a little damage and a long paralysis. */
   | { kind: 'soulTree' };
 
 export type SummonKind = 'soulThunder' | 'soulReaper' | 'soulFire' | 'soulTree';
@@ -90,8 +94,8 @@ export const SKILLS: Skill[] = [
   },
   {
     id: 'thunder', category: 'summon', name: 'Thunder', zh: '天雷', peCost: 0, cooldown: 3,
-    desc: 'Summon (1s call, untouchable): spends your 魂 (soul); lightning strikes the nearest enemies anywhere, 1 per soul level (max 4). Hit chance 55/65/75/85% by soul level; a hit deals 5–30 damage. Every bolt paralyses (0.8s on a miss, 2s on a hit); paralysed fighters can\'t act, but can\'t be hurt either.',
-    descZh: '召喚（需時1秒，期間無敵）：消耗「魂」召喚雷電攻擊最近的敵人，每級魂打1人（最多4人），不限距離。命中率按魂等級為55/65/75/85%，命中造成5–30傷害。無論是否命中都會麻痺（落空0.8秒，命中2秒）；麻痺時無法行動，但也不會受傷。',
+    desc: 'Summon (1s call, untouchable): spends your 魂 (soul); lightning strikes the nearest enemies anywhere, 1 per soul level (max 4). Hit chance 55/65/75/85% by soul level; a hit deals 5–30 damage. Every bolt paralyses (0.8s on a miss, 2s on a hit); paralysed fighters can\'t act and still take 40% damage.',
+    descZh: '召喚（需時1秒，期間無敵）：消耗「魂」召喚雷電攻擊最近的敵人，每級魂打1人（最多4人），不限距離。命中率按魂等級為55/65/75/85%，命中造成5–30傷害。無論是否命中都會麻痺（落空0.8秒，命中2秒）；麻痺時無法行動，且仍會受到40%傷害。',
     effect: { kind: 'soulThunder' },
   },
   {
@@ -108,8 +112,8 @@ export const SKILLS: Skill[] = [
   },
   {
     id: 'sacred-tree', category: 'summon', name: 'Sacred Tree', zh: '神樹', peCost: 0, cooldown: 3,
-    desc: 'Summon (1s call, untouchable): spends your 魂 (soul); sacred roots burst up under the nearest enemies anywhere, 3 per soul level (4 levels = 12, i.e. everyone). 75% to land on each target, but only 5 damage; a hit paralyses for 3.5s, longer than any other summon (0.8s on a miss).',
-    descZh: '召喚（需時1秒，期間無敵）：消耗「魂」，神樹的根鬚從最近的敵人腳下竄出，每級魂3人（4級即12人，等於全場），不限距離。每人75%命中，但只有5點傷害；命中麻痺3.5秒，比其他召喚都久（落空0.8秒）。',
+    desc: 'Summon (1s call, untouchable): spends your 魂 (soul); sacred roots burst up under the nearest enemies anywhere, 2 per soul level (4 levels = 8). 75% to land on each target, but only 5 damage; a hit paralyses for 3.5s, longer than any other summon (0.8s on a miss).',
+    descZh: '召喚（需時1秒，期間無敵）：消耗「魂」，神樹的根鬚從最近的敵人腳下竄出，每級魂2人（4級即8人），不限距離。每人75%命中，但只有5點傷害；命中麻痺3.5秒，比其他召喚都久（落空0.8秒）。',
     effect: { kind: 'soulTree' },
   },
   {
@@ -185,6 +189,12 @@ export const SKILLS: Skill[] = [
     effect: { kind: 'teamFury', multiplier: 1.2, duration: 10 },
   },
   {
+    id: 'ward-circle', category: 'team', name: 'Ward Circle', zh: '護體陣', peCost: 45, cooldown: 22,
+    desc: 'Your whole team takes 30% less damage and knockback for 8s.',
+    descZh: '8秒內全隊受到的傷害和擊退減少30%。',
+    effect: { kind: 'teamGuard', reduction: 0.3, duration: 8 },
+  },
+  {
     id: 'lifeline', category: 'heal', name: 'Lifeline', zh: '續命', peCost: 40, cooldown: 15,
     desc: 'Revive a fallen teammate from anywhere; they return beside you. Your HP is split evenly between you. (Team modes)',
     descZh: '無論距離，復活倒下的隊友並召回身旁，你的生命值平分給兩人。（限團隊模式）',
@@ -193,3 +203,7 @@ export const SKILLS: Skill[] = [
 ];
 
 export const skillById = (id: string | null): Skill | null => SKILLS.find((s) => s.id === id) ?? null;
+
+/** Effective duration, shared by combat, the loadout labels and the HUD sweep. */
+export const skillCooldownFor = (skill: Skill, role: Role): number =>
+  Math.round(skill.cooldown * role.skillCooldown * 1000) / 1000;

@@ -46,7 +46,7 @@ export type PadSide = 'L' | 'R';
  */
 export function isJoyConPair(id: string): boolean {
   const s = id.toLowerCase();
-  return (/joy-con/.test(s) && !/joy-con \(l\)|joy-con \(r\)|joy-con l|joy-con r/.test(s)) || /product: 200e/.test(s);
+  return (/joy-con/.test(s) && padKind(id) === 'nintendo') || /product: 200e/.test(s);
 }
 
 /** Button names for one half of a split pair, held sideways: attack, skill 1–3, use item, next item. */
@@ -112,7 +112,7 @@ export function readPad(pad: Gamepad): PadState {
   }
   // D-pad (standard layout) overrides the stick. Some browsers (Safari) report a single
   // Joy-Con's stick this way too, so it counts for them when the stick itself is still.
-  if (!single || (mx === 0 && my === 0)) {
+  if (!single || (pad.mapping !== 'standard' && mx === 0 && my === 0)) {
     if (b(14)) mx = -1;
     if (b(15)) mx = 1;
     if (b(12)) my = -1;
@@ -122,6 +122,8 @@ export function readPad(pad: Gamepad): PadState {
   const actions: PadState['actions'] = single
     ? [b(0), b(3), b(1), b(2), b(5), b(4)]
     : [b(0) || b(5), b(3), b(1), b(2) || b(4), b(7), b(6)];
+  const standardHalf = single && pad.mapping === 'standard'
+    ? readPadHalf(pad, kind === 'joyconL' ? 'L' : 'R') : null;
   return {
     mx, my,
     // Only full pads have a second stick for aiming; otherwise you aim where you move.
@@ -129,9 +131,9 @@ export function readPad(pad: Gamepad): PadState {
     ay: single ? 0 : dz(ax(3)),
     actions,
     // Switch convention for Nintendo pads: A (right) confirms, B (bottom) goes back.
-    confirm: kind === 'nintendo' ? b(1) : b(0),
-    back: kind === 'nintendo' ? b(0) : b(1),
-    start: b(9) || b(8),
+    confirm: standardHalf ? standardHalf.confirm : kind === 'nintendo' ? b(1) : b(0),
+    back: standardHalf ? standardHalf.back : kind === 'nintendo' ? b(0) : b(1),
+    start: standardHalf ? standardHalf.start : b(9) || b(8),
   };
 }
 

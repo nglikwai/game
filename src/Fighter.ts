@@ -1,12 +1,13 @@
 import * as Phaser from 'phaser';
-import { BODY_RADIUS, ICE_GRIP, MOVE_SPEED, SPRING, SAND_SPEED, SHALLOWS_SPEED, BOOST_SPEED, POISON, STEALTH_SPEED, SOUL_CAST_TIME, SOUL_LEVELS, SOUL_PER_LEVEL, TOWER_AURA_DAMAGE_TAKEN, TOWER_AURA_PE_REGEN, MUD_SPEED, PE_REGEN_DELAY, PE_REGEN_MOVING, PE_REGEN_PER_SEC, PE_REGEN_STILL } from './config';
+import { QUEST, PARALYZED_DAMAGE_TAKEN, BODY_RADIUS, ICE_GRIP, MOVE_SPEED, SPRING, SAND_SPEED, SHALLOWS_SPEED, BOOST_SPEED, POISON, STEALTH_SPEED, SOUL_CAST_TIME, SOUL_LEVELS, SOUL_PER_LEVEL, TOWER_AURA_DAMAGE_TAKEN, TOWER_AURA_PE_REGEN, MUD_SPEED, PE_REGEN_DELAY, PE_REGEN_MOVING, PE_REGEN_PER_SEC, PE_REGEN_STILL } from './config';
 import type { Controller, Intent } from './controls';
 import { sfx } from './sfx';
 import { POCKET_SIZE, type Item, type ItemEffect } from './items';
 import type { Role } from './roles';
-import { isSummon, type Skill, type SkillEffect, type SummonKind } from './skills';
+import { isSummon, skillCooldownFor, type Skill, type SkillEffect, type SummonKind } from './skills';
 import type { Weapon } from './weapons';
 import type { TerrainKind } from './maps/common';
+import { createMatchStats } from './matchStats';
 
 export type FighterState = 'idle' | 'windup' | 'active' | 'recovery' | 'stun' | 'channel' | 'dash' | 'paralyzed' | 'casting' | 'charging' | 'dead';
 
@@ -58,6 +59,7 @@ export interface Arena {
 }
 
 export class Fighter {
+  readonly stats = createMatchStats();
   maxHp: number;
   readonly maxPe: number;
   hp: number;
@@ -112,6 +114,8 @@ export class Fighter {
   /** Golden Bell: fraction of incoming damage / knockback that gets through. */
   private guardMult = 1;
   flashT = 0;
+  /** Seconds left of the icy tint after being hit by an Ice Staff (just a look, no effect on play). */
+  chillT = 0;
   peDeniedT = 0;
   /** A summon was refused for lack of soul: the HUD's soul diamonds flash while this runs down. */
   soulDeniedT = 0;
@@ -183,7 +187,8 @@ export class Fighter {
   /** 捨身 being charged: the blast's radius and how far along the charge is (0→1). */
   get sacrificeCharge() { return this.state === 'charging' && this.pendingSacrifice ? { radius: this.pendingSacrifice.radius, t: this.stateProgress } : null; }
   /** Paralysed or casting: can't act, and nothing can hurt them. */
-  get untouchable() { return this.state === 'paralyzed' || this.state === 'casting'; }
+  /** Nothing can hurt you: only while calling a summon (a paralysed fighter can still be hurt, for less). */
+  get untouchable() { return this.state === 'casting'; }
   get stateProgress() { return this.stateDur > 0 ? Math.min(1, this.stateT / this.stateDur) : 0; }
   get sprinting() { return this.speedBuffT > 0; }
   /** Fury: multiplier on weapon damage and knockback. */
@@ -219,6 +224,7 @@ export class Fighter {
 
     for (let i = 0; i < 3; i++) this.cooldowns[i] = Math.max(0, this.cooldowns[i] - dt);
     this.flashT = Math.max(0, this.flashT - dt);
+    this.chillT = Math.max(0, this.chillT - dt);
     this.peDeniedT = Math.max(0, this.peDeniedT - dt);
     this.soulDeniedT = Math.max(0, this.soulDeniedT - dt);
     this.speedBuffT = Math.max(0, this.speedBuffT - dt);
@@ -320,7 +326,11 @@ export class Fighter {
     // Hot springs heal you slowly while you stand in them.
     if (terrain === 'spring') this.heal(SPRING.healPerSec * dt);
     // Poison bog saps HP, but never finishes anyone off.
-    if (terrain === 'poison' && this.hp > 1) this.hp = Math.max(1, this.hp - POISON.dps * dt);
+    if (terrain === 'poison' && this.hp > 1) {
+      const lost = Math.min(this.hp - 1, POISON.dps * dt);
+      this.hp -= lost;
+      this.stats.taken += lost;
+    }
     let vx = mx * speed + this.kbx;
     let vy = my * speed + this.kby;
     if (this.state === 'dash') { vx = this.dashx; vy = this.dashy; }
@@ -403,7 +413,8 @@ export class Fighter {
     // Shinobi pay less for movement skills.
     const mobility = ['speedBuff', 'dash', 'teleport', 'stealth'].includes(skill.effect.kind);
     if (!this.spend(skill.peCost * (mobility ? this.role.mobilityCost : 1))) return;
-    this.cooldowns[slot] = skill.cooldown;
+    this.cooldowns[slot] = skillCooldownFor(skill, this.role);
+    this.stats.skills++;
     this.applyEffect(skill.effect, mx, my);
   }
 
@@ -412,6 +423,7 @@ export class Fighter {
     if (!item) return;
     if (!this.canApply(item.effect)) return this.deny();
     this.pocket.splice(index, 1);
+    this.stats.items++;
     if (this.selectedItem >= this.pocket.length) this.selectedItem = Math.max(0, this.pocket.length - 1);
     this.applyEffect(item.effect, mx, my);
   }
@@ -425,7 +437,10 @@ export class Fighter {
       this.pocket.push(item);
       return true;
     }
-    if (this.canApply(item.effect)) this.applyEffect(item.effect, 0, 0);
+    if (this.canApply(item.effect)) {
+      this.stats.items++;
+      this.applyEffect(item.effect, 0, 0);
+    }
     return false;
   }
 
@@ -490,6 +505,10 @@ export class Fighter {
         sfx.powerUp();
         this.arena.forTeam(this, (t) => t.empower(e.multiplier, e.duration));
         break;
+      case 'teamGuard':
+        sfx.guard();
+        this.arena.forTeam(this, (t) => t.ward(e.reduction, e.duration));
+        break;
       case 'sacrifice':
         // Rooted while the charge builds; hits still hurt but don't stop it.
         this.stealthT = 0;
@@ -540,6 +559,7 @@ export class Fighter {
         share = Math.min(share, t.maxHp);
         const spot = this.arena.reviveSpot(this);
         t.revive(spot.x, spot.y, share, t.maxPe / 2);
+        this.stats.revives++;
         sfx.respawn();
         this.arena.popText(t.x, t.y - 30, `+${Math.round(share)}`, '#7dff8a');
         this.arena.onRevived(t, this);
@@ -552,6 +572,7 @@ export class Fighter {
   heal(amount: number): number {
     const before = this.hp;
     this.hp = Math.min(this.maxHp, this.hp + amount * this.role.healReceived);
+    this.stats.recovered += this.hp - before;
     return this.hp - before;
   }
 
@@ -563,25 +584,44 @@ export class Fighter {
   }
 
   /** Fury from outside (War Drum). Doesn't weaken a stronger Fury already running. */
+  /** Damage reduction from outside (Ward Circle). Doesn't weaken a stronger guard already running. */
+  ward(reduction: number, duration: number) {
+    if (this.guardT > 0 && this.guardMult < 1 - reduction) return;
+    this.guardMult = 1 - reduction;
+    this.guardT = Math.max(this.guardT, duration);
+  }
+
   empower(multiplier: number, duration: number) {
     if (this.powerT > 0 && this.powerMult > multiplier) return;
     this.powerMult = multiplier;
     this.powerT = Math.max(this.powerT, duration);
   }
 
+  /** Share of incoming damage actually taken: guard, a tower's aura and paralysis all stack. */
+  get damageTaken() {
+    return this.guardMult * (this.inAura ? TOWER_AURA_DAMAGE_TAKEN : 1) * (this.paralyzed ? PARALYZED_DAMAGE_TAKEN : 1);
+  }
+
   /** Small damage over time (caltrops): no knockback, no stun, doesn't interrupt anything. */
   takeChip(damage: number) {
     if (!this.alive || this.untouchable) return;
-    this.hp -= damage * this.guardMult * (this.inAura ? TOWER_AURA_DAMAGE_TAKEN : 1);
+    this.stats.taken += Math.min(this.hp, damage * this.damageTaken);
+    this.hp -= damage * this.damageTaken;
     this.flashT = Math.max(this.flashT, 0.05);
     if (this.hp <= 0) this.die();
   }
 
-  /** Thunder: frozen in place for `seconds`, untouchable meanwhile. */
+  /** Summon paralysis. Bosses cannot have one paralysis episode extended by repeated hits. */
   paralyze(seconds: number) {
     if (!this.alive) return;
+    if (this.boss) {
+      if (this.paralyzed) return;
+      seconds = Math.min(seconds, QUEST.boss.maxParalysis);
+    }
     this.kbx = this.kby = 0;
     this.body.setVelocity(0, 0);
+    // A second paralysis only matters if it would last longer than what is left of the first.
+    if (this.paralyzed && seconds <= this.stateDur - this.stateT) return;
     this.setState('paralyzed', seconds);
   }
 
@@ -601,16 +641,19 @@ export class Fighter {
     if (pill >= 0) {
       const fixed = (this.pocket[pill].effect as Extract<ItemEffect, { kind: 'revive' }>).fixedHp ?? 40;
       this.pocket.splice(pill, 1);
+      this.stats.items++;
       if (this.selectedItem >= this.pocket.length) this.selectedItem = Math.max(0, this.pocket.length - 1);
       this.hp = Math.min(this.maxHp, fixed);
+      this.stats.recovered += this.hp;
       this.pendingSacrifice = null;
       this.kbx = this.kby = 0;
       this.body.setVelocity(0, 0);
-      this.setState('paralyzed', 1);
+      this.setState('casting', 1);
       this.arena.onPillRevived(this);
       return;
     }
     this.hp = 0;
+    this.stats.deaths++;
     this.pendingSacrifice = null;
     this.setState('dead', 0);
     sfx.death();
@@ -631,19 +674,25 @@ export class Fighter {
       return;
     }
     this.stealthT = 0;
-    damage *= this.guardMult * (this.inAura ? TOWER_AURA_DAMAGE_TAKEN : 1);
+    // Paralysed: frozen in place, hurt for less, and not even a hit makes you flinch.
+    const frozen = this.paralyzed;
+    damage *= this.damageTaken;
+    this.stats.taken += Math.min(this.hp, damage);
     knockback *= this.guardMult;
     this.hp -= damage;
     sfx.hit(Phaser.Math.Clamp(damage / 25, 0, 1));
     this.flashT = 0.12;
     knockback *= this.role.knockbackTaken;
-    this.kbx += dirx * knockback;
-    this.kby += diry * knockback;
+    if (!frozen) {
+      this.kbx += dirx * knockback;
+      this.kby += diry * knockback;
+    }
     this.arena.popText(this.x, this.y - 30, `-${Math.round(damage)}`, '#ffffff');
     if (this.hp <= 0) {
       this.die();
       return;
     }
+    if (frozen) return;
     // Charging 捨身 can't be interrupted.
     if (this.state === 'charging') return;
     // Poise: while swinging, hits weaker than a share of your own weapon's force (set by role) don't

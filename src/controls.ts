@@ -1,6 +1,8 @@
 import * as Phaser from 'phaser';
 import { halfLabels, padKind, padLabels, type PadSide } from './gamepads';
 import { readController, resolvePad } from './padconfig';
+import { hidLabels, hidPad, hidState } from './joyhid';
+import type { Difficulty } from './config';
 import type { Fighter } from './Fighter';
 import type { Projectile } from './scenes/BattleScene';
 import type { SkillEffect } from './skills';
@@ -27,7 +29,7 @@ export const emptyIntent = (): Intent => ({ mx: 0, my: 0, ax: 0, ay: 0, attack: 
 export interface WorldView {
   fighters: Fighter[];
   projectiles: Projectile[];
-  /** Save the Princess: each team's wall to break (centre + size) while still standing. */
+  /** Save the Princess: all walls still holding princesses (centre + size). */
   objectives: { team: number; x: number; y: number; w: number; h: number }[];
   /** Treasure chests on the field (centre + size). */
   chests: { x: number; y: number; w: number; h: number }[];
@@ -35,6 +37,8 @@ export interface WorldView {
   towers?: { team: number; x: number; y: number; w: number; h: number; alive: boolean }[];
   /** Siege: towers are the main objective. */
   siege?: boolean;
+  /** This team's CPU allies fight enemies and defend teammates before attacking objectives. */
+  defendTeam?: number;
   /** The map's routing hint for CPU fighters (e.g. which bridge to take), if any. */
   route?: (fx: number, fy: number, tx: number, ty: number) => { x: number; y: number } | null;
   /** Shrinking barrier: the safe circle right now, if the map has one. */
@@ -60,7 +64,9 @@ export type ControlId =
   | 'off' | 'kb1' | 'kb2' | 'kb3' | 'kb4' | 'cpu'
   | `pad${PadSlot}`
   /** One half of a Joy-Con pair that the system joined into a single controller (so the two halves are two players). */
-  | `pad${PadSlot}${'L' | 'R'}`;
+  | `pad${PadSlot}${'L' | 'R'}`
+  /** A Joy-Con read directly over WebHID (so SL / SR work); the Nth one connected. */
+  | `hid${1 | 2 | 3 | 4}`;
 
 /** 'pad2R' → { index: 1, side: 'R' }; 'pad3' → { index: 2 }; anything else → null. */
 export function parsePad(id: string): { index: number; side?: PadSide } | null {
@@ -116,9 +122,11 @@ export function keyLabel(code: number): string {
   return KEY_LABEL_OVERRIDES[code] ?? KEY_NAMES.get(code) ?? `#${code}`;
 }
 
-export function createController(scene: Phaser.Scene, id: ControlId, binds: Binds): Controller | null {
+export function createController(scene: Phaser.Scene, id: ControlId, binds: Binds, difficulty: Difficulty = 'standard'): Controller | null {
   if (id === 'off') return null;
-  if (id === 'cpu') return new AIController();
+  if (id === 'cpu') return new AIController(difficulty);
+  const hid = /^hid(\d)$/.exec(id);
+  if (hid) return new HidController(Number(hid[1]));
   const pad = parsePad(id);
   if (pad) return new GamepadController(pad.index, pad.side);
   return new KeyboardController(scene, KEY_SETS[id as KeySetId].move, binds);
@@ -190,6 +198,30 @@ class GamepadController implements Controller {
   }
 }
 
+/** A Joy-Con read directly over WebHID, held sideways (so its SL / SR work). */
+class HidController implements Controller {
+  private prev = [false, false, false, false, false, false];
+
+  constructor(private n: number) {}
+
+  get connected() {
+    return !!hidPad(this.n);
+  }
+
+  get labels(): Labels {
+    return hidLabels(hidPad(this.n)?.side ?? 'R');
+  }
+
+  read(): Intent {
+    const pad = hidPad(this.n);
+    if (!pad) return emptyIntent();
+    const st = hidState(pad, true);
+    const edge = st.actions.map((v, i) => v && !this.prev[i]);
+    this.prev = [...st.actions];
+    return { mx: st.mx, my: st.my, ax: 0, ay: 0, attack: edge[0], skills: [edge[1], edge[2], edge[3]], useItem: edge[4], nextItem: edge[5] };
+  }
+}
+
 // ---------- CPU ----------
 
 /** Index of the first equipped skill whose effect is one of `kinds`, or -1. */
@@ -197,8 +229,39 @@ function slotWith(f: Fighter, ...kinds: SkillEffect['kind'][]): number {
   return f.skills.findIndex((s) => !!s && kinds.includes(s.effect.kind));
 }
 
+/** The Hard CPU's knobs, one per behaviour (so each can be tested on its own). */
+export const HARD = {
+  /** Seconds between decisions (min, plus up to `thinkSpread` more). Standard: 0.09 + 0.08. */
+  thinkMin: 0.05,
+  thinkSpread: 0.04,
+  /** Chance to swing on a decision when the target is in the weapon's shape. Standard: 0.8. */
+  attackChance: 0.9,
+  /** Close in on an enemy that is recovering or stunned, and always swing at it. */
+  punish: true,
+  /** Chance to fire a ranged skill when in range. Standard: 0.35. */
+  shotChance: 0.55,
+  /** How far ahead to aim a ranged skill, 0–1. Standard: 0.7. */
+  lead: 1,
+  /** Chance to dash away from an incoming swing. Standard: 0.45. */
+  dashChance: 0.85,
+  /** Pick targets by weakness, with focus fire. */
+  smartTargets: true,
+  /** Adjust spacing to the enemy's weapon reach. */
+  spacing: true,
+};
+
+/** Hard CPUs share what they are attacking, per team, so a team focuses one enemy instead of each hitting its nearest. */
+const TEAM_FOCUS = new Map<number, { target: Fighter; at: number }>();
+
 export class AIController implements Controller {
   labels: Labels = ['', '', '', '', '', ''];
+  /** Hard: faster reactions, smarter targets and spacing, punishes openings, dodges more. */
+  private readonly hard: boolean;
+  private lastTarget: Fighter | null = null;
+
+  constructor(difficulty: Difficulty = 'standard') {
+    this.hard = difficulty === 'hard';
+  }
   private thinkT = 0;
   private held = emptyIntent();
   private strafe = Math.random() < 0.5 ? 1 : -1;
@@ -214,16 +277,59 @@ export class AIController implements Controller {
       // Keep moving between decisions, but don't re-press buttons.
       return { ...this.held, attack: false, skills: [false, false, false], useItemAt: undefined };
     }
-    this.thinkT = 0.09 + Math.random() * 0.08;
+    this.thinkT = this.hard ? HARD.thinkMin + Math.random() * HARD.thinkSpread : 0.09 + Math.random() * 0.08;
     this.held = this.decide(self, world);
     return this.held;
+  }
+
+  /**
+   * Hard: weigh distance against how hurt each enemy is (weak ones are worth chasing), stick with the
+   * current target, and join teammates already attacking someone.
+   */
+  private pickTarget(self: Fighter, enemies: Fighter[]): Fighter {
+    const now = performance.now();
+    const focus = TEAM_FOCUS.get(self.team);
+    const focused = focus && now - focus.at < 1500 ? focus.target : null;
+    let best = enemies[0];
+    let bestScore = Infinity;
+    for (const e of enemies) {
+      let score = self.distTo(e) * (0.55 + 0.9 * Math.max(0, e.hp) / e.maxHp);
+      if (e === this.lastTarget) score *= 0.8;
+      if (e === focused) score *= 0.75;
+      if (score < bestScore) {
+        bestScore = score;
+        best = e;
+      }
+    }
+    this.lastTarget = best;
+    TEAM_FOCUS.set(self.team, { target: best, at: now });
+    return best;
+  }
+
+  /** Prefer enemies pressuring an ally, especially a wounded ally or an incoming swing. */
+  private pickThreatToAlly(self: Fighter, world: WorldView, enemies: Fighter[]): Fighter | null {
+    const allies = world.fighters.filter((f) => f !== self && f.alive && !self.isEnemy(f) && !f.untouchable);
+    let threat: Fighter | null = null;
+    let best = Infinity;
+    for (const enemy of enemies) for (const ally of allies) {
+      const distance = enemy.distTo(ally);
+      const swinging = (enemy.state === 'windup' || enemy.state === 'active') &&
+        shapeHits(enemy.weapon.shape, enemy.x, enemy.y, enemy.facing, ally.x, ally.y, ally.radius + 20);
+      if (distance > 240 && !swinging) continue;
+      const urgency = (ally.hp < ally.maxHp * 0.5 ? 0.6 : 1) * (swinging ? 0.5 : 1);
+      const score = (self.distTo(enemy) + distance * 0.5) * urgency;
+      if (score < best) { best = score; threat = enemy; }
+    }
+    return threat;
   }
 
   private decide(self: Fighter, world: WorldView): Intent {
     const out = emptyIntent();
     // Vanished enemies can't be seen, so they're ignored.
     const enemies = world.fighters.filter((f) => self.isEnemy(f) && f.alive && (!f.hidden || (f.inFog && self.distTo(f) < 90)) && !f.untouchable);
-    const obj = world.objectives.find((o) => o.team === self.team) ?? null;
+    const ownWalls = world.objectives.filter((o) => o.team === self.team);
+    const obj = ownWalls.length ? ownWalls.reduce((a, b) =>
+      Math.hypot(a.x - self.x, a.y - self.y) < Math.hypot(b.x - self.x, b.y - self.y) ? a : b) : null;
     const chest = world.chests.length > 0
       ? world.chests.reduce((a, b) => (Math.hypot(a.x - self.x, a.y - self.y) < Math.hypot(b.x - self.x, b.y - self.y) ? a : b))
       : null;
@@ -234,8 +340,10 @@ export class AIController implements Controller {
     const fallbackGoal = obj ?? tower ?? chest;
     if (enemies.length === 0 && !fallbackGoal) return out;
 
+    const defendParty = world.defendTeam === self.team;
+    const allyThreat = defendParty ? this.pickThreatToAlly(self, world, enemies) : null;
     // With no enemy around (Save the Princess, everyone else respawning), aim at the wall / a chest.
-    const target = enemies.length > 0 ? enemies.reduce((a, b) => (self.distTo(a) < self.distTo(b) ? a : b)) : null;
+    const target = allyThreat ?? (enemies.length > 0 ? (this.hard && HARD.smartTargets ? this.pickTarget(self, enemies) : enemies.reduce((a, b) => (self.distTo(a) < self.distTo(b) ? a : b))) : null);
     const tx = target ? target.x : fallbackGoal!.x;
     const ty = target ? target.y : fallbackGoal!.y;
     const dx = tx - self.x;
@@ -266,7 +374,7 @@ export class AIController implements Controller {
     }
     // Sacred Tree: pins a crowd; worth it as soon as several enemies are about.
     const tree = slotWith(self, 'soulTree');
-    if (tree >= 0 && self.canUseSkill(tree) && (enemies.length >= 3 || (self.soulLevel >= 2 && enemies.length >= 2))) {
+    if (tree >= 0 && self.canUseSkill(tree) && enemies.length >= 2) {
       out.skills[tree] = true;
       return out;
     }
@@ -325,6 +433,12 @@ export class AIController implements Controller {
     const tiredMate = world.fighters.some((f) => f.alive && !self.isEnemy(f) && f.pe < 30);
     if (teamPe >= 0 && tiredMate && self.canUseSkill(teamPe)) {
       out.skills[teamPe] = true;
+      return out;
+    }
+    // Ward Circle: when a fight is on and the team is hurt or outnumbered.
+    const teamGuard = slotWith(self, 'teamGuard');
+    if (teamGuard >= 0 && dist < reach * 2 && (hurtMate || enemies.length >= 2) && self.canUseSkill(teamGuard)) {
+      out.skills[teamGuard] = true;
       return out;
     }
     if (teamFury >= 0 && dist < reach * 1.5 && self.canUseSkill(teamFury) && self.pe > w.peCost + self.skills[teamFury]!.peCost) {
@@ -400,7 +514,9 @@ export class AIController implements Controller {
     // Towers: the main goal in Siege; otherwise only worth hitting when one is close and no enemy is.
     const towerDist = tower ? Math.hypot(tower.x - self.x, tower.y - self.y) : Infinity;
     const towerGoal = tower && (world.siege ? !target || dist > 160 : towerDist < 260 && (!target || dist > 200)) ? tower : null;
-    const goal = obj ?? towerGoal ?? (chest && chestDist < 450 && (!target || dist > 220) ? chest : null);
+    // Quest support allies must not abandon a fight or a threatened teammate for an objective/chest.
+    // Towers remain the fallback while the guards are defeated or respawning.
+    const goal = defendParty && target ? null : obj ?? towerGoal ?? (chest && chestDist < 450 && (!target || dist > 220) ? chest : null);
 
     let mx = 0;
     let my = 0;
@@ -422,7 +538,7 @@ export class AIController implements Controller {
     if (threatened || incoming) {
       mx = perpX - Math.cos(ang) * (threatened ? 0.8 : 0);
       my = perpY - Math.sin(ang) * (threatened ? 0.8 : 0);
-      if (dash >= 0 && self.canUseSkill(dash) && Math.random() < 0.45) out.skills[dash] = true;
+      if (dash >= 0 && self.canUseSkill(dash) && Math.random() < (this.hard ? HARD.dashChance : 0.45)) out.skills[dash] = true;
     } else if (tired) {
       // Out of PE: stand still to recover fastest if nobody is close, otherwise back off.
       if (dist < 220) {
@@ -452,22 +568,33 @@ export class AIController implements Controller {
       const s = w.shape;
       // Stand where the weapon hits best: inside the band for ring / arc, on the circle for hammer / bomb.
       const ideal = s.kind === 'ring' || s.kind === 'arc' ? (s.inner + s.outer) / 2 : s.kind === 'circle' ? s.offset : reach * 0.7;
-      const approach = dist > ideal + 12 ? 1 : dist < ideal - 25 ? -0.7 : 0;
+      let approach = dist > ideal + 12 ? 1 : dist < ideal - 25 ? -0.7 : 0;
+      // Hard: read the enemy. Close in on an opening, and keep away from a shorter weapon
+      // (or stay tight against a longer one, where backing off would only get us hit).
+      const recovering = this.hard && HARD.punish && (target.state === 'recovery' || target.state === 'stun' || target.paralyzed);
+      if (this.hard && (HARD.punish || HARD.spacing)) {
+        const eReach = shapeReach(target.weapon.shape);
+        if (recovering) approach = dist > ideal ? 1 : 0;
+        else if (HARD.spacing && eReach < reach * 0.8 && dist < eReach + 50) approach = -0.8;
+        else if (HARD.spacing && eReach > reach * 1.2) approach = dist > ideal + 12 ? 1.2 : 0.3;
+        if (recovering && dist > reach && dash >= 0 && self.canUseSkill(dash) && Math.random() < 0.5) out.skills[dash] = true;
+      }
       mx = Math.cos(ang) * approach + perpX * 0.45;
       my = Math.sin(ang) * approach + perpY * 0.45;
 
       if (fury >= 0 && dist < reach * 1.3 && self.canUseSkill(fury) && self.pe > w.peCost + self.skills[fury]!.peCost) {
         out.skills[fury] = true;
-      } else if (shapeHits(w.shape, self.x, self.y, ang, target.x, target.y, target.radius - 4) && Math.random() < 0.8) {
+      } else if (shapeHits(w.shape, self.x, self.y, ang, target.x, target.y, target.radius - 4) && Math.random() < (recovering ? 1 : this.hard ? HARD.attackChance : 0.8)) {
         out.attack = true;
         out.ax = Math.cos(ang);
         out.ay = Math.sin(ang);
-      } else if (shot >= 0 && dist > 260 && dist < 640 && self.canUseSkill(shot) && self.pe > self.skills[shot]!.peCost + w.peCost && Math.random() < 0.35) {
+      } else if (shot >= 0 && dist > 260 && dist < 640 && self.canUseSkill(shot) && self.pe > self.skills[shot]!.peCost + w.peCost && Math.random() < (this.hard ? HARD.shotChance : 0.35)) {
         // Lead the target a little.
         const p = self.skills[shot]!.effect;
         const t = p.kind === 'projectile' ? dist / p.speed : 0;
-        const lx = target.x + target.vx * t * 0.7 - self.x;
-        const ly = target.y + target.vy * t * 0.7 - self.y;
+        const lead = this.hard ? HARD.lead : 0.7;
+        const lx = target.x + target.vx * t * lead - self.x;
+        const ly = target.y + target.vy * t * lead - self.y;
         const l = Math.hypot(lx, ly) || 1;
         out.ax = lx / l;
         out.ay = ly / l;

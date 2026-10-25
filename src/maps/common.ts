@@ -63,8 +63,9 @@ export type MapId = 'courtyard' | 'river' | 'snow' | 'town' | 'lava' | 'garden' 
   | 'volcano' | 'portal' | 'festival' | 'rockslide' | 'traps' | 'crystal'
   | 'chasm' | 'workshop' | 'fog' | 'sky' | 'altar' | 'tidal'
   | 'doors' | 'powder' | 'bell' | 'barrier' | 'whirlpool' | 'herbs'
+  | 'tea' | 'storm' | 'sunken' | 'frostfire' | 'orchard' | 'astral'
   /** 闖關 Quest stages only. */
-  | 'sanzu' | 'yama' | 'onihall';
+  | 'sanzu' | 'yama' | 'prison' | 'onihall';
 
 export interface GameMap {
   id: MapId;
@@ -173,11 +174,9 @@ export function spawnPoint(index: number, team: number | null, slotInTeam: numbe
 }
 
 /**
- * Save the Princess: the walled enclosure size, and where they stand: near the side
- * walls, just in front of that side's main tower.
+ * Save the Princess: four enclosures, one in each corner, with room to approach the walls.
  */
 export const CAGE_SIZE = 112;
-const SIDE_CAGES = [{ x: ARENA.x + 215, y: ARENA_MID_Y }, { x: ARENA.x + ARENA.w - 215, y: ARENA_MID_Y }];
 
 /**
  * Which side (0 = left, 1 = right) a team starts on. `flip` is decided at random
@@ -185,11 +184,14 @@ const SIDE_CAGES = [{ x: ARENA.x + 215, y: ARENA_MID_Y }, { x: ARENA.x + ARENA.w
  */
 export const sideOf = (team: number, flip: boolean) => (flip ? 1 - team : team);
 
-/** The princess walls: each team's princess is held on the ENEMY's side. */
+/** Each team's two princesses occupy the upper and lower corners on the ENEMY's side. */
 export function cagesFor(flip: boolean): Obstacle[] {
-  return [0, 1].map((team) => {
-    const c = SIDE_CAGES[sideOf(1 - team, flip)];
-    return { kind: 'cage' as const, team, x: c.x, y: c.y, w: CAGE_SIZE, h: CAGE_SIZE };
+  return [0, 1].flatMap((team) => {
+    const side = sideOf(1 - team, flip);
+    const x = side === 0 ? ARENA.x + 100 : ARENA.x + ARENA.w - 100;
+    return [ARENA.y + 100, ARENA.y + ARENA.h - 100].map((y) => ({
+      kind: 'cage' as const, team, x, y, w: CAGE_SIZE, h: CAGE_SIZE,
+    }));
   });
 }
 
@@ -214,11 +216,11 @@ export function towerSpots(side: number): { x: number; y: number; kind: TowerKin
   ];
 }
 
-/** Map obstacles, plus the two princess walls in Save the Princess (clearing anything standing where they go). */
+/** Four princess walls, clearing solid and low obstacles so each enclosure can be reached. */
 export function obstaclesFor(map: GameMap, mode: GameMode, flip = false): Obstacle[] {
   if (mode !== 'princess') return map.obstacles;
   const cages = cagesFor(flip);
-  return [...map.obstacles.filter((o) => o.low || !cages.some((c) => overlaps(o, c, 6))), ...cages];
+  return [...map.obstacles.filter((o) => !cages.some((c) => overlaps(o, c, 28))), ...cages];
 }
 
 /** Chest spots, minus any that would sit inside a princess wall. */

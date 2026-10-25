@@ -38,12 +38,19 @@ import { BELL } from './bell';
 import { BARRIER } from './barrier';
 import { WHIRLPOOL } from './whirlpool';
 import { HERB_GARDEN } from './herbs';
+import { TEA } from './tea';
+import { STORM } from './storm';
+import { SUNKEN } from './sunken';
+import { FROSTFIRE } from './frostfire';
+import { ORCHARD } from './orchard';
+import { ASTRAL } from './astral';
 
 export { QUEST_MAPS };
 
 export * from './common';
 
-export const MAPS: GameMap[] = [COURTYARD, RIVER, SNOW, TOWN, LAVA, GARDEN, DOJO, PADDY, ICE, DOCKS, ONSEN, GRAVEYARD, DESERT, SWAMP, MAZE, CANYON, PEAK, BEACH, VOLCANO, PORTAL, FESTIVAL, ROCKSLIDE, TRAPS_MAP, CRYSTAL, CHASM, WORKSHOP, FOG_FOREST, SKY, ALTAR_MAP, TIDAL, DOORS_MAP, POWDER, BELL, BARRIER, WHIRLPOOL, HERB_GARDEN];
+export const MAPS: GameMap[] = [COURTYARD, RIVER, SNOW, TOWN, LAVA, GARDEN, DOJO, PADDY, ICE, DOCKS, ONSEN, GRAVEYARD, DESERT, SWAMP, MAZE, CANYON, PEAK, BEACH, VOLCANO, PORTAL, FESTIVAL, ROCKSLIDE, TRAPS_MAP, CRYSTAL, CHASM, WORKSHOP, FOG_FOREST, SKY, ALTAR_MAP, TIDAL, DOORS_MAP, POWDER, BELL, BARRIER, WHIRLPOOL, HERB_GARDEN,
+  TEA, STORM, SUNKEN, FROSTFIRE, ORCHARD, ASTRAL];
 
 /** Map textures are big; 2× is plenty sharp and keeps six of them affordable in GPU memory. */
 export const MAP_RES = Math.min(RES, 2);

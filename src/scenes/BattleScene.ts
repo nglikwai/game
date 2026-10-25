@@ -1,20 +1,23 @@
 import * as Phaser from 'phaser';
 import { playMusic, type Track } from '../music';
-import { SOUL_CAST_TIME, MAIN_TOWER, MAIN_TOWER_HEAL, SMALL_TOWER, RESPAWN_TOWER_COST, TOWER_RESPAWN_HP, TOWER_RESPAWN_SOUL_KEEP, SOUL_REAPER, SOUL_FIRE, SOUL_TREE, SOUL_MISS_PARALYZE, SOUL_LEVELS, SOUL_PER_LEVEL, SOUL_FROM_HURT, SOUL_THUNDER, TEAM_RESPAWN, TOWER_AURA, TOWER_FIRE_INTERVAL, TOWER_HP, TOWER_RANGE, MAP_SCALE, MAX_PLAYERS, BIG_CHEST_HP, BIG_CHEST_ITEMS, CHEST_HP, maxRandomChests, randomChestInterval, startRandomChests, COUNTDOWN, QUEST, ALTAR, EMPTY_CHEST_CHANCE, HEIGHT, HUD_HEIGHT, MAX_HP, MAX_PE, PLAYER_COLORS, PRINCESS_WALL_HP, RES, RESPAWN_DELAY, TEAM_COLORS, WIDTH, type GameMode } from '../config';
+import { HARD_CPU_HP, SOUL_CAST_TIME, MAIN_TOWER, MAIN_TOWER_HEAL, SMALL_TOWER, RESPAWN_TOWER_COST, TOWER_RESPAWN_HP, TOWER_RESPAWN_SOUL_KEEP, SOUL_REAPER, SOUL_FIRE, SOUL_TREE, SOUL_MISS_PARALYZE, SOUL_LEVELS, SOUL_PER_LEVEL, SOUL_FROM_HURT, SOUL_THUNDER, TEAM_RESPAWN, TOWER_AURA, TOWER_FIRE_INTERVAL, TOWER_HP, TOWER_RANGE, MAP_SCALE, MAX_PLAYERS, BIG_CHEST_HP, BIG_CHEST_ITEMS, CHEST_HP, maxRandomChests, randomChestInterval, startRandomChests, BATTLE_READY_SECONDS, COUNTDOWN, QUEST, ALTAR, EMPTY_CHEST_CHANCE, HEIGHT, HUD_HEIGHT, MAX_HP, MAX_PE, PLAYER_COLORS, PRINCESS_WALL_HP, RES, RESPAWN_DELAY, TEAM_COLORS, WIDTH, type GameMode } from '../config';
 import { createController, type WorldView } from '../controls';
 import { Fighter, type Arena } from '../Fighter';
 import { POCKET_SIZE, rollItem, type Item, type ItemEffect } from '../items';
-import { skillById, type SkillEffect } from '../skills';
+import { skillById, skillCooldownFor, type SkillEffect } from '../skills';
 import { roleById, type Role } from '../roles';
-import { randomCpuLoadout } from '../cpuLoadout';
+import { rollCpuLoadouts } from '../cpuLoadout';
 import { WEAPONS, drawShape, rayAngles, shapeHits, shapeHitsRect } from '../weapons';
 import { T } from '../i18n';
 import { sfx } from '../sfx';
 import { ARENA as SCREEN_ARENA, ARENA_MID_Y as SCREEN_MID_Y, MAPS, MAP_RES, addArenaTexture, chestsFor, getMap, obstaclesFor, sideOf, spawnPoint, towerSpots, type GameMap, type MapId, type Obstacle, type TerrainKind } from '../maps';
-import { drawHeldWeapon, drawItemIcon, drawLog, kunai, ninjaTexture, type Pose } from '../art';
+import { drawHeldWeapon, drawWeaponIcon, drawItemIcon, drawLog, kunai, ninjaTexture, type Pose } from '../art';
+import { createMatchStats, type MatchStats } from '../matchStats';
+import { performanceScore, rankMatchResults, selectMatchAwards } from '../matchAwards';
+import { pickTreeSummon, type TreeSummon } from '../questTree';
 import { Fx, REAPER_SWING } from '../fx';
 import type { FighterState } from '../Fighter';
-import type { SlotConfig } from '../settings';
+import { getSettings, type SlotConfig } from '../settings';
 import { C, FONT, Petals, UIScene, addButton, toHex, txt } from '../ui';
 
 // ---------- battlefield coordinates ----------
@@ -47,6 +50,8 @@ export interface Projectile {
 /** A team's watchtower: shoots enemies in range, buffs teammates in its aura, can be destroyed. */
 interface Tower {
   team: number;
+  /** A living tree uses main-tower HP, aura and respawns, but casts summons instead of arrows. */
+  tree?: boolean;
   /** The big main tower (本陣) at the back. */
   main: boolean;
   range: number;
@@ -107,19 +112,26 @@ export interface QuestState {
     /** Per party slot: pocket items and soul. */
     players: Record<number, { pocket: Item[]; soul: number }>;
     /** Running totals for the results screen. */
-    stats: { dealt: number; kos: number; wall: number }[];
+    stats: MatchStats[];
   };
+}
+
+export interface BattleStartData {
+  slots: SlotConfig[];
+  mode: GameMode;
+  mapId?: MapId | 'random';
+  quest?: QuestState;
 }
 
 /** The boss: crimson, with a fixed loadout. */
 const BOSS_COLOR = 0xb3202e;
 const BOSS_GEAR = { weapon: Math.max(0, WEAPONS.findIndex((w) => w.id === 'hammer')), skills: ['fury', 'fireball', 'golden-bell'], role: 'samurai' as const };
 
-function bossRole(partySize: number): Role {
+export function bossRole(partySize: number): Role {
   const b = QUEST.boss;
   return {
     ...roleById('samurai'), name: 'Boss', zh: '頭目',
-    maxHp: b.hpBase + b.hpPerPlayer * partySize, speed: b.speed, poise: 1, knockbackTaken: b.knockbackTaken, healReceived: 1,
+    maxHp: b.hpBase + b.hpPerPlayer * partySize, speed: b.speed, skillCooldown: b.skillCooldown, poise: 1, knockbackTaken: b.knockbackTaken, healReceived: 1,
   };
 }
 
@@ -127,8 +139,8 @@ function bossRole(partySize: number): Role {
 function questSlots(lobby: SlotConfig[], stage: number): SlotConfig[] {
   const party = lobby.slice(0, QUEST.partySlots).map((sl) => ({ ...sl, team: 0 }));
   const n = party.filter((sl) => sl.control !== 'off').length;
-  // Stage 3 is the boss plus up to 3 grunts; otherwise one more enemy than the party (max 4).
-  const enemies = stage === 2 ? 1 + Math.min(3, n) : Math.min(MAX_PLAYERS - QUEST.partySlots, n + 1);
+  // Final stage prepares all guard slots; excess guards wait off-field for the boss to summon.
+  const enemies = stage === QUEST.bossStage ? Math.min(QUEST.boss.maxEnemies, MAX_PLAYERS - QUEST.partySlots) : Math.min(MAX_PLAYERS - QUEST.partySlots, n + 1);
   const base = lobby[QUEST.partySlots] ?? lobby[0];
   const foes = Array.from({ length: MAX_PLAYERS - QUEST.partySlots }, (_, k): SlotConfig => ({ ...base, control: k < enemies ? 'cpu' : 'off', team: 1 }));
   return [...party, ...foes];
@@ -142,8 +154,19 @@ interface PrincessWall {
   maxHp: number;
   lastHitter: Fighter | null;
   shakeT: number;
+  rescued: boolean;
+  body?: Phaser.Physics.Arcade.StaticBody;
+  rect?: Phaser.Geom.Rectangle;
   /** Crack lines, revealed one by one as the wall takes damage. */
   cracks: { x: number; y: number }[][];
+}
+
+interface QuestTreeCast {
+  spell: TreeSummon;
+  target: Fighter;
+  x: number;
+  y: number;
+  elapsed: number;
 }
 
 
@@ -204,6 +227,12 @@ export class BattleScene extends UIScene implements Arena {
   /** Obstacles that stop projectiles (everything except low terrain like water). */
   private shotBlockers: Phaser.Geom.Rectangle[] = [];
   private walls: PrincessWall[] = [];
+  private princessText?: Phaser.GameObjects.Text;
+  private questTreeT = QUEST.rescue.tree.initialDelay;
+  private questTreeCast: QuestTreeCast | null = null;
+  private questTree: Tower | null = null;
+  private bossRespawnT = QUEST.boss.respawnInterval;
+  private bossReserves = new Set<Fighter>();
   private chests: Chest[] = [];
   private towers: Tower[] = [];
   /** Who each main tower is healing this frame (for the beams). */
@@ -246,13 +275,14 @@ export class BattleScene extends UIScene implements Arena {
   private petals!: Petals;
   private paused = false;
   /** Per fighter (by slot index): damage dealt to fighters, KOs, damage dealt to their princess's wall. */
-  private stats: { dealt: number; kos: number; wall: number }[] = [];
+  private stats: MatchStats[] = [];
   private g!: Phaser.GameObjects.Graphics;
   private hud!: Phaser.GameObjects.Graphics;
   private nameTags: Phaser.GameObjects.Text[] = [];
   private keyLabels: Phaser.GameObjects.Text[][] = [];
   private over = false;
-  /** Seconds left in the pre-round countdown. */
+  private winningTeam: number | null = null;
+  /** Seconds left in the battlefield preview plus the pre-round countdown. */
   private countdown = 0;
   private overT = 0;
 
@@ -260,12 +290,12 @@ export class BattleScene extends UIScene implements Arena {
     super('Battle');
   }
 
-  init(data: { slots: SlotConfig[]; mode: GameMode; mapId?: MapId | 'random'; quest?: QuestState }) {
+  init(data: BattleStartData) {
     this.lobbySlots = data.slots;
     this.mode = data.mode ?? 'ffa';
     this.quest = this.mode === 'quest' ? data.quest ?? { stage: 0 } : null;
     // The underworld has its own music; the last stage gets the boss theme.
-    this.bgm = this.quest ? (this.quest.stage === 2 ? 'boss' : 'hell') : 'battle';
+    this.bgm = this.quest ? (this.quest.stage === QUEST.bossStage ? 'boss' : 'hell') : 'battle';
     this.slots = this.quest ? questSlots(data.slots, this.quest.stage) : data.slots;
     // 'random' picks a new map each round (and rematches keep it random). Quest stages have their own maps.
     this.mapChoice = this.quest ? QUEST.maps[this.quest.stage] : data.mapId ?? 'courtyard';
@@ -288,6 +318,12 @@ export class BattleScene extends UIScene implements Arena {
     this.map = this.mapChoice === 'random' ? MAPS[Math.floor(Math.random() * MAPS.length)] : getMap(this.mapChoice);
     this.shotBlockers = [];
     this.walls = [];
+    this.princessText = undefined;
+    this.questTreeT = QUEST.rescue.tree.initialDelay;
+    this.questTreeCast = null;
+    this.questTree = null;
+    this.bossRespawnT = QUEST.boss.respawnInterval;
+    this.bossReserves.clear();
     this.spawns = [];
     this.chests = [];
     this.caltrops = [];
@@ -308,12 +344,20 @@ export class BattleScene extends UIScene implements Arena {
     this.projectiles = [];
     this.obstacleRects = [];
     this.paused = false;
-    this.stats = PLAYER_COLORS.map((_, i) => ({ ...(this.quest?.carry?.stats[i] ?? { dealt: 0, kos: 0, wall: 0 }) }));
+    this.stats = PLAYER_COLORS.map((_, i) => createMatchStats(this.quest?.carry?.stats[i]));
     this.nameTags = [];
     this.keyLabels = [];
     this.over = false;
+    this.winningTeam = null;
     this.overT = 0;
-    this.countdown = COUNTDOWN;
+    this.countdown = BATTLE_READY_SECONDS + COUNTDOWN;
+  }
+
+  /** Party bonuses use a copy so enemies and later versus matches retain their role stats. */
+  private roleForSlot(base: Role, index: number): Role {
+    return this.quest && index < QUEST.partySlots
+      ? { ...base, peRegen: base.peRegen * QUEST.partyPeRegen, speed: base.speed * QUEST.partySpeed }
+      : base;
   }
 
   create() {
@@ -341,20 +385,25 @@ export class BattleScene extends UIScene implements Arena {
 
     // Random each round: which side red starts on (team modes) and who starts where.
     const flip = this.mode !== 'ffa' && !this.quest && Math.random() < 0.5;
-    const obstacles = obstaclesFor(this.map, this.mode, flip).map(toWorldRect);
+    const obstacles = obstaclesFor(this.map, this.mode, flip)
+      .filter((o) => !(this.quest?.stage === QUEST.rescueStage && o.kind === 'deadtree' && o.x === QUEST.rescue.tree.x && o.y === QUEST.rescue.tree.y))
+      .map(toWorldRect);
     const walls = obstacles.map((o) => {
-      if (o.kind === 'cage') this.walls.push(this.makeWall(o));
+      const wall = o.kind === 'cage' ? this.makeWall(o) : undefined;
+      if (wall) this.walls.push(wall);
       const rect = new Phaser.Geom.Rectangle(o.x - o.w / 2, o.y - o.h / 2, o.w, o.h);
       this.obstacleRects.push(rect);
       // Crystals bounce shots off instead of stopping them.
       if (o.kind === 'crystal') this.bouncers.push(rect);
       else if (!o.low) this.shotBlockers.push(rect);
-      return this.physics.add.staticBody(o.x - o.w / 2, o.y - o.h / 2, o.w, o.h);
+      const body = this.physics.add.staticBody(o.x - o.w / 2, o.y - o.h / 2, o.w, o.h);
+      if (wall) { wall.body = body; wall.rect = rect; }
+      return body;
     });
     this.startAmbience();
     this.stormT = this.map.lightning?.interval ?? 0;
     this.ventT = this.map.vents?.interval ?? 0;
-    this.fightStart = this.time.now / 1000 + COUNTDOWN;
+    this.fightStart = this.time.now / 1000 + BATTLE_READY_SECONDS + COUNTDOWN;
     this.rollT = this.map.rollers?.interval ?? 0;
 
     this.g = this.add.graphics();
@@ -368,11 +417,14 @@ export class BattleScene extends UIScene implements Arena {
     const teams = this.mode !== 'ffa';
     const startAt = this.assignStarts(flip);
     const partySize = this.slots.slice(0, QUEST.partySlots).filter((sl) => sl.control !== 'off').length;
+    const fixedRoles = new Map<number, Role['id']>();
+    if (this.quest?.stage === QUEST.bossStage) fixedRoles.set(QUEST.partySlots, BOSS_GEAR.role);
+    const cpuGear = rollCpuLoadouts(this.mode, this.slots, fixedRoles);
     this.slots.forEach((slot, i) => {
-      const controller = createController(this, slot.control, slot.binds);
+      const controller = createController(this, slot.control, slot.binds, getSettings().difficulty);
       if (!controller) return;
-      // Quest stage 3: the first enemy is the boss, waiting in front of his throne.
-      const isBoss = this.quest?.stage === 2 && i === QUEST.partySlots;
+      // The final Quest stage: the first enemy is the boss, waiting by his throne.
+      const isBoss = this.quest?.stage === QUEST.bossStage && i === QUEST.partySlots;
       const sp = isBoss ? this.freeSpot(toWorld({ x: WIDTH - 140, y: SCREEN_MID_Y }), [], QUEST.boss.radius + 4) : startAt[i];
       this.spawns[i] = sp;
       const r = isBoss ? QUEST.boss.radius : 18;
@@ -380,19 +432,25 @@ export class BattleScene extends UIScene implements Arena {
       body.setCircle(r);
       body.setCollideWorldBounds(true);
       // CPUs roll a fresh, sensible loadout every round (the lobby settings aren't touched).
-      const gear = isBoss ? BOSS_GEAR : slot.control === 'cpu' ? randomCpuLoadout(this.mode) : slot;
+      const gear = isBoss ? BOSS_GEAR : cpuGear.get(i) ?? slot;
       const skills = gear.skills.map(skillById);
-      const role = isBoss ? bossRole(partySize) : roleById(gear.role);
+      const baseRole = isBoss ? bossRole(partySize) : roleById(gear.role);
+      const role = this.roleForSlot(baseRole, i);
       const color = isBoss ? BOSS_COLOR : PLAYER_COLORS[i];
       const f = new Fighter(i, color, WEAPONS[gear.weapon], skills, role, controller, body, this);
+      Object.assign(f.stats, this.stats[i]);
+      this.stats[i] = f.stats;
       if (teams) f.team = slot.team;
       // Quest: the party is sturdier than usual.
       if (this.quest && i < QUEST.partySlots) f.maxHp = f.hp = Math.round(role.maxHp * QUEST.partyHp);
+      // Hard: the CPU fighters on the other side are tougher too.
+      else if (slot.control === 'cpu' && !isBoss && getSettings().difficulty === 'hard') f.maxHp = f.hp = Math.round(role.maxHp * HARD_CPU_HP);
       if (isBoss) {
         f.boss = true;
         f.radius = r;
         f.damageScale = QUEST.boss.damage;
       }
+      this.prepareBossReserve(f, partySize);
       // Quest: items and soul carry over from the last stage.
       const carried = this.quest?.carry?.players[i];
       if (carried) {
@@ -401,7 +459,7 @@ export class BattleScene extends UIScene implements Arena {
       }
       this.sprites[i] = this.add.image(sp.x, sp.y, ninjaTexture(this, color)).setScale(r / 18 / RES);
       this.lSprites.add(this.sprites[i]);
-      this.prevStates[i] = 'idle';
+      this.prevStates[i] = f.state;
       f.facing = Math.atan2(WORLD_CENTER.y - sp.y, WORLD_CENTER.x - sp.x);
       this.fighters.push(f);
       this.tagTexts[i] = this.quest && i >= QUEST.partySlots
@@ -417,15 +475,12 @@ export class BattleScene extends UIScene implements Arena {
     const bodies = this.fighters.map((f) => f.body);
     this.physics.add.collider(bodies, walls);
     this.physics.add.collider(bodies, bodies);
-    // Each team's wall gets HP in proportion to its team size, so 1-vs-2 stays fair.
-    for (const w of this.walls) {
-      const members = this.fighters.filter((f) => f.team === w.team).length;
-      w.maxHp = w.hp = PRINCESS_WALL_HP * Math.max(1, members) / 2;
-    }
+    this.configurePrincessWalls();
     // The round's chests are all there from the start; they drop in one by one during the countdown.
-    // Stagger the drop-ins so they all land within the 3-2-1 countdown.
+    // Stagger the drop-ins so they all land during the countdown.
     if (this.quest) {
       if (this.quest.stage === 1) this.placeQuestTowers(partySize);
+      if (this.quest.stage === QUEST.rescueStage) this.placeQuestTree(partySize);
     } else if (teams) this.placeTowers(flip);
     this.setupMapFeatures();
     const spots = chestsFor(this.map, this.mode)
@@ -451,7 +506,8 @@ export class BattleScene extends UIScene implements Arena {
         : undefined,
       chests: this.chests,
       towers: this.towers,
-      siege: this.mode === 'siege' || this.quest?.stage === 1,
+      siege: this.mode === 'siege' || this.quest?.stage === 1 || this.quest?.stage === QUEST.rescueStage,
+      defendTeam: this.quest?.stage === 1 || this.quest?.stage === QUEST.rescueStage ? 0 : undefined,
       safe: this.map.barrier ? () => this.barrierCircle() : undefined,
       herbs: this.map.herbs ? () => this.herbs.filter((h) => h.grown) : undefined,
     };
@@ -557,6 +613,7 @@ export class BattleScene extends UIScene implements Arena {
       this.updateBell(dt);
       this.updateBarrier(dt);
       this.updateHerbs(dt);
+      this.updateQuestTree(dt);
     }
     this.updateDoors();
     for (const f of this.fighters) f.inFog = f.alive && this.terrainAt(f.x, f.y) === 'fog';
@@ -571,7 +628,7 @@ export class BattleScene extends UIScene implements Arena {
     this.renderHud();
 
     // Free-for-all / Team: last team standing (in free-for-all every fighter is their own team).
-    // Save the Princess ends when a wall breaks; Siege when a team has no towers left.
+    // Save the Princess ends when both of a team's princesses are free; Siege when its towers fall.
     if (!this.over && this.mode === 'siege') {
       for (const team of [0, 1]) {
         if (this.towers.some((tw) => tw.team === team && tw.alive)) continue;
@@ -610,6 +667,12 @@ export class BattleScene extends UIScene implements Arena {
       const dy = t.y - f.y;
       const d = Math.hypot(dx, dy) || 1;
       this.dealDamage(f, t, w.damage * f.damageMult, dx / d, dy / d, w.knockback * f.damageMult, w.hitstun);
+      if (w.id === 'staff') {
+        // The Ice Staff leaves its victim frosted.
+        this.fx.frostBurst(t.x, t.y);
+        sfx.iceCrack();
+        t.chillT = 0.9;
+      }
     }
 
     for (const k of this.kegs) {
@@ -637,8 +700,8 @@ export class BattleScene extends UIScene implements Arena {
     }
 
     // You can only break your own team's princess out.
-    const wall = this.walls.find((w) => w.team === f.team);
-    if (wall && wall.hp > 0 && !this.over && !f.swingHits.has(wall)) {
+    for (const wall of this.walls) {
+      if (wall.team !== f.team || wall.hp <= 0 || this.over || f.swingHits.has(wall)) continue;
       const o = wall.o;
       if (shapeHitsRect(w.shape, f.x, f.y, f.facing, o.x, o.y, o.w, o.h)) {
         f.swingHits.add(wall);
@@ -680,15 +743,18 @@ export class BattleScene extends UIScene implements Arena {
   /** Apply a hit and record it in the round stats. */
   private dealDamage(from: Fighter | undefined, to: Fighter, dmg: number, dx: number, dy: number, knockback: number, hitstun: number, soulGain = true) {
     const before = to.hp;
+    const taken = to.stats.taken;
     to.takeHit(dmg, dx, dy, knockback, hitstun);
+    // Measure damage before any automatic revival restores the target's HP.
+    const actual = to.stats.taken - taken;
     this.fx.hitSpark(to.x - dx * to.radius * 0.6, to.y - dy * to.radius * 0.6, from?.color ?? 0xffffff);
     if (!from) return; // tower arrows don't count towards anyone's stats
     // Hurting enemies fills your soul (lightning itself doesn't, so it can't chain); being hurt fills a little too.
     if (soulGain) {
-      from.addSoul(before - to.hp);
-      to.addSoul((before - to.hp) * SOUL_FROM_HURT);
+      from.addSoul(actual);
+      to.addSoul(actual * SOUL_FROM_HURT);
     }
-    this.stats[from.index].dealt += before - to.hp;
+    this.stats[from.index].dealt += actual;
     if (before > 0 && !to.alive) this.stats[from.index].kos++;
   }
 
@@ -762,43 +828,85 @@ export class BattleScene extends UIScene implements Arena {
 
   private openResults(msg: string, color: string) {
     // Extra column: wall damage (Save the Princess) or tower damage (Siege).
-    const princess = this.mode === 'princess' || this.mode === 'siege' || this.mode === 'quest';
+    const objective = this.mode === 'princess' || this.mode === 'siege' || this.mode === 'quest';
     // In Quest only the party is listed.
     const listed = this.quest ? this.fighters.filter((f) => f.team === 0) : this.fighters;
+    const awards = selectMatchAwards(listed, this.winningTeam, !!this.quest);
     this.openModal({
-      w: 780,
-      // Grows with the number of fighters (up to 6 rows).
-      h: 290 + listed.length * 42,
+      w: 1160,
+      // Grows with the number of fighters (up to 8 rows).
+      h: 350 + listed.length * 42,
       title: T().results,
       depth: 400,
       closable: false,
       build: (m) => {
         m.content.add(txt(this, WIDTH / 2, m.y + 92, msg, 40, color, { title: true, bold: true, origin: 0.5, stroke: '#000000', strokeThickness: 5 }));
-        const cols = [m.x + 70, m.x + 330, m.x + 470, m.x + 600];
-        const headY = m.y + 150;
-        const heads = [T().weapon, T().dealt, T().kos, ...(princess ? [this.mode === 'princess' ? T().wallDmg : T().towerDmg] : [])];
-        heads.forEach((h, n) => m.content.add(txt(this, cols[n] + (n === 0 ? 0 : 40), headY, h, 14, C.dim, { origin: [n === 0 ? 0 : 0.5, 0.5] })));
+        const awardW = (m.w - 80) / 2;
+        ([{ label: 'MVP', fighter: awards.mvp, color: C.gold, textColor: C.goldHex },
+          { label: 'SVP', fighter: awards.svp, color: 0xa8a4e8, textColor: '#c1bdff' }]).forEach((award, n) => {
+          const x = m.x + 32 + n * (awardW + 16);
+          const y = m.y + 122;
+          const ag = this.add.graphics();
+          ag.fillStyle(award.color, 0.1).fillRoundedRect(x, y, awardW, 52, 8);
+          ag.lineStyle(1, award.color, 0.7).strokeRoundedRect(x, y, awardW, 52, 8);
+          ag.fillStyle(award.color, 0.08).fillCircle(x + 28, y + 27, 19);
+          // Small laurel sprigs frame the winner's weapon like a medal.
+          for (const side of [-1, 1]) for (let k = 0; k < 4; k++) {
+            ag.lineStyle(1, award.color, 0.45).lineBetween(x + 28 + side * (16 + k), y + 40 - k * 7, x + 28 + side * (22 + k), y + 37 - k * 7);
+          }
+          const f = award.fighter;
+          if (f) drawWeaponIcon(ag, f.weapon.id, x + 28, y + 28, 27, f.color);
+          m.content.add(ag);
+          m.content.add(txt(this, x + 52, y + 14, award.label, 13, award.textColor, { bold: true, origin: [0, 0.5] }));
+          m.content.add(txt(this, x + 52, y + 35, f ? `P${f.index + 1}  ${T().weaponName(f.weapon)}` : T().noAward, 17, C.text, { bold: true, origin: [0, 0.5] }));
+          if (f) m.content.add(txt(this, x + awardW - 18, y + 28, T().awardScore(Math.round(performanceScore(f.stats))), 18, award.textColor, { bold: true, origin: [1, 0.5] }));
+        });
+        const left = m.x + 32;
+        const playerW = 200;
+        const columns: { label: string; key: keyof MatchStats | 'score' }[] = [
+          { label: T().score, key: 'score' },
+          { label: T().dealt, key: 'dealt' },
+          { label: T().kos, key: 'kos' },
+          { label: T().deaths, key: 'deaths' },
+          { label: T().taken, key: 'taken' },
+          { label: T().recovered, key: 'recovered' },
+          { label: T().skillsUsed, key: 'skills' },
+          { label: T().itemsUsed, key: 'items' },
+          { label: T().revives, key: 'revives' },
+          ...(objective ? [{ label: this.quest ? T().objectiveDmg : this.mode === 'princess' ? T().wallDmg : T().towerDmg, key: 'wall' as const }] : []),
+        ];
+        const colW = (m.w - 64 - playerW) / columns.length;
+        const colX = (n: number) => left + playerW + (n + 0.5) * colW;
+        const headY = m.y + 210;
+        m.content.add(txt(this, left + 12, headY, T().weapon, 14, C.dim, { origin: [0, 0.5] }));
+        columns.forEach((c, n) => m.content.add(txt(this, colX(n), headY, c.label, 14, C.dim, { origin: 0.5, align: 'center' })));
         const g = this.add.graphics();
-        g.lineStyle(1, C.border, 1).lineBetween(m.x + 50, headY + 16, m.x + m.w - 50, headY + 16);
+        g.lineStyle(1, C.border, 1).lineBetween(left, headY + 20, m.x + m.w - 32, headY + 20);
         m.content.add(g);
-        // Best players first.
-        const rows = [...listed].sort((a, b) => this.stats[b.index].dealt + this.stats[b.index].wall - (this.stats[a.index].dealt + this.stats[a.index].wall));
+        const rows = rankMatchResults(listed, this.winningTeam, this.mode !== 'ffa');
         rows.forEach((f, r) => {
           const y = headY + 40 + r * 42;
           const st = this.stats[f.index];
+          const award = f === awards.mvp ? 'MVP' : f === awards.svp ? 'SVP' : null;
+          const awardColor = award === 'MVP' ? C.gold : 0xa8a4e8;
           const rg = this.add.graphics();
-          rg.fillStyle(r % 2 ? 0x1a1f2a : 0x161a23, 1).fillRoundedRect(m.x + 50, y - 18, m.w - 100, 36, 6);
-          rg.fillStyle(f.color, 1).fillCircle(cols[0] - 2, y, 9);
-          if (this.mode !== 'ffa') rg.lineStyle(2, TEAM_COLORS[f.team], 1).strokeCircle(cols[0] - 2, y, 13);
+          rg.fillStyle(r % 2 ? 0x1a1f2a : 0x161a23, 1).fillRoundedRect(left, y - 18, m.w - 64, 36, 6);
+          if (award) rg.lineStyle(1, awardColor, 0.7).strokeRoundedRect(left, y - 18, m.w - 64, 36, 6);
+          rg.fillStyle(f.color, 1).fillCircle(left + 14, y, 7);
+          if (this.mode !== 'ffa') rg.lineStyle(2, TEAM_COLORS[f.team], 1).strokeCircle(left + 14, y, 10);
           m.content.add(rg);
-          m.content.add(txt(this, cols[0] + 22, y, `P${f.index + 1}  ${T().weaponName(f.weapon)}`, 18, C.text, { bold: true, origin: [0, 0.5] }));
-          const vals = [Math.round(st.dealt), st.kos, ...(princess ? [Math.round(st.wall)] : [])];
-          vals.forEach((v, n) => m.content.add(txt(this, cols[n + 1] + 40, y, String(v), 20, C.text, { bold: true, origin: 0.5 })));
+          const player = txt(this, left + 30, y - (award ? 5 : 0), `P${f.index + 1}  ${T().weaponName(f.weapon)}`, 16, C.text, { bold: true, origin: [0, 0.5] });
+          player.setScale(Math.min(1, (playerW - 38) / player.width));
+          m.content.add(player);
+          if (award) m.content.add(txt(this, left + 30, y + 11, award, 10, toHex(awardColor), { bold: true, origin: [0, 0.5] }));
+          columns.forEach((c, n) => m.content.add(txt(this, colX(n), y, String(Math.round(c.key === 'score' ? performanceScore(st) : st[c.key])), 20, C.text, { bold: true, origin: 0.5 })));
         });
+        m.content.add(txt(this, WIDTH / 2, m.y + m.h - 106, T().resultsHint, 12, C.dim, { origin: 0.5, align: 'center', wrap: m.w - 80 }));
+        m.content.add(txt(this, WIDTH / 2, m.y + m.h - 82, T().awardHint, 11, C.dim, { origin: 0.5, align: 'center', wrap: m.w - 80 }));
         const by = m.y + m.h - 46;
         // A finished game goes back to the fighter setup (no instant rematch); Quest keeps its own retry.
         const buttons: { id: string; label: string; onPress: () => void }[] = [
-          ...(this.quest ? [{ id: 'again', label: T().questRestart, onPress: () => this.scene.restart({ slots: this.lobbySlots, mode: this.mode, mapId: this.mapChoice }) }] : []),
+          ...(this.quest ? [{ id: 'again', label: T().questRestart, onPress: () => this.enterRound({ slots: this.lobbySlots, mode: this.mode, mapId: this.mapChoice }) }] : []),
           { id: 'lobby', label: T().toLobby, onPress: () => this.scene.start('Lobby') },
           { id: 'title', label: T().toTitle, onPress: () => this.scene.start('Title') },
         ];
@@ -857,11 +965,11 @@ export class BattleScene extends UIScene implements Arena {
     for (let i = this.projectiles.length - 1; i >= 0; i--) if (this.projectiles[i].dead) this.projectiles.splice(i, 1);
   }
 
-  /** Big 3, 2, 1, FIGHT! in the middle of the arena. */
+  /** Big 5, 4, 3, 2, 1, FIGHT! in the middle of the arena. */
   private startCountdown() {
     const labels = [...Array.from({ length: COUNTDOWN }, (_, i) => String(COUNTDOWN - i)), T().fight];
     labels.forEach((label, i) => {
-      this.time.delayedCall(i * 1000, () => {
+      this.time.delayedCall((BATTLE_READY_SECONDS + i) * 1000, () => {
         const go = i === labels.length - 1;
         if (go) sfx.countdownGo();
         else sfx.countdownTick();
@@ -1087,6 +1195,7 @@ export class BattleScene extends UIScene implements Arena {
         const give = Math.min(MAIN_TOWER_HEAL.perSec * dt, f.maxHp - f.hp, spare);
         if (give <= 0) continue;
         f.hp += give;
+        f.stats.recovered += give;
         tw.hp -= give;
         this.towerHeals.push({ tower: tw, f });
       }
@@ -1100,7 +1209,7 @@ export class BattleScene extends UIScene implements Arena {
   /** Towers shoot the nearest visible enemy in range. */
   private updateTowers(dt: number) {
     for (const tw of this.towers) {
-      if (!tw.alive) continue;
+      if (!tw.alive || tw.tree) continue;
       tw.reload -= dt;
       if (tw.reload > 0) continue;
       const targets = this.fighters.filter((f) => f.alive && f.team !== tw.team && !f.hidden && !f.untouchable && Math.hypot(f.x - tw.x, f.y - tw.y) < tw.range);
@@ -1132,13 +1241,14 @@ export class BattleScene extends UIScene implements Arena {
 
   private destroyTower(tw: Tower) {
     tw.alive = false;
+    if (tw.tree) this.questTreeCast = null;
     tw.collider.destroy();
     tw.body.destroy();
     this.obstacleRects.splice(this.obstacleRects.indexOf(tw.rect), 1);
     sfx.wallBreak();
     this.fx.smoke(tw.x, tw.y, 24, 1.4);
     this.fx.hammerSmash(tw.x, tw.y, 50);
-    this.showBanner((tw.main ? T().mainTowerDown : T().towerDown)(T().teamNames[tw.team]), TEAM_COLORS[tw.team]);
+    this.showBanner(tw.tree ? T().questTreeDestroyed : (tw.main ? T().mainTowerDown : T().towerDown)(T().teamNames[tw.team]), TEAM_COLORS[tw.team]);
     // The attackers get a short War Drum.
     for (const f of this.fighters) if (f.alive && f.team !== tw.team) f.empower(1.3, 5);
   }
@@ -1783,6 +1893,85 @@ export class BattleScene extends UIScene implements Arena {
 
   // ---------- 闖關 Quest ----------
 
+  /** The prison tree marks one random living party member, then strikes that fixed spot. */
+  private updateQuestTree(dt: number) {
+    if (this.quest?.stage !== QUEST.rescueStage || this.over || !this.questTree?.alive) {
+      this.questTreeCast = null;
+      return;
+    }
+    if (this.paused || this.countdown > 0) return;
+    const config = QUEST.rescue.tree;
+    if (this.questTreeCast) {
+      const cast = this.questTreeCast;
+      cast.elapsed += dt;
+      if (cast.elapsed < cast.spell.warn) return;
+      this.questTreeCast = null;
+      this.questTreeT = config.interval;
+      this.strikeQuestTree(cast);
+      return;
+    }
+    this.questTreeT -= dt;
+    if (this.questTreeT > 0) return;
+    const targets = this.fighters.filter((f) => f.team === 0 && f.alive && !f.untouchable);
+    if (!targets.length) return;
+    const target = targets[Math.floor(Math.random() * targets.length)];
+    const spell = pickTreeSummon();
+    this.questTreeCast = { spell, target, x: target.x, y: target.y, elapsed: 0 };
+    const tree = toWorld(config);
+    this.popText(tree.x, tree.y - 75, T().questTreeCast(T().skillName(skillById(spell.skillId)!), target.index + 1), toHex(spell.color));
+    sfx.summonCharge(spell.kind, spell.warn);
+  }
+
+  private strikeQuestTree(cast: QuestTreeCast) {
+    const { spell, x, y } = cast;
+    if (spell.kind === 'soulReaper') {
+      const hit = Math.random() < spell.hitChance;
+      sfx.reaper();
+      this.fx.reaperCatch(() => ({ x, y }), hit);
+      this.time.delayedCall(REAPER_SWING * 1000, () => {
+        if (this.over || this.quest?.stage !== QUEST.rescueStage || !this.questTree?.alive) return;
+        sfx.scythe();
+        this.applyQuestTreeHit(cast, hit);
+      });
+      return;
+    }
+    if (spell.kind === 'soulFire') { sfx.holyFire(); this.fx.holyFlame(x, y); }
+    else if (spell.kind === 'soulThunder') { sfx.skyThunder(); this.fx.skyBolt(x, y); }
+    else { sfx.sacredTree(); this.fx.treeRoots(x, y); }
+    this.screenFlash(spell.color, 0.12);
+    this.applyQuestTreeHit(cast);
+  }
+
+  private applyQuestTreeHit(cast: QuestTreeCast, hit = Math.random() < cast.spell.hitChance) {
+    if (this.over || this.quest?.stage !== QUEST.rescueStage || !this.questTree?.alive) return;
+    const { target, spell } = cast;
+    if (target.team !== 0 || !target.alive || target.untouchable) return;
+    // Moving out of the warning circle avoids damage and paralysis entirely.
+    if (Math.hypot(target.x - cast.x, target.y - cast.y) > QUEST.rescue.tree.radius + target.radius) {
+      this.summonResult(target, false, spell.color);
+      return;
+    }
+    this.summonResult(target, hit, spell.color);
+    if (!hit) { target.paralyze(SOUL_MISS_PARALYZE); return; }
+    this.dealDamage(undefined, target, Phaser.Math.Between(spell.minDamage, spell.maxDamage), 0, 0, 0, 0, false);
+    if (target.alive) target.paralyze(spell.paralyze);
+  }
+
+  private renderQuestTree(now: number) {
+    if (this.quest?.stage !== QUEST.rescueStage || this.over || !this.questTree?.alive) return;
+    const cast = this.questTreeCast;
+    const tree = toWorld(QUEST.rescue.tree);
+    const color = cast?.spell.color ?? 0xa86aff;
+    this.gGlow.fillStyle(color, 0.12 + 0.06 * Math.sin(now * 3)).fillCircle(tree.x, tree.y, 90);
+    if (!cast) return;
+    const progress = Math.min(1, cast.elapsed / cast.spell.warn);
+    this.fx.summonCircle(this.g, this.gGlow, tree.x, tree.y, progress, color, now);
+    this.fx.targetMark(this.gOver, cast.x, cast.y, progress, color, now);
+    this.g.fillStyle(color, 0.08 + progress * 0.2).fillCircle(cast.x, cast.y, QUEST.rescue.tree.radius);
+    this.g.lineStyle(3, color, 0.7).strokeCircle(cast.x, cast.y, QUEST.rescue.tree.radius);
+    this.gGlow.lineStyle(2, color, 0.25 + progress * 0.35).lineBetween(tree.x, tree.y, cast.x, cast.y);
+  }
+
   /** Stage 2: two great towers on the enemy side. They shoot, heal and keep sending enemies back in. */
   private placeQuestTowers(partySize: number) {
     const bodies = this.fighters.map((f) => f.body);
@@ -1800,10 +1989,47 @@ export class BattleScene extends UIScene implements Arena {
         range: st.range, fireInterval: st.fireInterval, reload: st.fireInterval, aura: st.aura, arrow: st.arrow,
       });
     }
+    // The party gets a small tower of its own: it shoots enemies and buffs allies in its aura (it can be destroyed,
+    // but it doesn't bring anyone back, only a main tower does that).
+    const mine = TOWER_STATS.small;
+    const msize = mine.size;
+    const mhp = (mine.hp * Math.max(2, partySize)) / 2;
+    const q = this.freeSpot(toWorld({ x: 380, y: SCREEN_MID_Y }), [], msize / 2 + 10);
+    const mbody = this.physics.add.staticBody(q.x - msize / 2, q.y - msize / 2, msize, msize);
+    const mcollider = this.physics.add.collider(bodies, mbody);
+    const mrect = new Phaser.Geom.Rectangle(q.x - msize / 2, q.y - msize / 2, msize, msize);
+    this.obstacleRects.push(mrect);
+    this.towers.push({
+      team: 0, main: false, x: q.x, y: q.y, w: msize, h: msize, hp: mhp, maxHp: mhp, alive: true, shakeT: 0, body: mbody, collider: mcollider, rect: mrect,
+      range: mine.range, fireInterval: mine.fireInterval, reload: mine.fireInterval, aura: mine.aura, arrow: mine.arrow,
+    });
+  }
+
+  /** Keep the prison tree as a tree: destructible, able to revive guards, and never shooting arrows. */
+  private placeQuestTree(partySize: number) {
+    const config = QUEST.rescue.tree;
+    const p = toWorld(config);
+    const w = 88 * S, h = 100 * S;
+    const hp = config.hpBase + config.hpPerPlayer * partySize;
+    const body = this.physics.add.staticBody(p.x - w / 2, p.y - h / 2, w, h);
+    const collider = this.physics.add.collider(this.fighters.map((f) => f.body), body);
+    const rect = new Phaser.Geom.Rectangle(p.x - w / 2, p.y - h / 2, w, h);
+    this.obstacleRects.push(rect);
+    this.questTree = {
+      team: 1, main: true, tree: true, x: p.x, y: p.y, w, h, hp, maxHp: hp, alive: true, shakeT: 0,
+      body, collider, rect, range: 0, fireInterval: 1, reload: 0, aura: config.aura, arrow: TOWER_ARROW,
+    };
+    this.towers.push(this.questTree);
+  }
+
+  /** Every Quest stage entry, including retries, goes through the shared loading screen. */
+  private enterRound(data: BattleStartData) {
+    if (data.mode === 'quest') this.scene.start('Loading', structuredClone(data));
+    else this.scene.restart(data);
   }
 
   private restartRound() {
-    this.scene.restart({ slots: this.lobbySlots, mode: this.mode, mapId: this.mapChoice, quest: this.quest ?? undefined });
+    this.enterRound({ slots: this.lobbySlots, mode: this.mode, mapId: this.mapChoice, quest: this.quest ?? undefined });
   }
 
   private createQuestHud() {
@@ -1825,7 +2051,9 @@ export class BattleScene extends UIScene implements Arena {
       ? `${T().questStage(1)}  ${T().questWaveOf(this.wave, QUEST.waves)} · ${T().questLeft(left)}`
       : q.stage === 1
         ? `${T().questStage(2)}  ${T().questTowersLeft(this.towers.filter((tw) => tw.team === 1 && tw.alive).length)}`
-        : `${T().questStage(3)}  ${T().questBossHint}`;
+        : q.stage === QUEST.rescueStage
+          ? `${T().questStage(q.stage + 1)}  ${T().questRescueProgress(this.walls.filter((w) => w.rescued).length, this.walls.length)} · ${T().questLeft(left)} · ${T().questTreeState(!!this.questTree?.alive)}`
+          : `${T().questStage(q.stage + 1)}  ${T().questBossHint}`;
     if (this.questText && this.questText.text !== status) this.questText.setText(status);
     const boss = foes.find((f) => f.boss);
     if (boss && this.bossBar) {
@@ -1861,7 +2089,53 @@ export class BattleScene extends UIScene implements Arena {
       }
     } else if (q.stage === 1) {
       if (!this.towers.some((tw) => tw.team === 1 && tw.alive)) this.questClear();
+    } else if (q.stage === QUEST.rescueStage) {
+      if (this.walls.length === 2 && this.walls.every((w) => w.rescued) && this.questTree && !this.questTree.alive && !foes.some((f) => f.alive)) this.questClear();
     } else if (!foes.some((f) => f.boss && f.alive)) this.questClear();
+    else this.updateBossReinforcements(dt);
+  }
+
+  /** Preserve the initial party-scaled enemy count, preparing extra guards off-field for later summons. */
+  private prepareBossReserve(f: Fighter, partySize: number) {
+    if (this.quest?.stage !== QUEST.bossStage || f.index < QUEST.partySlots + 1 + Math.min(QUEST.boss.maxEnemies - 1, partySize)) return;
+    this.bossReserves.add(f);
+    f.hp = 0;
+    f.state = 'dead';
+    f.body.enable = false;
+  }
+
+  /** The boss trades its own HP for one guard, up to four living enemies including itself. */
+  private updateBossReinforcements(dt: number) {
+    if (this.quest?.stage !== QUEST.bossStage || this.over || this.paused || this.countdown > 0) return;
+    const boss = this.fighters.find((f) => f.boss && f.alive);
+    if (!boss) return;
+    const enemies = this.fighters.filter((f) => f.team === boss.team);
+    const fallen = enemies.filter((f) => !f.boss && !f.alive)
+      .sort((a, b) => Number(this.bossReserves.has(a)) - Number(this.bossReserves.has(b)) || (this.deathTime.get(a) ?? 0) - (this.deathTime.get(b) ?? 0));
+    if (!fallen.length || enemies.filter((f) => f.alive).length >= QUEST.boss.maxEnemies) {
+      this.bossRespawnT = QUEST.boss.respawnInterval;
+      return;
+    }
+    this.bossRespawnT = Math.max(0, this.bossRespawnT - dt);
+    if (this.bossRespawnT > 0) return;
+    const cost = Math.max(1, Math.round(boss.maxHp * QUEST.boss.respawnHpCost));
+    if (boss.hp <= cost) return;
+    const guard = fallen[0];
+    const spot = this.freeSpot({ x: boss.x - 80, y: boss.y + (guard.index % 2 ? -60 : 60) }, this.fighters.filter((f) => f.alive).map((f) => ({ x: f.x, y: f.y })));
+    boss.hp -= cost;
+    boss.flashT = 0.15;
+    guard.revive(spot.x, spot.y, guard.maxHp * TOWER_RESPAWN_HP);
+    guard.pocket.length = 0;
+    guard.selectedItem = 0;
+    guard.soul *= TOWER_RESPAWN_SOUL_KEEP;
+    this.bossReserves.delete(guard);
+    this.nameTags[guard.index]?.setVisible(true);
+    this.onRevived(guard);
+    this.popText(boss.x, boss.y - boss.radius - 16, `-${cost} HP`, '#ff8a8a');
+    this.showBanner(T().bossReinforcement, BOSS_COLOR);
+    this.fx.respawnBeam(boss.x, boss.y, spot.x, spot.y, BOSS_COLOR);
+    sfx.respawn();
+    this.bossRespawnT = QUEST.boss.respawnInterval;
   }
 
   /** Stage 1: the beaten enemies come back in as the next wave, from their side. */
@@ -1887,7 +2161,9 @@ export class BattleScene extends UIScene implements Arena {
   }
 
   private questClear() {
+    if (this.over) return;
     const q = this.quest!;
+    this.questTreeCast = null;
     if (q.stage >= QUEST.maps.length - 1) {
       this.endRound(undefined, T().questComplete, 0xf2c94c);
       return;
@@ -1905,7 +2181,7 @@ export class BattleScene extends UIScene implements Arena {
           const by = m.y + m.h - 50;
           addButton(this, m.content, m.nav, {
             id: 'next', x: WIDTH / 2 - 150, y: by, w: 240, h: 50, label: `${T().questNext}  ▶`, primary: true,
-            onPress: () => this.scene.restart({ slots: this.lobbySlots, mode: 'quest', quest: { stage: q.stage + 1, carry: this.questCarry() } }),
+            onPress: () => this.enterRound({ slots: this.lobbySlots, mode: 'quest', quest: { stage: q.stage + 1, carry: this.questCarry() } }),
           });
           addButton(this, m.content, m.nav, { id: 'lobby', x: WIDTH / 2 + 150, y: by, w: 200, h: 50, label: T().toLobby, onPress: () => this.scene.start('Lobby') });
         },
@@ -1920,16 +2196,20 @@ export class BattleScene extends UIScene implements Arena {
     this.time.delayedCall(1500, () => playMusic('defeat'));
     this.showEndBanner(T().questFailed, '#ff5a5a', () => {
       this.openModal({
-        w: 620, h: 280, title: T().questFailed, titleColor: '#ff7a7a', depth: 400, closable: false,
+        w: 900, h: 300, title: T().questFailed, titleColor: '#ff7a7a', depth: 400, closable: false,
         build: (m) => {
           m.content.add(txt(this, WIDTH / 2, m.y + 110, T().questFailedAt(q.stage + 1), 22, C.text, { title: true, bold: true, origin: 0.5 }));
           const by = m.y + m.h - 50;
-          addButton(this, m.content, m.nav, { id: 'retry', x: WIDTH / 2 - 200, y: by, w: 180, h: 50, label: T().questRetry, primary: true, onPress: () => this.restartRound() });
           addButton(this, m.content, m.nav, {
-            id: 'over', x: WIDTH / 2, y: by, w: 180, h: 50, label: T().questRestart,
-            onPress: () => this.scene.restart({ slots: this.lobbySlots, mode: 'quest' }),
+            id: 'edit', x: WIDTH / 2 - 315, y: by, w: 190, h: 50, label: T().questEdit, primary: true, size: 17,
+            onPress: () => this.scene.start('Lobby', { retryQuest: structuredClone(q), slots: structuredClone(this.lobbySlots) }),
           });
-          addButton(this, m.content, m.nav, { id: 'lobby', x: WIDTH / 2 + 200, y: by, w: 180, h: 50, label: T().toLobby, onPress: () => this.scene.start('Lobby') });
+          addButton(this, m.content, m.nav, { id: 'retry', x: WIDTH / 2 - 105, y: by, w: 190, h: 50, label: T().questRetry, size: 17, onPress: () => this.restartRound() });
+          addButton(this, m.content, m.nav, {
+            id: 'over', x: WIDTH / 2 + 105, y: by, w: 190, h: 50, label: T().questRestart, size: 17,
+            onPress: () => this.enterRound({ slots: this.lobbySlots, mode: 'quest' }),
+          });
+          addButton(this, m.content, m.nav, { id: 'lobby', x: WIDTH / 2 + 315, y: by, w: 190, h: 50, label: T().toLobby, size: 17, onPress: () => this.scene.start('Lobby') });
         },
       });
     });
@@ -1973,6 +2253,10 @@ export class BattleScene extends UIScene implements Arena {
   }
 
   private renderTower(g: Phaser.GameObjects.Graphics, over: Phaser.GameObjects.Graphics, tw: Tower, now: number) {
+    if (tw.tree) {
+      this.renderTreeTower(g, over, tw, now);
+      return;
+    }
     const color = TEAM_COLORS[tw.team];
     if (!tw.alive) {
       // Rubble where it stood.
@@ -2008,6 +2292,40 @@ export class BattleScene extends UIScene implements Arena {
     const bw = tw.w + 10;
     over.fillStyle(0x000000, 0.65).fillRect(x - bw / 2 - 1, tw.y - h - 14, bw + 2, 7);
     over.fillStyle(color, 1).fillRect(x - bw / 2, tw.y - h - 13, bw * (tw.hp / tw.maxHp), 5);
+  }
+
+  private renderTreeTower(g: Phaser.GameObjects.Graphics, over: Phaser.GameObjects.Graphics, tree: Tower, now: number) {
+    const x = tree.x + (tree.shakeT > 0 ? Math.sin(now * 80) * 3 : 0), y = tree.y;
+    if (!tree.alive) {
+      g.fillStyle(0x24231f, 1).fillEllipse(x, y, 72 * S, 54 * S);
+      g.lineStyle(5, 0x514536, 1).lineBetween(x - 38 * S, y + 12 * S, x + 26 * S, y - 18 * S);
+      g.fillStyle(0x695442, 1).fillEllipse(x, y, 34 * S, 26 * S);
+      return;
+    }
+    const pulse = 0.5 + 0.5 * Math.sin(now * 2);
+    g.fillStyle(0x945bc2, 0.04 + pulse * 0.03).fillCircle(x, y, tree.aura);
+    g.lineStyle(1, 0x9b78af, 0.2).strokeCircle(x, y, tree.aura);
+    for (let k = 0; k < 11; k++) {
+      const a = k * Math.PI * 2 / 11;
+      const length = (58 + (k % 3) * 10) * S;
+      const ex = x + Math.cos(a) * length, ey = y + Math.sin(a) * length;
+      const limb = Array.from({ length: 9 }, (_, n) => {
+        const t = n / 8, u = 1 - t;
+        return { x: u * u * x + 2 * u * t * (ex + 15 * S) + t * t * ex,
+          y: u * u * y + 2 * u * t * (y + Math.sin(a) * 20 * S) + t * t * ey };
+      });
+      g.lineStyle(9 * S, 0x554631, 1).strokePoints(limb as Phaser.Math.Vector2[], false);
+      g.lineStyle(1.5 * S, 0x9b78af, 0.8).strokePoints(limb as Phaser.Math.Vector2[], false);
+      const fork = limb[5], side = a + (k % 2 ? 0.65 : -0.65);
+      g.lineStyle(4 * S, 0x554631, 1).lineBetween(fork.x, fork.y, fork.x + Math.cos(side) * 28 * S, fork.y + Math.sin(side) * 28 * S);
+    }
+    over.fillStyle(0x5a4534, 1).fillEllipse(x, y, 58 * S, 76 * S);
+    over.lineStyle(2, 0x9b78af, 1).strokeEllipse(x, y, 58 * S, 76 * S);
+    over.lineStyle(2 * S, 0x382e27, 0.8).lineBetween(x - 8 * S, y + 10 * S, x - 4 * S, y + 30 * S).lineBetween(x + 11 * S, y + 13 * S, x + 8 * S, y + 33 * S);
+    over.fillStyle(0xcf95ff, 0.7 + pulse * 0.3).fillEllipse(x - 11 * S, y - 6 * S, 8 * S, 14 * S).fillEllipse(x + 11 * S, y - 6 * S, 8 * S, 14 * S);
+    const bw = tree.w + 20;
+    over.fillStyle(0x080b10, 0.9).fillRoundedRect(x - bw / 2, y - tree.h / 2 - 19, bw, 9, 3);
+    over.fillStyle(0xb57bff, 1).fillRoundedRect(x - bw / 2 + 1, y - tree.h / 2 - 18, (bw - 2) * Math.max(0, tree.hp / tree.maxHp), 7, 2);
   }
 
   // ---------- treasure chests ----------
@@ -2124,6 +2442,15 @@ export class BattleScene extends UIScene implements Arena {
 
   // ---------- Save the Princess ----------
 
+  private configurePrincessWalls() {
+    for (const wall of this.walls) {
+      const members = this.fighters.filter((f) => f.team === wall.team).length;
+      wall.maxHp = wall.hp = this.quest?.stage === QUEST.rescueStage
+        ? QUEST.rescue.wallBase + QUEST.rescue.wallPerPlayer * members
+        : PRINCESS_WALL_HP * Math.max(1, members) / 2;
+    }
+  }
+
   private makeWall(o: Obstacle): PrincessWall {
     // Fixed crack pattern, spread around the wall ring.
     const rand = new Phaser.Math.RandomDataGenerator(['princess-wall']);
@@ -2141,12 +2468,17 @@ export class BattleScene extends UIScene implements Arena {
       }
       cracks.push(line);
     }
-    return { o, team: o.team ?? 0, hp: PRINCESS_WALL_HP, maxHp: PRINCESS_WALL_HP, lastHitter: null, shakeT: 0, cracks };
+    return { o, team: o.team ?? 0, hp: PRINCESS_WALL_HP, maxHp: PRINCESS_WALL_HP, lastHitter: null, shakeT: 0, rescued: false, cracks };
   }
 
   private showPrincessIntro() {
+    this.princessText = this.add.text(WIDTH / 2, HUD_HEIGHT + 12, '', {
+      fontFamily: FONT, resolution: RES, fontSize: '17px', fontStyle: 'bold', color: '#ffd6ea',
+      backgroundColor: '#141821', padding: { x: 12, y: 4 },
+    }).setOrigin(0.5).setDepth(15);
+    this.updatePrincessProgress();
     const banner = this.add
-      .text(WIDTH / 2, SCREEN_ARENA.y + 30, T().princessGoal, { fontFamily: FONT, resolution: RES, fontSize: '26px', fontStyle: 'bold', color: '#ffd6ea', stroke: '#000000', strokeThickness: 5 })
+      .text(WIDTH / 2, SCREEN_ARENA.y + 30, this.quest ? T().questRescueGoal : T().princessGoal, { fontFamily: FONT, resolution: RES, fontSize: '26px', fontStyle: 'bold', color: '#ffd6ea', stroke: '#000000', strokeThickness: 5 })
       .setOrigin(0.5)
       .setDepth(15);
     this.tweens.add({ targets: banner, alpha: 0, delay: 2600, duration: 800, onComplete: () => banner.destroy() });
@@ -2160,6 +2492,17 @@ export class BattleScene extends UIScene implements Arena {
       this.tweens.add({ targets: t, y: t.y - 5, yoyo: true, repeat: -1, duration: 600, ease: 'Sine.easeInOut' });
       return t;
     });
+  }
+
+  private updatePrincessProgress() {
+    if (this.quest) {
+      this.princessText?.setText(T().questRescueProgress(this.walls.filter((w) => w.rescued).length, this.walls.length));
+      return;
+    }
+    this.princessText?.setText([0, 1].map((team) => {
+      const walls = this.walls.filter((w) => w.team === team);
+      return T().princessProgress(T().teamNames[team], walls.filter((w) => w.rescued).length, walls.length);
+    }).join('   ·   '));
   }
 
   findReviveTarget(f: Fighter): Fighter | null {
@@ -2208,9 +2551,11 @@ export class BattleScene extends UIScene implements Arena {
       for (const f of this.fighters) {
         if (!f.alive || f.team === c.team || Math.hypot(f.x - c.x, f.y - c.y) >= c.r) continue;
         const before = f.hp;
+        const taken = f.stats.taken;
         f.takeChip(c.dps * 0.5);
-        c.owner.addSoul(before - f.hp);
-        this.stats[c.owner.index].dealt += before - f.hp;
+        const actual = f.stats.taken - taken;
+        c.owner.addSoul(actual);
+        this.stats[c.owner.index].dealt += actual;
         if (before > 0 && !f.alive) this.stats[c.owner.index].kos++;
       }
     }
@@ -2344,9 +2689,12 @@ export class BattleScene extends UIScene implements Arena {
    */
   private updateTeamRespawns(dt: number) {
     this.elapsed += dt;
-    const wait = Math.min(TEAM_RESPAWN.max, TEAM_RESPAWN.base + this.elapsed * TEAM_RESPAWN.growthPerSec);
+    const baseWait = Math.min(TEAM_RESPAWN.max, TEAM_RESPAWN.base + this.elapsed * TEAM_RESPAWN.growthPerSec);
     for (const f of this.fighters) if (!f.alive && !this.deathTime.has(f)) this.deathTime.set(f, this.elapsed);
     for (const team of [0, 1]) {
+      // Quest enemy towers and the prison tree are slow to bring their fallen back.
+      const questEnemyRespawn = (this.quest?.stage === 1 || this.quest?.stage === QUEST.rescueStage) && team === 1;
+      const wait = questEnemyRespawn ? baseWait * QUEST.towerRespawnFactor : baseWait;
       const dead = this.fighters
         .filter((f) => !f.alive && f.team === team)
         .sort((a, b) => (this.deathTime.get(a) ?? 0) - (this.deathTime.get(b) ?? 0));
@@ -2374,11 +2722,15 @@ export class BattleScene extends UIScene implements Arena {
       f.soul *= TOWER_RESPAWN_SOUL_KEEP;
       sfx.respawn();
       // Bringing someone back costs the tower some of its HP.
-      const cost = Math.min(home.hp - 1, home.maxHp * RESPAWN_TOWER_COST);
+      // Quest guards consume their tower's remaining HP too: repeated defeats can exhaust it.
+      const cost = Math.min(questEnemyRespawn ? home.hp : home.hp - 1, home.maxHp * RESPAWN_TOWER_COST);
       if (cost > 0) {
-        home.hp -= cost;
-        home.shakeT = 0.15;
-        this.popText(home.x, home.y - home.h / 2 - 12, `-${Math.round(cost)}`, '#9fd8ff');
+        if (questEnemyRespawn) this.damageTower(home, cost, undefined);
+        else {
+          home.hp -= cost;
+          home.shakeT = 0.15;
+          this.popText(home.x, home.y - home.h / 2 - 12, `-${Math.round(cost)}`, '#9fd8ff');
+        }
       }
       this.fx.respawnBeam(home.x, home.y, spot.x, spot.y, TEAM_COLORS[team]);
       this.teamRespawnT[team] = dead.length > 1 ? wait : -1;
@@ -2387,7 +2739,17 @@ export class BattleScene extends UIScene implements Arena {
 
 
   private breakWall(wall: PrincessWall) {
-    this.world.objectives = [];
+    if (wall.rescued || this.over) return;
+    wall.hp = 0;
+    wall.rescued = true;
+    this.world.objectives = this.walls.filter((w) => !w.rescued).map((w) => ({ team: w.team, x: w.o.x, y: w.o.y, w: w.o.w, h: w.o.h }));
+    // A rescued enclosure stops blocking movement, projectiles and future spawn placement.
+    wall.body?.destroy();
+    if (wall.rect) {
+      this.obstacleRects = this.obstacleRects.filter((r) => r !== wall.rect);
+      this.shotBlockers = this.shotBlockers.filter((r) => r !== wall.rect);
+    }
+    this.updatePrincessProgress();
     sfx.wallBreak();
     const o = wall.o;
     this.helpTexts[this.walls.indexOf(wall)]?.destroy();
@@ -2421,7 +2783,16 @@ export class BattleScene extends UIScene implements Arena {
         duration: 1400,
       });
     }
-    this.endRound(wall.lastHitter ?? undefined, T().rescued(T().teamNames[wall.team]), TEAM_COLORS[wall.team]);
+    const teamWalls = this.walls.filter((w) => w.team === wall.team);
+    if (teamWalls.every((w) => w.rescued)) {
+      if (this.quest?.stage === QUEST.rescueStage) {
+        if (this.questTree && !this.questTree.alive && !this.fighters.some((f) => f.team === 1 && f.alive)) this.questClear();
+        else this.showBanner(T().questRescuedFight, TEAM_COLORS[wall.team]);
+      }
+      else this.endRound(wall.lastHitter ?? undefined, T().rescued(T().teamNames[wall.team]), TEAM_COLORS[wall.team]);
+    } else {
+      this.showBanner(T().princessProgress(T().teamNames[wall.team], teamWalls.filter((w) => w.rescued).length, teamWalls.length), TEAM_COLORS[wall.team]);
+    }
   }
 
   private renderWallAndPrincess(g: Phaser.GameObjects.Graphics, wall: PrincessWall) {
@@ -2431,7 +2802,7 @@ export class BattleScene extends UIScene implements Arena {
     const sy = wall.shakeT > 0 ? Phaser.Math.Between(-2, 2) : 0;
     const l = o.x - o.w / 2 + sx;
     const t = o.y - o.h / 2 + sy;
-    const th = 26; // thick brick walls
+    const th = this.quest?.stage === QUEST.rescueStage ? 50 : 38;
 
     if (!broken) {
       // Shadow, inner floor, then the brick ring.
@@ -2581,12 +2952,16 @@ export class BattleScene extends UIScene implements Arena {
       case 'ninjato':
         if (s.kind === 'rect') this.fx.lungeSlash(() => ({ x: f.x, y: f.y }), f.facing, s.offset + s.length, s.width);
         break;
+      case 'yari':
+        if (s.kind === 'rect') this.fx.spearThrust(f.x, f.y, f.facing, s.offset, s.length, s.width, f.color);
+        break;
       case 'talisman':
         if (s.kind === 'cross') this.fx.lightningCross(f.x, f.y, f.facing, s.arm, s.width);
         sfx.thunder();
         break;
       case 'staff':
         if (s.kind === 'twin') this.fx.staffSweep(() => ({ x: f.x, y: f.y }), f.facing, s.length, s.width);
+        sfx.iceStaff();
         break;
       case 'kunai':
         if (s.kind === 'rays') this.fx.kunaiVolley(f.x, f.y, rayAngles(s, f.facing), s.offset, s.offset + s.length, f.color);
@@ -2650,6 +3025,7 @@ export class BattleScene extends UIScene implements Arena {
     this.renderBarrier(now);
     this.renderPads(now);
     this.renderAltar(now);
+    this.renderQuestTree(now);
     for (const c of this.caltrops) {
       // Fade in quickly, fade out over the last second.
       const a = Math.min(1, c.t * 6, c.life - c.t);
@@ -2680,6 +3056,11 @@ export class BattleScene extends UIScene implements Arena {
     for (const f of this.fighters) {
       const sprite = this.sprites[f.index];
       const tag = this.nameTags[f.index];
+      if (this.bossReserves.has(f)) {
+        sprite.setVisible(false);
+        tag.setVisible(false);
+        continue;
+      }
       const respawn = this.respawnTimers.get(f);
       const respawnText = f.paralyzed ? T().paralyzedTag : respawn === undefined ? '' : respawn === Infinity ? T().waitingRespawn : T().respawning(Math.ceil(respawn));
       tag.setText(respawnText ? `${this.tagTexts[f.index]}  ${respawnText}` : this.tagTexts[f.index]);
@@ -2736,6 +3117,7 @@ export class BattleScene extends UIScene implements Arena {
       const stunned = f.state === 'stun';
       sprite.setAlpha(stunned && Math.floor(now * 20) % 2 === 0 ? 0.55 : 1);
       if (f.flashT > 0) sprite.setTint(0xffffff).setTintMode(Phaser.TintModes.FILL);
+      else if (f.chillT > 0) sprite.setTint(0xa8dcff).setTintMode(Phaser.TintModes.MULTIPLY);
       else if (f.paralyzed) sprite.setTint(0x9fc0ff).setTintMode(Phaser.TintModes.MULTIPLY);
       else sprite.clearTint().setTintMode(Phaser.TintModes.MULTIPLY);
       const summon = f.summoning;
@@ -2844,7 +3226,7 @@ export class BattleScene extends UIScene implements Arena {
   }
 
   // HUD: a compact panel per player slot, in two rows of four across the top.
-  private static readonly HUD = { cols: 4, pad: 8, barW: 122, skillX: 140, skill: 22, skillGap: 3, pocketX: 226, pocket: 20, pocketGap: 3 };
+  private static readonly HUD = { cols: 4, pad: 42, barW: 88, skillX: 140, skill: 22, skillGap: 3, pocketX: 226, pocket: 20, pocketGap: 3 };
 
   private hudPanel(i: number) {
     const L = BattleScene.HUD;
@@ -2888,13 +3270,18 @@ export class BattleScene extends UIScene implements Arena {
     h.fillStyle(0x0d0f14, 1).fillRect(0, 0, WIDTH, HUD_HEIGHT);
     for (let i = 0; i < this.slots.length; i++) {
       const { x0, y0, pw, ph } = this.hudPanel(i);
-      if (i % L.cols > 0) h.lineStyle(1, 0x2a2f3c, 1).lineBetween(x0, y0 + 4, x0, y0 + ph - 4);
-      if (y0 > 0 && i % L.cols === 0) h.lineStyle(1, 0x2a2f3c, 1).lineBetween(6, y0, WIDTH - 6, y0);
       const f = this.fighters.find((ff) => ff.index === i);
+      h.fillStyle(f ? 0x151e2b : 0x101722, 1).fillRoundedRect(x0 + 3, y0 + 2, pw - 6, ph - 4, 5);
+      h.lineStyle(1, f?.color ?? 0x344052, f ? 0.2 : 0.12).strokeRoundedRect(x0 + 3, y0 + 2, pw - 6, ph - 4, 5);
       if (!f) continue;
       const alpha = f.alive ? 1 : 0.35;
+      h.fillStyle(f.color, alpha * 0.65).fillRoundedRect(x0 + 3, y0 + 9, 2, ph - 18, 1);
       // Team tint behind the panel in team modes.
-      if (this.mode !== 'ffa') h.fillStyle(TEAM_COLORS[f.team], 0.08).fillRect(x0 + 1, y0 + 1, pw - 2, ph - 2);
+      if (this.mode !== 'ffa') h.fillStyle(TEAM_COLORS[f.team], 0.035).fillRoundedRect(x0 + 4, y0 + 3, pw - 8, ph - 6, 4);
+      // Use the same weapon artwork as the loadout screen, with room beside the bars.
+      h.fillStyle(0x1b2030, 1).fillRoundedRect(x0 + 6, y0 + 6, 30, 34, 5);
+      h.lineStyle(1, f.color, alpha).strokeRoundedRect(x0 + 6, y0 + 6, 30, 34, 5);
+      drawWeaponIcon(this.hudIcons, f.weapon.id, x0 + 21, y0 + 23, 25, f.color);
       // HP and PE (體力) bars.
       h.fillStyle(0x2a1416, 1).fillRect(x0 + L.pad, y0 + 18, L.barW, 9);
       h.fillStyle(0xe5484d, alpha).fillRect(x0 + L.pad, y0 + 18, L.barW * (f.hp / f.maxHp), 9);
@@ -2915,7 +3302,7 @@ export class BattleScene extends UIScene implements Arena {
         const affordable = f.pe >= s.peCost;
         h.fillStyle(ready && affordable ? 0x2f3a52 : 0x1b2030, alpha).fillRect(bx, by, sz, sz);
         if (!ready) {
-          const frac = f.cooldowns[k] / s.cooldown;
+          const frac = f.cooldowns[k] / skillCooldownFor(s, f.role);
           h.fillStyle(0x000000, 0.6).fillRect(bx, by + sz * (1 - frac), sz, sz * frac);
         }
         h.lineStyle(1, ready ? f.color : 0x3a4152, alpha).strokeRect(bx, by, sz, sz);
@@ -2947,6 +3334,7 @@ export class BattleScene extends UIScene implements Arena {
 
   private endRound(winner: Fighter | undefined, message?: string, messageColor?: number) {
     this.over = true;
+    this.winningTeam = winner?.team ?? (this.quest ? 0 : null);
     // Let the final hit / wall crash ring out before the fanfare.
     this.time.delayedCall(message ? 700 : 350, () => sfx.win());
     // Someone always wins a versus round; only a draw gets the sad music.

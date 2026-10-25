@@ -1,8 +1,10 @@
 import * as Phaser from 'phaser';
 import { musicState } from './music';
+import { initJoyConHid } from './joyhid';
 import { HEIGHT, RES, WIDTH } from './config';
 import { BattleScene } from './scenes/BattleScene';
 import { LobbyScene } from './scenes/LobbyScene';
+import { LoadingScene } from './scenes/LoadingScene';
 import { MapScene } from './scenes/MapScene';
 import { PadScene } from './scenes/PadScene';
 import { ModeScene } from './scenes/ModeScene';
@@ -17,8 +19,10 @@ const game = new Phaser.Game({
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
   physics: { default: 'arcade', arcade: { debug: false } },
   input: { gamepad: true },
-  scene: [TitleScene, ModeScene, MapScene, LobbyScene, BattleScene, PadScene],
+  scene: [TitleScene, ModeScene, MapScene, LobbyScene, LoadingScene, BattleScene, PadScene],
 });
+
+initJoyConHid();
 
 // Handy for poking at state from the browser console during development.
 if (import.meta.env.DEV) Object.assign(window, { game, musicState });

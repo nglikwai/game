@@ -18,7 +18,7 @@ export type Shape =
   /** `count` thin rays fanning out `spread` apart, from `offset` out to `offset + length`. */
   | { kind: 'rays'; offset: number; length: number; width: number; spread: number; count: number };
 
-export type WeaponId = 'fan' | 'shuriken' | 'hammer' | 'daggers' | 'flail' | 'kusarigama' | 'bomb' | 'ninjato' | 'talisman' | 'staff' | 'kunai';
+export type WeaponId = 'fan' | 'shuriken' | 'hammer' | 'daggers' | 'flail' | 'kusarigama' | 'bomb' | 'ninjato' | 'talisman' | 'staff' | 'kunai' | 'yari';
 
 export interface Weapon {
   id: WeaponId;
@@ -39,17 +39,17 @@ export interface Weapon {
 
 const A = WEAPON_AREA;
 
-// Each shape fixes one free dimension and solves the other so area === WEAPON_AREA.
+// Shapes use WEAPON_AREA as their baseline; individual weapons can have an area bonus.
 const sector = (angleDeg: number): Shape => {
   const angle = (angleDeg * Math.PI) / 180;
   return { kind: 'sector', angle, radius: Math.sqrt((2 * A) / angle) };
 };
-const rect = (width: number, offset: number): Shape => ({ kind: 'rect', width, offset, length: A / width });
+const rect = (width: number, offset: number, areaScale = 1): Shape => ({ kind: 'rect', width, offset, length: A * areaScale / width });
 const circle = (gap: number): Shape => {
   const radius = Math.sqrt(A / Math.PI);
   return { kind: 'circle', radius, offset: BODY_RADIUS + gap + radius };
 };
-const ring = (inner: number): Shape => ({ kind: 'ring', inner, outer: Math.sqrt(A / Math.PI + inner * inner) });
+const ring = (inner: number, areaScale = 1): Shape => ({ kind: 'ring', inner, outer: Math.sqrt(A * areaScale / Math.PI + inner * inner) });
 const cross = (width: number): Shape => ({ kind: 'cross', width, arm: (A + width * width) / (4 * width) });
 const arc = (inner: number, angleDeg: number): Shape => {
   const angle = (angleDeg * Math.PI) / 180;
@@ -75,12 +75,12 @@ function make(id: WeaponId, name: string, zh: string, shape: Shape, cycle: numbe
 
 export const WEAPONS: Weapon[] = [
   // Fan-shaped flame sweep.
-  make('fan', 'Fire Fan', '火扇', sector(110), 0.55),
-  // A shuriken streaking down a long, narrow line.
-  make('shuriken', 'Shuriken', '手裡劍', rect(32, BODY_RADIUS), 0.8),
+  make('fan', 'Fire Fan', '火扇', sector(110), 0.5),
+  // Larger stars cover a wider lane while keeping their existing throwing distance.
+  make('shuriken', 'Shuriken', '手裡劍', rect(40, BODY_RADIUS, 1.25), 0.5),
   make('hammer', 'Hammer', '大錘', circle(-10), 1.1),
   make('daggers', 'Daggers', '雙匕', rect(110, 6), 0.32),
-  make('flail', 'Flail', '流星錘', ring(36), 0.85),
+  make('flail', 'Flail', '流星錘', ring(36, 1.15), 0.85),
   // Sickle on a chain: a curved band at mid range, with a blind spot up close.
   make('kusarigama', 'Kusarigama', '鎖鐮', arc(60, 130), 0.7),
   // Thrown bomb: the same circle as the hammer, but landing far away. Slowest, hardest-hitting.
@@ -89,10 +89,12 @@ export const WEAPONS: Weapon[] = [
   { ...make('ninjato', 'Ninjato', '忍刀', rect(56, 10), 0.6), lunge: 850 },
   // Lightning strikes in a cross around you, all four directions at once.
   make('talisman', 'Thunder Talisman', '雷符', cross(34), 0.9),
-  // A staff swung through both ends at once: hits in front and behind.
-  make('staff', 'Bō Staff', '棍', twin(40), 0.65),
+  // An icy staff swung through both ends at once: hits in front and behind, leaving frost.
+  make('staff', 'Ice Staff', '冰棍', twin(40), 0.65),
   // Three kunai thrown in a fan: long reach, but with gaps between them.
-  make('kunai', 'Kunai Volley', '苦無', rays(17, 20), 0.75),
+  make('kunai', 'Kunai Volley', '苦無', rays(21, 20), 0.75),
+  // A precise polearm thrust: longer and narrower than the shuriken, without a lunge.
+  make('yari', 'Yari Spear', '長槍', rect(28, BODY_RADIUS - 4), 0.9),
 ];
 
 export function shapeArea(s: Shape): number {

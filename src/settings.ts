@@ -1,5 +1,6 @@
 import { GAME_MODES, MAX_HUMANS, MAX_PLAYERS, QUEST, type GameMode } from './config';
 import { KEY_SETS, isKeySet, keyLabel, parsePad, type Binds, type ControlId } from './controls';
+import { DIFFICULTIES, type Difficulty } from './config';
 import { T } from './i18n';
 import { MAPS, type MapId } from './maps';
 import type { RoleId } from './roles';
@@ -22,12 +23,15 @@ export interface GameSettings {
   mode: GameMode;
   /** A map, or 'random' for a different one every round. */
   mapId: MapId | 'random';
+  /** How clever the CPU fighters are. */
+  difficulty: Difficulty;
   slots: SlotConfig[];
 }
 
 const SLOTS_KEY = 'arena-duel-slots';
 const MODE_KEY = 'arena-duel-mode';
 const MAP_KEY = 'arena-duel-map';
+const DIFFICULTY_KEY = 'arena-duel-difficulty';
 
 const DEFAULT_SLOTS: SlotConfig[] = [
   { control: 'kb1', weapon: 0, skills: ['meditate', 'arrow', 'blink'], binds: [...KEY_SETS.kb1.defaultBinds], team: 0, role: 'ronin' },
@@ -90,11 +94,21 @@ function loadMap(): MapId | 'random' {
   return 'courtyard';
 }
 
+function loadDifficulty(): Difficulty {
+  try {
+    const d = localStorage.getItem(DIFFICULTY_KEY) as Difficulty | null;
+    if (d && DIFFICULTIES.includes(d)) return d;
+  } catch {
+    // Fall through to the default.
+  }
+  return 'standard';
+}
+
 let settings: GameSettings | null = null;
 
 /** The shared, mutable settings object. Call saveSettings() after changing it. */
 export function getSettings(): GameSettings {
-  settings ??= { mode: loadMode(), mapId: loadMap(), slots: loadSlots() };
+  settings ??= { mode: loadMode(), mapId: loadMap(), difficulty: loadDifficulty(), slots: loadSlots() };
   return settings;
 }
 
@@ -104,6 +118,7 @@ export function saveSettings() {
     localStorage.setItem(SLOTS_KEY, JSON.stringify(settings.slots));
     localStorage.setItem(MODE_KEY, settings.mode);
     localStorage.setItem(MAP_KEY, settings.mapId);
+    localStorage.setItem(DIFFICULTY_KEY, settings.difficulty);
   } catch {
     // Not critical; settings just won't survive a reload.
   }
@@ -111,6 +126,21 @@ export function saveSettings() {
 
 /** Modes where players pick a team in the lobby (in Quest everyone in P1–P4 is on the same side). */
 export const usesTeams = (mode: GameMode) => mode !== 'ffa' && mode !== 'quest';
+
+/**
+ * Deal everyone who is playing into two teams at random, as evenly as possible (with an odd number,
+ * either team may get the extra player). Slots that are off keep their team.
+ */
+export function randomizeTeams(slots: SlotConfig[]) {
+  const playing = slots.map((s, i) => (s.control === 'off' ? -1 : i)).filter((i) => i >= 0);
+  for (let i = playing.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [playing[i], playing[j]] = [playing[j], playing[i]];
+  }
+  const half = playing.length / 2;
+  const redCount = Number.isInteger(half) ? half : Math.random() < 0.5 ? Math.ceil(half) : Math.floor(half);
+  playing.forEach((slot, n) => (slots[slot].team = n < redCount ? 0 : 1));
+}
 
 /** Every key a keyboard slot listens to: its movement keys plus its binds. */
 export function keysOf(slot: SlotConfig): number[] {

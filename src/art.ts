@@ -177,6 +177,25 @@ export function kunai(g: Phaser.GameObjects.Graphics, x: number, y: number, angl
   g.lineStyle(1, 0x5d6370, 1).lineBetween(at(0, 0).x, at(0, 0).y, at(len, 0).x, at(len, 0).y);
 }
 
+/** A lacquered polearm with a leaf-shaped steel head and a red tassel. */
+function spear(g: Phaser.GameObjects.Graphics, x: number, y: number, angle: number, length: number, color: number) {
+  const c = Math.cos(angle), s = Math.sin(angle);
+  const at = (f: number, side = 0) => ({ x: x + (c * f - s * side) * length, y: y + (s * f + c * side) * length });
+  const rear = at(-0.5), neck = at(0.23), tip = at(0.5);
+  g.lineStyle(length * 0.055, 0x67452e, 1).lineBetween(rear.x, rear.y, neck.x, neck.y);
+  g.lineStyle(length * 0.018, 0xc39864, 1).lineBetween(rear.x, rear.y, neck.x, neck.y);
+  const blade = [neck, at(0.31, 0.065), tip, at(0.31, -0.065)];
+  g.fillStyle(0xdce6ee, 1).fillPoints(blade as Phaser.Math.Vector2[], true);
+  g.lineStyle(length * 0.014, 0x536579, 1).strokePoints(blade as Phaser.Math.Vector2[], true);
+  g.lineStyle(length * 0.014, 0xffffff, 0.9).lineBetween(neck.x, neck.y, tip.x, tip.y);
+  const wrap = at(0.19);
+  g.fillStyle(color, 1).fillCircle(wrap.x, wrap.y, length * 0.035);
+  for (const side of [-1, 1]) {
+    const tassel = [at(0.2), at(0.02, side * 0.12), at(0.09, side * 0.025)];
+    g.fillStyle(0xb8383e, 1).fillPoints(tassel as Phaser.Math.Vector2[], true);
+  }
+}
+
 /** The weapon in the ninja's hands, posed for the current swing phase. */
 export function drawHeldWeapon(g: Phaser.GameObjects.Graphics, id: WeaponId, p: Pose) {
   const wind = windAmount(p);
@@ -217,7 +236,7 @@ export function drawHeldWeapon(g: Phaser.GameObjects.Graphics, id: WeaponId, p: 
       const hx = p.phase === 'strike' ? lerp(17, 9, p.t) : lerp(9, -3, wind);
       const hy = p.phase === 'strike' ? lerp(5, 11, p.t) : lerp(11, 15, wind);
       const h = hand(g, p, hx, hy);
-      if (!thrown) drawShurikenStar(g, h.x + Math.cos(p.facing) * 3, h.y + Math.sin(p.facing) * 3, 5.5, p.time * (p.phase === 'windup' ? 14 : 2));
+      if (!thrown) drawShurikenStar(g, h.x + Math.cos(p.facing) * 3, h.y + Math.sin(p.facing) * 3, 8, p.time * (p.phase === 'windup' ? 14 : 2));
       hand(g, p, 7, -10);
       break;
     }
@@ -290,6 +309,16 @@ export function drawHeldWeapon(g: Phaser.GameObjects.Graphics, id: WeaponId, p: 
       hand(g, p, lerp(6, 12, strike), lerp(-8, 0, strike));
       break;
     }
+    case 'yari': {
+      // Pull the shaft back with both hands, then drive it straight forward.
+      const thrust = p.phase === 'strike' ? Math.max(0, 1 - p.t * 1.6) : 0;
+      const shift = -wind * 10 + thrust * 20;
+      const centre = toWorld(p, 17 + shift, 7 * (1 - thrust));
+      spear(g, centre.x, centre.y, p.facing + 0.08 * (1 - thrust), 72, p.color);
+      hand(g, p, 11 + shift * 0.5, 5);
+      hand(g, p, -5 + shift * 0.5, -3);
+      break;
+    }
     case 'staff': {
       // Held across the body in both hands; twirled through the windup, then whipped round on the strike.
       let ang = Math.PI / 2;
@@ -300,10 +329,11 @@ export function drawHeldWeapon(g: Phaser.GameObjects.Graphics, id: WeaponId, p: 
       const half = 26;
       const e1 = { x: c.x + Math.cos(a) * half, y: c.y + Math.sin(a) * half };
       const e2 = { x: c.x - Math.cos(a) * half, y: c.y - Math.sin(a) * half };
-      g.lineStyle(4, 0x7a5030, 1).lineBetween(e1.x, e1.y, e2.x, e2.y);
-      // Iron-shod ends.
-      g.fillStyle(0x6a707c, 1).fillCircle(e1.x, e1.y, 2.6).fillCircle(e2.x, e2.y, 2.6);
-      g.fillStyle(0xf2c94c, 1).fillCircle(c.x + Math.cos(a) * 8, c.y + Math.sin(a) * 8, 1.6).fillCircle(c.x - Math.cos(a) * 8, c.y - Math.sin(a) * 8, 1.6);
+      // A pale blue bar of ice with a bright core, crystal tips and a frosty shimmer.
+      g.lineStyle(5, 0x7cc8ee, 1).lineBetween(e1.x, e1.y, e2.x, e2.y);
+      g.lineStyle(2, 0xeaf9ff, 1).lineBetween(e1.x, e1.y, e2.x, e2.y);
+      for (const e of [e1, e2]) iceCrystal(g, e.x, e.y, a + (e === e1 ? 0 : Math.PI), 4);
+      g.fillStyle(0xffffff, 1).fillCircle(c.x + Math.cos(a) * 8, c.y + Math.sin(a) * 8, 1.4).fillCircle(c.x - Math.cos(a) * 8, c.y - Math.sin(a) * 8, 1.4);
       g.fillStyle(0xf1c9a0, 1).fillCircle(c.x + Math.cos(a) * 6, c.y + Math.sin(a) * 6, 3.2).fillCircle(c.x - Math.cos(a) * 6, c.y - Math.sin(a) * 6, 3.2);
       break;
     }
@@ -432,7 +462,7 @@ export function drawWeaponIcon(g: Phaser.GameObjects.Graphics, id: WeaponId, x: 
       break;
     }
     case 'shuriken':
-      drawShurikenStar(g, x, y, 17 * s, 0.3);
+      drawShurikenStar(g, x, y, 20 * s, 0.3);
       break;
     case 'hammer': {
       g.lineStyle(5 * s, 0x5a3a1e, 1).lineBetween(x - 14 * s, y + 14 * s, x + 6 * s, y - 6 * s);
@@ -461,14 +491,19 @@ export function drawWeaponIcon(g: Phaser.GameObjects.Graphics, id: WeaponId, x: 
     case 'ninjato':
       ninjato(g, x - 14 * s, y + 14 * s, -Math.PI / 4, 34 * s);
       break;
+    case 'yari':
+      spear(g, x, y, -Math.PI / 4, 42 * s, color);
+      break;
     case 'talisman':
       talismanPaper(g, x - 7 * s, y + 13 * s, -Math.PI / 2, 26 * s, 1);
       break;
     case 'staff': {
       const a = -Math.PI / 4;
-      g.lineStyle(5 * s, 0x7a5030, 1).lineBetween(x - Math.cos(a) * 22 * s, y - Math.sin(a) * 22 * s, x + Math.cos(a) * 22 * s, y + Math.sin(a) * 22 * s);
-      g.fillStyle(0x6a707c, 1).fillCircle(x - Math.cos(a) * 22 * s, y - Math.sin(a) * 22 * s, 3.5 * s).fillCircle(x + Math.cos(a) * 22 * s, y + Math.sin(a) * 22 * s, 3.5 * s);
-      g.fillStyle(0xf2c94c, 1).fillCircle(x - Math.cos(a) * 8 * s, y - Math.sin(a) * 8 * s, 2.5 * s).fillCircle(x + Math.cos(a) * 8 * s, y + Math.sin(a) * 8 * s, 2.5 * s);
+      g.lineStyle(6 * s, 0x7cc8ee, 1).lineBetween(x - Math.cos(a) * 22 * s, y - Math.sin(a) * 22 * s, x + Math.cos(a) * 22 * s, y + Math.sin(a) * 22 * s);
+      g.lineStyle(2.4 * s, 0xeaf9ff, 1).lineBetween(x - Math.cos(a) * 22 * s, y - Math.sin(a) * 22 * s, x + Math.cos(a) * 22 * s, y + Math.sin(a) * 22 * s);
+      iceCrystal(g, x - Math.cos(a) * 22 * s, y - Math.sin(a) * 22 * s, a + Math.PI, 5 * s);
+      iceCrystal(g, x + Math.cos(a) * 22 * s, y + Math.sin(a) * 22 * s, a, 5 * s);
+      g.fillStyle(0xffffff, 1).fillCircle(x - Math.cos(a) * 8 * s, y - Math.sin(a) * 8 * s, 2 * s).fillCircle(x + Math.cos(a) * 8 * s, y + Math.sin(a) * 8 * s, 2 * s);
       break;
     }
     case 'kunai':
@@ -484,6 +519,18 @@ export function drawWeaponIcon(g: Phaser.GameObjects.Graphics, id: WeaponId, x: 
       g.fillStyle(color, 1).fillCircle(x + Math.cos(Math.PI * 0.2) * 13 * s, y + Math.sin(Math.PI * 0.2) * 13 * s, 3 * s);
       break;
   }
+}
+
+/** A small ice crystal: a pointed diamond at (x, y) pointing along `angle`, `r` long. */
+function iceCrystal(g: Phaser.GameObjects.Graphics, x: number, y: number, angle: number, r: number) {
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  const tip = { x: x + c * r * 1.6, y: y + s * r * 1.6 };
+  const l = { x: x - s * r * 0.8, y: y + c * r * 0.8 };
+  const rr = { x: x + s * r * 0.8, y: y - c * r * 0.8 };
+  const back = { x: x - c * r * 0.6, y: y - s * r * 0.6 };
+  g.fillStyle(0xcdeeff, 1).fillPoints([tip, l, back, rr] as Phaser.Math.Vector2[], true);
+  g.lineStyle(1, 0x5aaedc, 1).strokePoints([tip, l, back, rr] as Phaser.Math.Vector2[], true);
 }
 
 /** The wooden log a fallen ninja leaves behind (替身術). */

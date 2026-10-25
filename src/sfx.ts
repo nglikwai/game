@@ -285,6 +285,19 @@ export const sfx = {
     noise(0.5, { filter: 'highpass', freq: 3500, vol: 0.07, attack: 0.1, delay: 0.05 });
   },
 
+  /** 冰棍 swing: a glittering chime over a cold whoosh. */
+  iceStaff() {
+    noise(0.25, { filter: 'highpass', freq: 4500, vol: 0.09, attack: 0.05 });
+    for (const [f, d] of [[2093, 0], [2637, 0.04], [3136, 0.08], [4186, 0.12]] as const) tone(f, 0.28, { type: 'sine', vol: 0.045, delay: d });
+  },
+
+  /** 冰棍 hit: ice cracking. */
+  iceCrack() {
+    noise(0.1, { filter: 'highpass', freq: 3500, vol: 0.2 });
+    tone(1800, 0.12, { type: 'triangle', to: 600, vol: 0.08 });
+    tone(2600, 0.08, { type: 'sine', vol: 0.05, delay: 0.03 });
+  },
+
   /** 聖火 landing: a whoosh and a bright chime. */
   holyFire() {
     noise(0.5, { filter: 'bandpass', freq: 700, to: 2200, q: 1, vol: 0.3, attack: 0.02 });
