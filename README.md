@@ -20,10 +20,13 @@ and toggles sound effects and music. All UI text lives in `src/i18n.ts`.
 
 The menus share an ink-blue and brass style: illustrated fighter portraits and weapon crests,
 map thumbnails, framed skill badges and clear primary actions. The lobby keeps all eight slots
-on screen; Quest's lower row previews its four stages. Mode selection, maps, controller setup,
+on screen; each Quest lobby previews its own four stages. Mode selection, maps, controller setup,
 dialogs, battle HUD panels and MVP/SVP medals follow the same visual language.
 
 ## Modes
+
+In **闖關**, each active player card has its own **勇者陣營 / Heroes** or **地獄陣營 / Hell** selector. P1 can play a hero while P2 (or any other players) controls a Hell enemy in the same run. Mixed factions compete over the existing stage objectives: heroes advance by completing them, Hell wins by defeating the heroes or pushing the lantern home. Each stage announces its winning faction, and both sides can continue along the six-stage route. CPU fighters fill the remaining seats when Hell is playable. All-hero cooperative runs and all-Hell defensive runs remain available. In the finale, the first human Hell player controls the Oni King, or the first two human Hell players become Crimson/Jade (CPU fills a missing boss). Human bosses use three skills on the usual buttons; CPU bosses retain four. Player numbers, controls, items and stats stay with their selected faction across stages. Factions stay fixed during retry setup; weapons, skills and controls can still be edited.
+
 - **混戰 Free-for-all**: last fighter standing wins.
 - **團隊戰 Team Battle**: each player picks 紅隊 / 藍隊. No friendly fire. Last team standing wins.
 - **拯救公主 Save the Princess**: four princesses occupy the four corners, two per team on the *enemy's* side.
@@ -32,6 +35,7 @@ dialogs, battle HUD panels and MVP/SVP medals follow the same visual language.
   each for a two-player team (scaled with team size), twice their previous HP, and thicker brickwork.
   Fallen players can respawn while their main tower stands.
 - **攻城戰 Siege**: destroy all three enemy towers to win.
+- **闖關2 Quest 2**: a separate four-stage campaign containing 妖樹苑 Cursed Grove, 封印祭壇 Sealed Altars, 引魂燈道 Spirit Lantern Road, and the new 雙煞鬼門 Twin Warden Gate. Hold each altar for 8 seconds; escort the lantern against guards returning every 14 seconds. The finale pairs a hammer-wielding Crimson Warden with a talisman/fire-casting Jade Warden. Defeat both within 12 seconds of each other or the fallen one revives at 60% HP. Each warden has 180 + 70 HP per party member. Both campaigns keep the same party bonuses, loading sequence, setup editing, checkpoint retries and item/soul/stat carry; completing one does not enter the other.
 - **闖關 Quest**: up to 4 players (P1–P4, humans or CPU allies), with 5% faster movement, fight through four underworld (地獄) stages,
   each with its own map: 第一關 三途川 Sanzu River (defeat every enemy, two waves with a five-second break; cross the blood river on bone
   bridges), 第二關 閻羅城 Yama's Fortress (destroy two great towers behind an obsidian wall with three gates; they
@@ -43,23 +47,25 @@ dialogs, battle HUD panels and MVP/SVP medals follow the same visual language.
   hits 60% harder, bigger, hard to knock back, plus a few grunts). The boss moves at 105% of normal player speed,
   has 25% shorter skill cooldowns and takes at most one second of paralysis per episode; further hits cannot extend it.
   Every 10 seconds it can spend 8% of its max HP to bring back a guard (or fill a reserve slot),
-  up to four living enemies including itself. It cannot spend its last HP this way. Enemy numbers and tower / boss HP scale with the
+  up to four living enemies including itself. Each returned guard rolls a random weapon and three role-appropriate skills, never Lifeline; its role, scaled HP and stats remain intact. Boss summons gain ten percentage points of hit chance (capped at 100%); ordinary player summons are unchanged. It cannot spend its last HP this way. Enemy numbers and tower / boss HP scale with the
   party. Between stages the fallen come back and everyone heals; items, soul and stats carry over. If the whole party
   falls you can retry the stage, change your party's setup before retrying that same stage, or start over.
   Changing setup preserves the stage-start items, soul and stats checkpoint. The underworld has its own music, with a boss theme for the last stage.
   The party fights with 120% of its role's max HP and recovers PE 10% faster in every Quest stage (including
   CPU allies, stacking with role and tower bonuses). Enemy and boss PE recovery stays unchanged.
-  In stage 2 the party also has a small tower of its own that shoots enemies and buffs allies standing near it (it can be destroyed, and it doesn't bring anyone back). Enemies never get 續命 Lifeline. Quest towers and the prison tree revive guards at 2.5 times the normal wait.
+  In stage 2 the party also has a small tower of its own that shoots enemies and buffs allies standing near it (it can be destroyed, and it doesn't bring anyone back). Enemies never get 續命 Lifeline. Stage 2 towers revive guards at 2.5 times the normal wait (10–35 seconds); the stage 3 tree uses twice the normal wait (8–28 seconds).
   Stage 3 walls each have 900 + 250 HP per party member (1,150 solo; 1,400 for two; 1,900 for four). The tree
   marks a fixed spot before casting: Holy Fire lands after 0.8 seconds, Thunder after 1.1 seconds,
   while Sacred Tree and Reaper retain their 1.6-second warning (plus the Reaper's existing scythe swing).
   Leave the circle to avoid both damage and paralysis.
   Its summons use level-two hit chances with 25% more damage and a five-second cooldown between casts.
-  The tree stays a tree, shoots no arrows, and acts as an enemy main tower with 600 + 200 HP per party member.
+  The tree stays a tree, shoots no arrows, and acts as an enemy main tower with 900 + 300 HP per party member.
   It heals nearby guards and spends 10% of its max HP per guard respawn; that cost can exhaust it.
   CPU allies prioritise defending teammates and fighting guards before the princess walls or tree, as in stage 2.
   Rescue both princesses, destroy the tree and defeat all remaining guards to advance. The tree keeps casting until
   destroyed, then stops both attacks and respawns. Retry resets this stage; advancing preserves items, soul, stats and award totals.
+  In Quest 2 stage 1 (the grove), tree effects rotate after 40 seconds of activity with a five-second rest between effects. The summoning tree has 50% more HP than the other two trees.
+  Quest 2 stage 2 uses a golden stone courtyard with three nonblocking altars. CPU allies capture safe altars and defend threatened teammates; guards return one at a time every twelve seconds while any seal remains. Break all three seals to advance, even if guards remain alive.
 
 **Watchtowers (箭塔)** appear in every team mode: two front towers per team (one smaller and weaker; the small ones sit diagonally) plus a
 bigger main tower (本陣) at the back. Towers shoot the nearest enemy in range (arrows fly over obstacles); teammates inside a tower's aura recover PE
@@ -69,7 +75,7 @@ a 5 s War Drum when one falls. Only the main tower can bring players back (the s
 14 s as the battle goes on. In Team Battle a team is out once it has no
 one standing and no main tower left. Tower and respawn numbers are in `src/config.ts`.
 
-Starting from the lobby and entering any Quest stage (including retries) shows a five-second loading screen.
+Starting from the lobby and entering any Quest stage (including retries) shows a silent five-second loading screen, followed by a transition sound over one second of black. The arena music begins when the game scene appears.
 Every round then shows the frozen battlefield for three seconds before a five-second
 5-4-3-2-1 countdown; nobody can move until it ends.
 
@@ -85,6 +91,20 @@ Every round then shows the frozen battlefield for three seconds before a five-se
 seconds, hurting anyone there) · 沉船海灘 Shipwreck Beach (sea and slow surf at the top and bottom, a broken wreck
 with its treasure in the gap). Water, lava and the sea block walking, but projectiles fly over them.
 Each map lives in `src/maps/` (obstacles, chest spots, art, CPU routing). 🎲 Random Map picks a new one every round.
+All 42 versus maps and eight Quest maps share a finishing pass with individually chosen materials and palettes:
+stone bevels and wear, timber grain, woven tatami, sand ripples, frost crystals, leaf litter, reflections and border crests.
+The finishing pass avoids objectives and functional terrain, preserves every layout, and is baked into the cached map
+texture so the same art appears in battle and in previews without extra per-frame work.
+
+Skills have distinct cast flourishes: healing lotuses, faceted golden shields, wind streaks, fury flares, spirit diamonds
+and departure seals for ninja tricks. Team skills mark their living recipients, and Lifeline draws a thread to the revived
+ally. Thunder, Holy Fire, Sacred Tree and Reaper have separate ritual glyphs and matching target marks; their lighting
+stays within the caster's local circle. Holy Fire blooms into tapered flames and roots rise into a leafy cage.
+All twelve weapons have their own motion and impact treatment: tapered fire and frost crescents, shuriken
+afterimages, three kunai trails, hammer debris, visible chain links and a spiked flail head, crossing dagger cuts,
+a pointed sword lunge, a travelling spear pressure ring, paper lightning charms and layered bomb pressure waves.
+Weapon-specific hit accents appear only when damage lands. Throwing glints use the game clock, so pausing
+also freezes them; all visual effects expire without changing weapon reach, damage or attack timing.
 火山口 Volcano Crater (fire vents erupt two at a time after a warning) · 傳送神社 Portal Shrine (three portal pairs) ·
 夜市祭典 Night Festival (a golden lane that speeds you up, fireworks) · 落石山道 Rockslide Pass (boulders roll down
 the roads after a warning) · 機關城 Trap Castle (two sets of spike traps take turns) · 水晶洞窟 Crystal Cave
@@ -140,6 +160,7 @@ Start positions are fixed but shuffled every round, and in team modes red's side
 
   A miss still paralyses for 0.8 s (paralysed fighters can't act or move, but they still take 40% damage (on top of any tower aura or guard); only a summon caster mid-call is untouchable). Calling a summon takes
   1 s (the caster can't act and can't be hurt), and the strikes land when the call finishes.
+  Summon light and shadow stay in a large circle around the caster, including player, boss and tree summons.
   死神 shows up in person: a hooded reaper rises behind each target and swings his scythe; on a hit, skeletal hands
   grab the victim, a chain binds them and their soul is torn out.
 - **Treasure chests (寶箱)**: each map places a fixed, mirrored set at the start (corner piles are often empty, the
@@ -208,9 +229,9 @@ The lobby's control selector lists only what is actually connected (keyboards, C
 - `src/joyhid.ts`: direct Joy-Con input over WebHID (reports, SL / SR, reconnection)
 - `src/padconfig.ts` + `src/scenes/PadScene.ts`: the Controller Setup page: per-controller mode (whole / split Joy-Con halves) and custom button maps
 - `src/i18n.ts`: Traditional Chinese / English UI text
-- `src/maps/`: the thirty-six maps, the three Quest-only underworld maps (`hell.ts`), shared map helpers and spawn points
+- `src/maps/`: 42 versus maps, eight stages across two Quest campaigns, shared map helpers, spawn points and the cached art finishing pass (`finishArt.ts`)
 - `src/art.ts`: ninja characters, held weapons, weapon / item icons (all drawn in code)
-- `src/fx.ts`: particles and strike effects (flames, shuriken streak, shockwave, slashes, smoke)
+- `src/fx.ts`: particles, weapon effects, skill cast flourishes and elemental summon rituals
 - `src/roles.ts`: the four roles
 - `src/cpuLoadout.ts`: random CPU role / weapon / skills
 - `src/items.ts`: chest items, drop chances and pocket size

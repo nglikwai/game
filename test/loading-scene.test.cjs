@@ -1,10 +1,15 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const load = require('./load-source.cjs')();
+const audio = [];
+const load = require('./load-source.cjs')({
+  music: { stopMusic: (immediate) => audio.push(['stop', immediate]) },
+  sfx: { battleTransition: () => audio.push(['transition']) },
+});
 const { LoadingScene } = load('src/scenes/LoadingScene.ts');
 const { LobbyScene } = load('src/scenes/LobbyScene.ts');
 const { BattleScene } = load('src/scenes/BattleScene.ts');
-const { QUEST } = load('src/config.ts');
+const { QUEST, questStageNumber } = load('src/config.ts');
+const { getMap } = load('src/maps/index.ts');
 const { getSettings } = load('src/settings.ts');
 const { setLang, T } = load('src/i18n.ts');
 
@@ -35,7 +40,7 @@ test('the lobby routes a snapshot of the selected setup through Loading', () => 
   assert.notEqual(start[1].slots, settings.slots);
 });
 
-test('loading waits five seconds, preserves battle data and enters exactly once', () => {
+test('loading waits five seconds, holds the finished screen for two seconds, and enters exactly once', () => {
   const data = { mode: 'quest', slots: [], mapId: 'random' };
   const { scene, starts, texts } = loading(data);
   scene.update(0, 2500);
@@ -44,22 +49,29 @@ test('loading waits five seconds, preserves battle data and enters exactly once'
   scene.update(0, 2499);
   assert.equal(starts.length, 0);
   scene.update(0, 1);
+  assert.equal(starts.length, 0);
+  assert.equal(texts.at(-1).text, '100%');
+  scene.update(0, 1999);
+  assert.equal(starts.length, 0);
+  scene.update(0, 1);
   assert.equal(starts.length, 1);
   assert.equal(starts[0][0], 'Battle');
   assert.equal(starts[0][1], data);
-  assert.equal(texts.at(-1).text, '100%');
   scene.update(0, 5000);
   assert.equal(starts.length, 1);
 });
 
 test('a new visit resets loading progress and uses the new setup', () => {
   const { scene, starts } = loading({ mode: 'ffa', slots: [] });
-  scene.update(0, 5100);
+  scene.update(0, 5000);
+  scene.update(0, 2000);
   const next = { mode: 'team', slots: [] };
   scene.init(next); scene.create();
   scene.update(0, 4999);
   assert.equal(starts.length, 1);
   scene.update(0, 1);
+  assert.equal(starts.length, 1);
+  scene.update(0, 2000);
   assert.equal(starts.length, 2);
   assert.equal(starts[1][1], next);
 });
@@ -74,19 +86,28 @@ test('loading labels are present in both languages', () => {
 });
 
 test('every Quest stage waits five seconds and retains its checkpoint before the battle countdown', () => {
-  for (let stage = 0; stage < QUEST.maps.length; stage++) {
+  const routes = [
+    [0, 1, QUEST.rescueStage, QUEST.groveStage, QUEST.sealStage, QUEST.bossStage],
+    [QUEST.escortStage, 0, 1, QUEST.rescueStage, QUEST.groveStage, QUEST.wardenStage],
+  ];
+  for (const route of routes) for (const stage of route) {
     const battle = new BattleScene();
-    const data = { mode: 'quest', slots: [], quest: { stage, carry: { players: {}, stats: [] } } };
+    const data = { mode: 'quest', slots: [], quest: { stage, route, carry: { players: {}, stats: [] } } };
     let next;
     battle.scene = { start: (key, payload) => { assert.equal(key, 'Loading'); next = payload; } };
     battle.enterRound(data);
-    assert.equal(JSON.stringify(next), JSON.stringify(data));
+    assert.equal(next.quest.stage, stage);
+    assert.deepEqual(Array.from(next.quest.route), route);
+    assert.deepEqual(next.quest.carry, data.quest.carry);
     assert.notEqual(next, data);
     const { scene, starts, texts } = loading(next);
-    assert.ok(texts.some((t) => t.text === T().questStageTitle(stage + 1, T().questGoals[stage])));
+    assert.ok(texts.some((t) => t.text === T().mapName(getMap(QUEST.maps[stage]))));
+    assert.ok(texts.some((t) => t.text === T().questStageTitle(questStageNumber(route, stage), T().questGoals[stage])));
     scene.update(0, 4999);
     assert.equal(starts.length, 0);
     scene.update(0, 1);
+    assert.equal(starts.length, 0);
+    scene.update(0, 2000);
     assert.equal(starts.length, 1);
     const entered = new BattleScene();
     entered.init(starts[0][1]);
@@ -113,4 +134,23 @@ test('the battlefield is held for three seconds before 5-4-3-2-1, with FIGHT at 
   assert.deepEqual(labels, []);
   for (const event of scheduled) event.run();
   assert.deepEqual(labels, ['5', '4', '3', '2', '1', T().fight]);
+});
+
+test('loading cuts music immediately and plays one transition cue when the bar finishes', () => {
+  audio.length = 0;
+  const { scene, starts } = loading({ mode: 'ffa', slots: [] });
+  assert.deepEqual(audio, [['stop', true]]);
+  scene.update(0, 4999);
+  assert.deepEqual(audio, [['stop', true]]);
+  const fills = [];
+  const overlay = new Proxy({}, { get: (_, key) => (...args) => { fills.push([key, ...args]); return overlay; } });
+  scene.add.graphics = () => overlay;
+  scene.update(0, 1);
+  assert.deepEqual(audio, [['stop', true], ['transition']]);
+  assert.equal(fills.some(([key]) => key === 'fillRect'), false);
+  scene.update(0, 1999);
+  assert.equal(starts.length, 0);
+  scene.update(0, 1);
+  assert.equal(starts.length, 1);
+  assert.equal(audio.length, 2);
 });

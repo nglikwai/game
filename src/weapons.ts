@@ -18,7 +18,7 @@ export type Shape =
   /** `count` thin rays fanning out `spread` apart, from `offset` out to `offset + length`. */
   | { kind: 'rays'; offset: number; length: number; width: number; spread: number; count: number };
 
-export type WeaponId = 'fan' | 'shuriken' | 'hammer' | 'daggers' | 'flail' | 'kusarigama' | 'bomb' | 'ninjato' | 'talisman' | 'staff' | 'kunai' | 'yari';
+export type WeaponId = 'fan' | 'shuriken' | 'hammer' | 'daggers' | 'flail' | 'kusarigama' | 'bomb' | 'ninjato' | 'talisman' | 'staff' | 'kunai' | 'yari' | 'thunder-fan' | 'fire-kunai';
 
 export interface Weapon {
   id: WeaponId;
@@ -40,9 +40,9 @@ export interface Weapon {
 const A = WEAPON_AREA;
 
 // Shapes use WEAPON_AREA as their baseline; individual weapons can have an area bonus.
-const sector = (angleDeg: number): Shape => {
+const sector = (angleDeg: number, areaScale = 1): Shape => {
   const angle = (angleDeg * Math.PI) / 180;
-  return { kind: 'sector', angle, radius: Math.sqrt((2 * A) / angle) };
+  return { kind: 'sector', angle, radius: Math.sqrt((2 * A * areaScale) / angle) };
 };
 const rect = (width: number, offset: number, areaScale = 1): Shape => ({ kind: 'rect', width, offset, length: A * areaScale / width });
 const circle = (gap: number): Shape => {
@@ -57,9 +57,13 @@ const arc = (inner: number, angleDeg: number): Shape => {
 };
 
 const twin = (width: number): Shape => ({ kind: 'twin', width, length: A / (2 * width) });
-const rays = (width: number, spreadDeg: number, count = 3): Shape => ({
-  kind: 'rays', width, count, offset: BODY_RADIUS, spread: (spreadDeg * Math.PI) / 180, length: A / (count * width),
-});
+const rays = (width: number, spreadDeg: number, count = 3, areaScale = 1): Shape => {
+  const blade = width * Math.sqrt(areaScale);
+  return {
+    kind: 'rays', width: blade, count, offset: BODY_RADIUS, spread: (spreadDeg * Math.PI) / 180,
+    length: (A * areaScale) / (count * blade),
+  };
+};
 
 function make(id: WeaponId, name: string, zh: string, shape: Shape, cycle: number): Weapon {
   return {
@@ -96,6 +100,24 @@ export const WEAPONS: Weapon[] = [
   // A precise polearm thrust: longer and narrower than the shuriken, without a lunge.
   make('yari', 'Yari Spear', '長槍', rect(28, BODY_RADIUS - 4), 0.9),
 ];
+
+/**
+ * The Oni King's fan. Same sweep as the fire fan, enlarged, and it hits harder than its speed would imply.
+ * Kept out of WEAPONS so lobby loadouts and CPU rolls cannot pick it.
+ */
+const thunderFan = make('thunder-fan', 'Thunder Fan', '雷扇', sector(110, 2.25), 0.38);
+export const THUNDER_FAN: Weapon = { ...thunderFan, damage: 15, knockback: 420, hitstun: 0.22 };
+
+/** Enlarged kunai volley. Same three rays as 苦無, with thicker burning blades. */
+const fireKunai = make('fire-kunai', 'Fire Kunai', '火苦無', rays(21, 20, 3, 2.25), 0.5);
+export const FIRE_KUNAI: Weapon = { ...fireKunai, damage: 18, knockback: 480, hitstun: 0.26 };
+
+/** The Oni King draws one of these at the start of the finale. */
+export const ONI_WEAPONS: readonly Weapon[] = [THUNDER_FAN, FIRE_KUNAI];
+
+export function rollOniWeapon(random: () => number = Math.random): Weapon {
+  return ONI_WEAPONS[Math.floor(random() * ONI_WEAPONS.length)]!;
+}
 
 export function shapeArea(s: Shape): number {
   switch (s.kind) {

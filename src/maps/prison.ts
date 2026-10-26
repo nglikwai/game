@@ -10,8 +10,8 @@ const TREE_BODY: Obstacle = { kind: 'deadtree', x: TREE.x, y: TREE.y, w: 88, h: 
 /** Quest-only rescue stage: the tree stands beyond the two prison enclosures. */
 export const PRISON: GameMap = {
   id: 'prison', name: 'Cursed Tree Prison', zh: '幽樹囚庭',
-  desc: 'Rescue both princesses, destroy the cursed tree and defeat all guards. The tree casts summons and spends HP to revive guards.',
-  descZh: '救出兩位公主、摧毀幽樹並擊敗所有守衛。幽樹會施放召喚術，並消耗自身生命復活守衛。',
+  desc: 'Both princess walls hold a seal. Break them both to reach the cursed tree, then destroy it and defeat the guards.',
+  descZh: '兩面公主囚牆撐著封印。兩面都打破才能通往幽樹，再摧毀幽樹並擊敗守衛。',
   obstacles: [...WALLS, ...STONES, TREE_BODY],
   chests: [...cornerPile(1, 1), ...cornerPile(1, -1), ...cornerPile(-1, 1), ...cornerPile(-1, -1),
     { x: 340, y: MID - 150, empty: 0 }, { x: 340, y: MID + 150, empty: 0 },

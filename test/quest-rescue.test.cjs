@@ -5,7 +5,7 @@ const { BattleScene } = load('src/scenes/BattleScene.ts');
 const { Fighter } = load('src/Fighter.ts');
 const { WEAPONS } = load('src/weapons.ts');
 const { roleById } = load('src/roles.ts');
-const { QUEST, PRINCESS_WALL_HP } = load('src/config.ts');
+const { QUEST, PRINCESS_WALL_HP, SOUL_REAPER } = load('src/config.ts');
 const { QUEST_MAPS, MAPS, getMap, mulberry32 } = load('src/maps/index.ts');
 const { TREE_SUMMONS, pickTreeSummon } = load('src/questTree.ts');
 
@@ -16,7 +16,7 @@ function rescue() {
   scene.countdown = 0;
   scene.questTree = { alive: true, tree: true, hp: 800, maxHp: 800, team: 1 };
   scene.towers.push(scene.questTree);
-  scene.fx = { hitSpark() {}, holyFlame() {}, skyBolt() {}, treeRoots() {}, reaperCatch() {} };
+  scene.fx = { hitSpark() {}, holyFlame() {}, skyBolt() {}, treeRoots() {}, reaperCatch() {}, summonPulse() {} };
   scene.popText = () => {};
   scene.summonResult = () => {};
   scene.screenFlash = () => {};
@@ -32,23 +32,25 @@ function rescue() {
   return { scene, party, enemy, makeFighter };
 }
 
-test('Quest inserts the rescue stage before the boss, with four stages and the correct music', () => {
-  assert.deepEqual([...QUEST.maps], ['sanzu', 'yama', 'prison', 'onihall']);
+test('every quest map keeps its stage id, boss music, and goal text', () => {
+  assert.deepEqual([...QUEST.maps], ['sanzu', 'yama', 'prison', 'grove', 'seals', 'lantern', 'onihall', 'wardens', 'snare', 'night', 'dirge']);
   assert.deepEqual(Array.from(QUEST_MAPS, (m) => m.id), [...QUEST.maps]);
-  assert.equal(MAPS.length, 42); // prison remains Quest-only
-  assert.ok(!MAPS.some((m) => m.id === 'prison'));
+  assert.equal(MAPS.length, 42); // prison and the grove remain Quest-only
+  assert.ok(!MAPS.some((m) => m.id === 'prison' || m.id === 'grove'));
   for (let stage = 0; stage < QUEST.maps.length; stage++) {
     const scene = new BattleScene();
     scene.init({ mode: 'quest', slots: [], quest: { stage } });
     assert.equal(scene.map.id, QUEST.maps[stage]);
-    assert.equal(scene.bgm, stage === QUEST.bossStage ? 'boss' : 'hell');
+    assert.equal(scene.bgm, stage === QUEST.bossStage || stage === QUEST.wardenStage || stage === QUEST.dirgeStage ? 'boss' : 'hell');
   }
   const { T, setLang } = load('src/i18n.ts');
   for (const lang of ['en', 'zh']) {
     setLang(lang);
-    assert.equal(T().questGoals.length, 4);
+    assert.equal(T().questGoals.length, QUEST.maps.length);
     assert.ok(T().questGoals[QUEST.rescueStage]);
+    assert.ok(T().questGoals[QUEST.groveStage]);
     assert.ok(T().questStage(4).includes(lang === 'zh' ? '四' : '4'));
+    assert.ok(T().questStage(5).includes(lang === 'zh' ? '五' : '5'));
   }
 });
 
@@ -126,6 +128,32 @@ test('both princesses, the tree and the guards must all be cleared, whichever is
   assert.equal(clears, 1);
 });
 
+test('rescuers cannot cross the seal or hurt the tree until both walls are broken', () => {
+  const cages = getMap('prison').obstacles.filter((o) => o.kind === 'cage');
+  const gate = QUEST.rescue.tree.gateX;
+  assert.ok(cages.every((o) => o.x + o.w / 2 < gate));
+  assert.ok(gate < QUEST.rescue.tree.x);
+  const { scene, party, enemy } = rescue();
+  assert.equal(scene.rescueGateOpen, false);
+  assert.ok(scene.rescueGateX > gate);
+  const line = scene.rescueGateX;
+  party.body.reset = (x, y) => { party.body.center.x = x + party.radius; party.body.center.y = y + party.radius; };
+  party.body.center.x = line + 80;
+  scene.updateRescueGate();
+  assert.ok(party.x < line);
+  enemy.body.center.x = line + 80;
+  scene.updateRescueGate();
+  assert.equal(enemy.x, line + 80);
+  const hp = scene.questTree.hp;
+  scene.damageTower(scene.questTree, 40, party);
+  assert.equal(scene.questTree.hp, hp);
+  scene.damageTower(scene.questTree, 30, undefined);
+  assert.equal(scene.questTree.hp, hp - 30);
+  for (const wall of scene.walls) wall.rescued = true;
+  scene.damageTower(scene.questTree, 40, party);
+  assert.equal(scene.questTree.hp, hp - 70);
+});
+
 test('tree randomly selects from all four summon types and only targets living, vulnerable party members', () => {
   assert.equal(new Set(TREE_SUMMONS.map((s) => s.kind)).size, 4);
   for (let n = 0; n < 4; n++) assert.equal(pickTreeSummon(() => (n + 0.5) / 4), TREE_SUMMONS[n]);
@@ -145,13 +173,13 @@ for (const spell of TREE_SUMMONS) test(`${spell.kind}: tree warning follows its 
   let strikes = 0;
   scene.strikeQuestTree = () => strikes++;
   scene.questTreeCast = { spell, target: party, x: party.x, y: party.y, elapsed: 0 };
-  scene.updateQuestTree(spell.warn - 0.1);
+  scene.updateQuestTree(spell.warn * QUEST.rescue.tree.warnScale - 0.05);
   assert.equal(strikes, 0);
   scene.paused = true;
   scene.updateQuestTree(5);
   assert.equal(strikes, 0);
   scene.paused = false;
-  scene.updateQuestTree(0.2);
+  scene.updateQuestTree(0.1);
   assert.equal(strikes, 1);
   assert.equal(scene.questTreeCast, null);
   assert.equal(scene.questTreeT, QUEST.rescue.tree.interval);
@@ -169,7 +197,7 @@ test('light summons warn faster, heavy effects retain their timing, and warning 
     const progress = [];
     scene.fx.summonCircle = (_g, _glow, _x, _y, value) => progress.push(value);
     scene.fx.targetMark = (_g, _x, _y, value) => progress.push(value);
-    scene.questTreeCast = { spell, target: party, x: party.x, y: party.y, elapsed: spell.warn / 2 };
+    scene.questTreeCast = { spell, target: party, x: party.x, y: party.y, elapsed: spell.warn * QUEST.rescue.tree.warnScale / 2 };
     scene.renderQuestTree(1);
     assert.deepEqual(progress, [0.5, 0.5]);
   }
@@ -179,14 +207,41 @@ for (const spell of TREE_SUMMONS) test(`${spell.kind}: damage/paralysis apply on
   const { scene, party } = rescue();
   const cast = { target: party, spell, x: party.x, y: party.y, elapsed: spell.warn };
   scene.applyQuestTreeHit(cast, true);
-  assert.equal(party.stats.taken, Math.floor((spell.minDamage + spell.maxDamage) / 2));
-  assert.equal(party.paralyzed, party.alive); // a fatal Reaper hit cannot paralyse a dead fighter
+  if (spell.kind === 'soulReaper') {
+    assert.equal(party.hp, SOUL_REAPER.leaveHp);
+    assert.equal(party.stats.taken, 100 - SOUL_REAPER.leaveHp);
+    assert.equal(party.paralyzed, true);
+  } else {
+    assert.equal(party.stats.taken, Math.floor((spell.minDamage + spell.maxDamage) / 2));
+    assert.equal(party.paralyzed, party.alive);
+  }
   const dodged = rescue();
   const warning = { ...cast, target: dodged.party };
   dodged.party.body.center.x += QUEST.rescue.tree.radius + dodged.party.radius + 1;
   dodged.scene.applyQuestTreeHit(warning, true);
   assert.equal(dodged.party.stats.taken, 0);
   assert.equal(dodged.party.paralyzed, false);
+});
+
+test('a Reaper hit ignores protection: 80 or more HP is left at 20, and under 80 dies', () => {
+  const spell = TREE_SUMMONS.find((s) => s.kind === 'soulReaper');
+  for (const hp of [80, 100, 140]) {
+    const { scene, party } = rescue();
+    party.hp = hp;
+    party.ward(0.35, 10);
+    scene.applyQuestTreeHit({ target: party, spell, x: party.x, y: party.y, elapsed: 0 }, true);
+    assert.equal(party.hp, SOUL_REAPER.leaveHp);
+    assert.equal(party.alive, true);
+    assert.equal(party.stats.taken, hp - SOUL_REAPER.leaveHp);
+    assert.equal(party.paralyzed, true);
+  }
+  const { scene, party } = rescue();
+  party.hp = 79;
+  party.ward(0.5, 10);
+  scene.applyQuestTreeHit({ target: party, spell, x: party.x, y: party.y, elapsed: 0 }, true);
+  assert.equal(party.alive, false);
+  assert.equal(party.stats.taken, 79);
+  assert.equal(party.paralyzed, false);
 });
 
 test('Reaper impact waits for its swing and cannot hurt anyone after stage completion', () => {
@@ -208,8 +263,10 @@ test('Reaper impact waits for its swing and cannot hurt anyone after stage compl
   assert.equal(scene.questTreeCast, null);
 });
 
-test('clearing the rescue stage offers the boss next and carries totals, items and soul', () => {
+test('clearing the rescue stage offers the next trial and carries totals, items and soul', () => {
   const { scene, party } = rescue();
+  const route = [0, QUEST.rescueStage, 1, QUEST.groveStage, QUEST.sealStage, QUEST.bossStage];
+  scene.quest.route = route;
   const queued = [];
   let modal;
   let restarted;
@@ -233,10 +290,58 @@ test('clearing the rescue stage offers the boss next and carries totals, items a
   };
   modal.build({ x: 330, y: 210, w: 620, h: 300, content: { add() {} }, nav: { add: (button) => buttons.push(button) } });
   buttons.find((b) => b.id === 'next').onEnter();
-  assert.equal(restarted.quest.stage, QUEST.bossStage);
+  assert.equal(restarted.quest.stage, 1);
+  assert.equal(JSON.stringify(restarted.quest.route), JSON.stringify(route));
   assert.equal(restarted.quest.carry.stats[0].wall, 2800);
   assert.equal(restarted.quest.carry.players[0].soul, 50);
   assert.equal(restarted.quest.carry.players[0].pocket[0].id, 'rice-ball');
+});
+
+test('stage 3 states its goal once and keeps the upper help callout off that line', () => {
+  const { T, setLang } = load('src/i18n.ts');
+  const { MAP_SCALE, HUD_HEIGHT, WIDTH } = load('src/config.ts');
+  const { ARENA } = load('src/maps/common.ts');
+  const S = MAP_SCALE;
+  const walls = getMap('prison').obstacles.filter((o) => o.kind === 'cage').map((o) => ({
+    o: { ...o, x: o.x * S, y: (o.y - HUD_HEIGHT) * S, w: o.w * S, h: o.h * S },
+    team: 0,
+  }));
+  const screen = (p) => ({ x: p.x / S, y: HUD_HEIGHT + p.y / S });
+  for (const lang of ['zh', 'en']) {
+    setLang(lang);
+    const scene = new BattleScene();
+    scene.init({ mode: 'quest', slots: [], quest: { stage: QUEST.rescueStage, route: [0, 1, QUEST.rescueStage, QUEST.groveStage, QUEST.sealStage, QUEST.bossStage] } });
+    const texts = [];
+    scene.add = {
+      text(x, y, text) {
+        const obj = { x, y, text, setOrigin() { return obj; }, setDepth() { return obj; }, setText(value) { obj.text = value; return obj; } };
+        texts.push(obj);
+        return obj;
+      },
+    };
+    scene.tweens = { add() {} };
+    scene.lTop = { add() {} };
+    scene.walls = walls;
+    scene.showPrincessIntro();
+    assert.equal(texts.filter((t) => t.text === T().questRescueGoal || t.text === T().princessGoal).length, 0);
+    const banners = [];
+    scene.fighters = [];
+    scene.showBanner = (msg) => banners.push(msg);
+    scene.createQuestHud();
+    assert.deepEqual(banners, [T().questStageTitle(QUEST.rescueStage + 1, T().questGoals[QUEST.rescueStage])]);
+    const help = texts.filter((t) => t.text === T().help).map(screen);
+    assert.equal(help.length, 2);
+    const upperWall = walls.map((w) => w.o).sort((a, b) => a.y - b.y)[0];
+    const upper = help.sort((a, b) => a.y - b.y)[0];
+    assert.ok(upper.x < upperWall.x / S - upperWall.w / S / 2);
+    assert.ok(upper.x > WIDTH * 0.4);
+    assert.ok(upper.y > ARENA.y + 70);
+    const lower = help.sort((a, b) => a.y - b.y)[1];
+    const lowerWall = walls.map((w) => w.o).sort((a, b) => a.y - b.y)[1];
+    const lowerTop = HUD_HEIGHT + (lowerWall.y - lowerWall.h / 2) / S;
+    assert.ok(Math.abs(lower.x - lowerWall.x / S) < 1);
+    assert.ok(lower.y < lowerTop);
+  }
 });
 
 test('retry restores the current rescue stage and its original carried state', () => {
@@ -250,4 +355,48 @@ test('retry restores the current rescue stage and its original carried state', (
   assert.equal(next.map.id, 'prison');
   assert.equal(next.questTreeCast, null);
   assert.equal(next.questTreeT, QUEST.rescue.tree.initialDelay);
+});
+
+test('the prison tree fields four guards and can return one or a whole set without passing four', () => {
+  const scene = new BattleScene();
+  scene.init({ mode: 'quest', slots: [{ control: 'kb1' }], quest: { stage: QUEST.rescueStage } });
+  assert.equal(scene.slots.filter((s) => s.team === 1 && s.control === 'cpu').length, 4);
+  assert.equal(QUEST.rescue.tree.radius, 120);
+  assert.ok(QUEST.rescue.tree.warnScale < 1);
+  const guards = [4, 5, 6, 7].map((index) => {
+    const body = { center: { x: 0, y: 0 }, velocity: { x: 0, y: 0 }, reset(x, y) { this.center = { x, y }; } };
+    const fighter = new Fighter(index, 0xffffff, WEAPONS[0], [], roleById('ronin'), { labels: [] }, body, scene);
+    fighter.team = 1;
+    fighter.state = 'dead';
+    return fighter;
+  });
+  scene.fighters = guards;
+  scene.questTree = {
+    alive: true, tree: true, main: true, team: 1, hp: 2000, maxHp: 2000,
+    x: 1000, y: 400, w: 80, h: 100, shakeT: 0, rect: {},
+    body: { destroy() {} }, collider: { destroy() {} },
+  };
+  scene.towers = [scene.questTree];
+  scene.freeSpot = (spot) => spot;
+  scene.fx = { hitSpark() {}, respawnBeam() {}, smoke() {}, hammerSmash() {} };
+  scene.popText = () => {};
+  scene.showBanner = () => {};
+  const random = Math.random;
+  const living = () => guards.filter((f) => f.alive).length;
+  try {
+    Math.random = () => 0;
+    scene.updateTeamRespawns(0);
+    scene.updateTeamRespawns(8);
+    assert.equal(living(), 1);
+    scene.teamRespawnT[1] = 0;
+    Math.random = () => 0.99;
+    scene.updateTeamRespawns(0);
+    assert.equal(living(), 4);
+    guards[0].state = 'dead';
+    scene.teamRespawnT[1] = 0;
+    scene.updateTeamRespawns(0);
+    assert.equal(living(), 4);
+  } finally {
+    Math.random = random;
+  }
 });

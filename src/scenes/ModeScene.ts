@@ -33,7 +33,7 @@ export class ModeScene extends UIScene {
       const cx = WIDTH / 2 + (i - (GAME_MODES.length - 1) / 2) * (CARD_W + CARD_GAP);
       const x = cx - CARD_W / 2;
       const g = this.add.graphics();
-      const tint = [0xc09b69, 0x8fa6c3, 0xcc8baf, 0xada18b, 0xa78bba][i];
+      const tint = [0xc09b69, 0x8fa6c3, 0xcc8baf, 0xada18b, 0xa78bba, 0x88c9b3][i];
       drawRosterFrame(g, x, CARD_Y, CARD_W, CARD_H, tint);
       g.fillStyle(tint, 0.07).fillCircle(cx, CARD_Y + 122, 82);
       g.lineStyle(1, tint, 0.15).strokeCircle(cx, CARD_Y + 122, 89);
@@ -47,7 +47,9 @@ export class ModeScene extends UIScene {
       const name = txt(this, cx, CARD_Y + 253, T().modeNames(mode), 25, C.text, { title: true, bold: true, origin: 0.5 });
       name.setScale(Math.min(1, (CARD_W - 28) / name.width));
       layer.add(name);
-      layer.add(txt(this, cx, CARD_Y + 285, T().modeDesc(mode), 13, C.dim, { origin: [0.5, 0], wrap: CARD_W - 34, align: 'center' }));
+      const desc = txt(this, cx, CARD_Y + 285, T().modeDesc(mode), 13, C.dim, { origin: [0.5, 0], wrap: CARD_W - 34, align: 'center' });
+      desc.setScale(Math.min(1, 108 / Math.max(1, desc.height)));
+      layer.add(desc);
       layer.add(txt(this, cx, CARD_Y + CARD_H - 26, '›', 21, toHex(tint), { origin: 0.5 }));
       nav.add({
         id: mode, x, y: CARD_Y, w: CARD_W, h: CARD_H, radius: 14,
@@ -118,7 +120,7 @@ function drawModeIcon(g: Phaser.GameObjects.Graphics, mode: GameMode, cx: number
     g.fillStyle(TEAM_COLORS[0], 1).fillTriangle(cx - 60, cy - 70, cx - 60, cy - 40, cx - 30, cy - 55);
     g.fillStyle(TEAM_COLORS[1], 1).fillTriangle(cx + 60, cy - 70, cx + 60, cy - 40, cx + 30, cy - 55);
   } else if (mode === 'quest') {
-    // A torii gate with four stage lanterns and the boss's horned mask beyond it.
+    // A torii gate, six stage lanterns, and the boss's horned mask beyond it.
     g.fillStyle(0x8a1a14, 1).fillRect(cx - 62, cy - 48, 124, 12);
     g.fillStyle(0x1e1e22, 1).fillRect(cx - 72, cy - 60, 144, 10);
     g.fillStyle(0x8a1a14, 1).fillRect(cx - 50, cy - 36, 12, 110).fillRect(cx + 38, cy - 36, 12, 110);
@@ -128,9 +130,9 @@ function drawModeIcon(g: Phaser.GameObjects.Graphics, mode: GameMode, cx: number
     g.fillStyle(0xf2e6d0, 1).fillTriangle(cx - 20, cy + 2, cx - 14, cy - 18, cx - 8, cy + 2).fillTriangle(cx + 20, cy + 2, cx + 14, cy - 18, cx + 8, cy + 2);
     g.fillStyle(0xffd23a, 1).fillCircle(cx - 9, cy + 16, 4).fillCircle(cx + 9, cy + 16, 4);
     g.fillStyle(0x1e1e22, 1).fillRect(cx - 12, cy + 32, 24, 5);
-    for (const k of [-1.5, -0.5, 0.5, 1.5]) {
-      g.fillStyle(0xf2c94c, 0.8).fillCircle(cx + k * 26, cy + 84, 6);
-      g.lineStyle(1, 0x6b3f1f, 1).strokeCircle(cx + k * 26, cy + 84, 6);
+    for (let k = 0; k < 6; k++) {
+      g.fillStyle(0xf2c94c, 0.8).fillCircle(cx + (k - 2.5) * 18, cy + 84, 5);
+      g.lineStyle(1, 0x6b3f1f, 1).strokeCircle(cx + (k - 2.5) * 18, cy + 84, 5);
     }
   } else {
     // Crown over a walled-in heart.

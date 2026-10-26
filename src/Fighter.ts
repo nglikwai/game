@@ -1,5 +1,5 @@
 import * as Phaser from 'phaser';
-import { QUEST, PARALYZED_DAMAGE_TAKEN, BODY_RADIUS, ICE_GRIP, MOVE_SPEED, SPRING, SAND_SPEED, SHALLOWS_SPEED, BOOST_SPEED, POISON, STEALTH_SPEED, SOUL_CAST_TIME, SOUL_LEVELS, SOUL_PER_LEVEL, TOWER_AURA_DAMAGE_TAKEN, TOWER_AURA_PE_REGEN, MUD_SPEED, PE_REGEN_DELAY, PE_REGEN_MOVING, PE_REGEN_PER_SEC, PE_REGEN_STILL } from './config';
+import { QUEST, PARALYZED_DAMAGE_TAKEN, BODY_RADIUS, ICE_GRIP, MOVE_SPEED, SPRING, SAND_SPEED, SHALLOWS_SPEED, BOOST_SPEED, POISON, STEALTH_SPEED, SOUL_CAST_TIME, SOUL_LEVELS, SOUL_PER_LEVEL, SOUL_REAPER, TOWER_AURA_DAMAGE_TAKEN, TOWER_AURA_PE_REGEN, MUD_SPEED, PE_REGEN_DELAY, PE_REGEN_MOVING, PE_REGEN_PER_SEC, PE_REGEN_STILL } from './config';
 import type { Controller, Intent } from './controls';
 import { sfx } from './sfx';
 import { POCKET_SIZE, type Item, type ItemEffect } from './items';
@@ -13,6 +13,8 @@ export type FighterState = 'idle' | 'windup' | 'active' | 'recovery' | 'stun' | 
 
 /** What a Fighter needs from the scene it lives in. */
 export interface Arena {
+  /** Visual cue after a skill is accepted; never called for a failed cast or a pocket item. */
+  onSkillCast?(f: Fighter, effect: SkillEffect, mx: number, my: number): void;
   onSwingActive(f: Fighter): void;
   spawnProjectile(f: Fighter, effect: Extract<ItemEffect, { kind: 'projectile' }>): void;
   popText(x: number, y: number, text: string, color: string): void;
@@ -84,7 +86,7 @@ export class Fighter {
   readonly swingHits = new Set<object>();
   /** Fighters on the same team can't hurt each other. In free-for-all everyone has their own team. */
   team: number;
-  readonly cooldowns = [0, 0, 0];
+  readonly cooldowns: number[];
   /** Items from treasure chests, oldest first. */
   readonly pocket: Item[] = [];
   /** Which pocket slot the use-item key fires. */
@@ -119,6 +121,8 @@ export class Fighter {
   peDeniedT = 0;
   /** A summon was refused for lack of soul: the HUD's soul diamonds flash while this runs down. */
   soulDeniedT = 0;
+  /** Sealed inside a snare tree until that tree is destroyed. */
+  trapped = false;
   /** Standing still, so PE is recovering at the boosted rate. */
   resting = false;
   /** Inside a friendly watchtower's aura (faster PE, less damage taken). */
@@ -129,8 +133,8 @@ export class Fighter {
   constructor(
     readonly index: number,
     readonly color: number,
-    readonly weapon: Weapon,
-    /** Up to 3 equipped skills; null = empty slot. */
+    public weapon: Weapon,
+    /** Equipped skills; null = empty slot. Players have 3, CPU enemies have 4. */
     readonly skills: (Skill | null)[],
     readonly role: Role,
     readonly controller: Controller,
@@ -138,6 +142,7 @@ export class Fighter {
     private arena: Arena,
   ) {
     this.team = index;
+    this.cooldowns = skills.map(() => 0);
     this.maxHp = this.hp = role.maxHp;
     this.maxPe = this.pe = role.maxPe;
   }
@@ -192,7 +197,7 @@ export class Fighter {
   get stateProgress() { return this.stateDur > 0 ? Math.min(1, this.stateT / this.stateDur) : 0; }
   get sprinting() { return this.speedBuffT > 0; }
   /** Fury: multiplier on weapon damage and knockback. */
-  get damageMult() { return this.powerMult * this.damageScale; }
+  get damageMult() { return this.powerMult * this.damageScale * this.role.attack; }
   get powered() { return this.powerT > 0; }
   get guarded() { return this.guardT > 0; }
   /** Has the Thunder skill equipped (so the soul meter matters). */
@@ -221,8 +226,13 @@ export class Fighter {
 
   update(dt: number, intent: Intent) {
     if (!this.alive) return;
+    if (this.trapped) {
+      this.body.velocity.x = 0;
+      this.body.velocity.y = 0;
+      return;
+    }
 
-    for (let i = 0; i < 3; i++) this.cooldowns[i] = Math.max(0, this.cooldowns[i] - dt);
+    for (let i = 0; i < this.cooldowns.length; i++) this.cooldowns[i] = Math.max(0, this.cooldowns[i] - dt);
     this.flashT = Math.max(0, this.flashT - dt);
     this.chillT = Math.max(0, this.chillT - dt);
     this.peDeniedT = Math.max(0, this.peDeniedT - dt);
@@ -265,7 +275,7 @@ export class Fighter {
         if (intent.attack) this.tryAttack();
         else if (intent.useItemAt !== undefined) this.tryUseItem(intent.useItemAt, mx, my);
         else if (intent.useItem) this.tryUseItem(this.selectedItem, mx, my);
-        else for (let i = 0; i < 3; i++) if (intent.skills[i]) { this.tryUseSkill(i, mx, my); break; }
+        else for (let i = 0; i < this.skills.length; i++) if (intent.skills[i]) { this.tryUseSkill(i, mx, my); break; }
         break;
       case 'windup':
         if (this.stateT >= w.windup) {
@@ -415,6 +425,7 @@ export class Fighter {
     if (!this.spend(skill.peCost * (mobility ? this.role.mobilityCost : 1))) return;
     this.cooldowns[slot] = skillCooldownFor(skill, this.role);
     this.stats.skills++;
+    this.arena.onSkillCast?.(this, skill.effect, mx, my);
     this.applyEffect(skill.effect, mx, my);
   }
 
@@ -600,6 +611,34 @@ export class Fighter {
   /** Share of incoming damage actually taken: guard, a tower's aura and paralysis all stack. */
   get damageTaken() {
     return this.guardMult * (this.inAura ? TOWER_AURA_DAMAGE_TAKEN : 1) * (this.paralyzed ? PARALYZED_DAMAGE_TAKEN : 1);
+  }
+
+  /**
+   * The reaper's scythe. Damage reduction does not apply. Under 80 HP this kills;
+   * at 80 or more the target is left with 20 HP. Substitution still takes the hit instead.
+   * Returns false when the scythe does not land on this body.
+   */
+  sufferReaper(): boolean {
+    if (!this.alive || this.untouchable) return false;
+    if (this.substituteT > 0) {
+      this.substituteT = 0;
+      this.stealthT = 0;
+      this.kbx = this.kby = 0;
+      sfx.vanish();
+      this.arena.onSubstitute(this, 0, 0);
+      return false;
+    }
+    this.stealthT = 0;
+    const before = this.hp;
+    const kill = before < SOUL_REAPER.executeBelow;
+    const next = kill ? 0 : SOUL_REAPER.leaveHp;
+    this.stats.taken += before - next;
+    this.hp = next;
+    this.flashT = 0.12;
+    sfx.hit(1);
+    this.arena.popText(this.x, this.y - 30, `-${Math.round(before - next)}`, '#ffffff');
+    if (kill) this.die();
+    return true;
   }
 
   /** Small damage over time (caltrops): no knockback, no stun, doesn't interrupt anything. */

@@ -231,6 +231,39 @@ export function drawHeldWeapon(g: Phaser.GameObjects.Graphics, id: WeaponId, p: 
       hand(g, p, 7, -10);
       break;
     }
+    case 'thunder-fan': {
+      // The fire fan, opened wider, with a lightning leaf instead of a flame.
+      const open = p.phase === 'idle' ? 0.35 : p.phase === 'windup' ? 0.4 + p.t * 0.6 : 1 - Math.max(0, (p.t - 0.45) * 2);
+      const back = wind * 1.2;
+      const h = hand(g, p, lerp(9, 2, wind), lerp(11, 16, wind));
+      const dir = p.facing + lerp(0.25, 1.5, back / 1.2) - (p.phase === 'strike' ? 0.25 : 0);
+      const spread = lerp(0.2, 2.15, open);
+      const r = 26;
+      g.fillStyle(0x1d4f86, 1);
+      g.beginPath();
+      g.slice(h.x, h.y, r, dir - spread / 2, dir + spread / 2, false);
+      g.fillPath();
+      g.lineStyle(1.4, 0x071422, 0.8);
+      for (let i = 0; i <= 8; i++) {
+        const a = dir - spread / 2 + (spread * i) / 8;
+        g.lineBetween(h.x, h.y, h.x + Math.cos(a) * r, h.y + Math.sin(a) * r);
+      }
+      g.lineStyle(2, 0xe7f6ff, 1);
+      g.beginPath();
+      g.arc(h.x, h.y, r, dir - spread / 2, dir + spread / 2, false);
+      g.strokePath();
+      if (open > 0.4) {
+        const tip = { x: h.x + Math.cos(dir) * r * 0.72, y: h.y + Math.sin(dir) * r * 0.72 };
+        g.lineStyle(2, 0xfff6c2, 1);
+        g.beginPath();
+        g.moveTo(h.x + Math.cos(dir) * 6, h.y + Math.sin(dir) * 6);
+        g.lineTo(tip.x - Math.sin(dir) * 5, tip.y + Math.cos(dir) * 5);
+        g.lineTo(tip.x, tip.y);
+        g.strokePath();
+      }
+      hand(g, p, 7, -10);
+      break;
+    }
     case 'shuriken': {
       const thrown = p.phase === 'strike' && p.t < 0.7;
       const hx = p.phase === 'strike' ? lerp(17, 9, p.t) : lerp(9, -3, wind);
@@ -342,6 +375,17 @@ export function drawHeldWeapon(g: Phaser.GameObjects.Graphics, id: WeaponId, p: 
       const thrown = p.phase === 'strike' && p.t < 0.6;
       const h = hand(g, p, p.phase === 'strike' ? lerp(16, 9, p.t) : lerp(9, -2, wind), lerp(11, 15, wind));
       if (!thrown) for (const k of [-1, 0, 1]) kunai(g, h.x, h.y, p.facing + k * 0.35 - wind * 0.6, 11);
+      hand(g, p, 7, -10);
+      break;
+    }
+    case 'fire-kunai': {
+      const thrown = p.phase === 'strike' && p.t < 0.55;
+      const h = hand(g, p, p.phase === 'strike' ? lerp(18, 8, p.t) : lerp(9, -2, wind), lerp(11, 15, wind));
+      if (!thrown) for (const k of [-1, 0, 1]) {
+        const a = p.facing + k * 0.42 - wind * 0.5;
+        kunai(g, h.x, h.y, a, 18);
+        g.fillStyle(0xffb45a, 0.9).fillCircle(h.x + Math.cos(a) * 16, h.y + Math.sin(a) * 16, 2.4);
+      }
       hand(g, p, 7, -10);
       break;
     }
@@ -461,6 +505,28 @@ export function drawWeaponIcon(g: Phaser.GameObjects.Graphics, id: WeaponId, x: 
       g.fillStyle(0xffb03a, 1).fillCircle(px, py - r * 0.6, 4 * s);
       break;
     }
+    case 'thunder-fan': {
+      const px = x;
+      const py = y + 16 * s;
+      const r = 32 * s;
+      const a0 = -Math.PI * 0.9;
+      const a1 = -Math.PI * 0.1;
+      g.fillStyle(0x1d4f86, 1);
+      g.beginPath();
+      g.slice(px, py, r, a0, a1, false);
+      g.fillPath();
+      g.lineStyle(1, 0x071422, 0.8);
+      for (let i = 0; i <= 8; i++) {
+        const a = a0 + ((a1 - a0) * i) / 8;
+        g.lineBetween(px, py, px + Math.cos(a) * r, py + Math.sin(a) * r);
+      }
+      g.lineStyle(2, 0xe7f6ff, 1);
+      g.beginPath();
+      g.arc(px, py, r, a0, a1, false);
+      g.strokePath();
+      g.lineStyle(2, 0xfff6c2, 1).lineBetween(px, py - 4 * s, px - 4 * s, py - r * 0.45).lineBetween(px - 4 * s, py - r * 0.45, px + 2 * s, py - r * 0.85);
+      break;
+    }
     case 'shuriken':
       drawShurikenStar(g, x, y, 20 * s, 0.3);
       break;
@@ -508,6 +574,13 @@ export function drawWeaponIcon(g: Phaser.GameObjects.Graphics, id: WeaponId, x: 
     }
     case 'kunai':
       for (const k of [-1, 0, 1]) kunai(g, x - 2 * s, y + 14 * s, -Math.PI / 2 + k * 0.45, 26 * s);
+      break;
+    case 'fire-kunai':
+      for (const k of [-1, 0, 1]) {
+        const a = -Math.PI / 2 + k * 0.5;
+        kunai(g, x - 2 * s, y + 16 * s, a, 34 * s);
+        g.fillStyle(0xff7a32, 1).fillCircle(x - 2 * s + Math.cos(a) * 30 * s, y + 16 * s + Math.sin(a) * 30 * s, 3 * s);
+      }
       break;
     case 'flail':
       g.lineStyle(1.5, 0x9aa0ab, 1);

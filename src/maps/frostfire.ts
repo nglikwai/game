@@ -12,8 +12,8 @@ const OBSTACLES: Obstacle[] = [350, 930].flatMap((x) => [
 
 export const FROSTFIRE: GameMap = {
   id: 'frostfire', name: 'Frostfire Forge', zh: '冰焰鍛冶場',
-  desc: 'An icy forge floor makes stopping hard. Watch the glowing vents before they erupt beneath your feet.',
-  descZh: '結冰的鍛冶場地面容易打滑。注意發光的噴口，及時避開腳下的火焰。',
+  desc: 'An icy forge floor makes stopping hard. Vents erupt and leave fire on the ground; step on the flames and you burn.',
+  descZh: '結冰的鍛冶場地面容易打滑。噴口噴發後火焰會留在地上，踩上去會被灼傷。',
   obstacles: OBSTACLES,
   chests: [...cornerPile(1, 1), ...cornerPile(-1, 1), ...cornerPile(1, -1), ...cornerPile(-1, -1),
     { x: 640, y: MID, big: true }, { x: 450, y: MID }, { x: 830, y: MID }],

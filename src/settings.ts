@@ -1,4 +1,4 @@
-import { GAME_MODES, MAX_HUMANS, MAX_PLAYERS, QUEST, type GameMode } from './config';
+import { isQuestMode, GAME_MODES, MAX_HUMANS, MAX_PLAYERS, QUEST, type GameMode, type QuestRule, type QuestSide } from './config';
 import { KEY_SETS, isKeySet, keyLabel, parsePad, type Binds, type ControlId } from './controls';
 import { DIFFICULTIES, type Difficulty } from './config';
 import { T } from './i18n';
@@ -17,10 +17,14 @@ export interface SlotConfig {
   /** Team and Save the Princess modes: 0 = red, 1 = blue. */
   team: number;
   role: RoleId;
+  /** Quest faction, independent of the versus team. Missing values use the legacy party choice. */
+  questSide?: QuestSide;
 }
 
 export interface GameSettings {
   mode: GameMode;
+  /** Standard, Hell, or Free. Free is the only rule where each player picks a side. */
+  questRule: QuestRule;
   /** A map, or 'random' for a different one every round. */
   mapId: MapId | 'random';
   /** How clever the CPU fighters are. */
@@ -32,6 +36,7 @@ const SLOTS_KEY = 'arena-duel-slots';
 const MODE_KEY = 'arena-duel-mode';
 const MAP_KEY = 'arena-duel-map';
 const DIFFICULTY_KEY = 'arena-duel-difficulty';
+const QUEST_SIDE_KEY = 'arena-duel-quest-side';
 
 const DEFAULT_SLOTS: SlotConfig[] = [
   { control: 'kb1', weapon: 0, skills: ['meditate', 'arrow', 'blink'], binds: [...KEY_SETS.kb1.defaultBinds], team: 0, role: 'ronin' },
@@ -62,6 +67,7 @@ function loadSlots(): SlotConfig[] {
         ) as Binds,
         team: s.team ?? i % 2,
         role: s.role ?? 'ronin',
+        questSide: s.questSide === 'hell' || s.questSide === 'heroes' ? s.questSide : undefined,
         skills: (s.skills as (string | number | null)[]).map((v, k) => {
           const id = typeof v === 'number' ? OLD_SLOT_POOLS[k]?.[v] ?? null : v;
           return SKILLS.some((sk) => sk.id === id) ? id : null;
@@ -76,8 +82,9 @@ function loadSlots(): SlotConfig[] {
 
 function loadMode(): GameMode {
   try {
-    const m = localStorage.getItem(MODE_KEY) as GameMode | null;
-    if (m && GAME_MODES.includes(m)) return m;
+    const m = localStorage.getItem(MODE_KEY);
+    if (m === 'quest2') return 'quest';
+    if (m && (GAME_MODES as readonly string[]).includes(m)) return m as GameMode;
   } catch {
     // Fall through to the default.
   }
@@ -106,9 +113,19 @@ function loadDifficulty(): Difficulty {
 
 let settings: GameSettings | null = null;
 
+function loadQuestRule(): QuestRule {
+  try {
+    const saved = localStorage.getItem(QUEST_SIDE_KEY);
+    if (saved === 'heroes' || saved === 'hell' || saved === 'free') return saved;
+  } catch {
+    // Fall through to the default.
+  }
+  return 'heroes';
+}
+
 /** The shared, mutable settings object. Call saveSettings() after changing it. */
 export function getSettings(): GameSettings {
-  settings ??= { mode: loadMode(), mapId: loadMap(), difficulty: loadDifficulty(), slots: loadSlots() };
+  settings ??= { mode: loadMode(), questRule: loadQuestRule(), mapId: loadMap(), difficulty: loadDifficulty(), slots: loadSlots() };
   return settings;
 }
 
@@ -119,13 +136,14 @@ export function saveSettings() {
     localStorage.setItem(MODE_KEY, settings.mode);
     localStorage.setItem(MAP_KEY, settings.mapId);
     localStorage.setItem(DIFFICULTY_KEY, settings.difficulty);
+    localStorage.setItem(QUEST_SIDE_KEY, settings.questRule);
   } catch {
     // Not critical; settings just won't survive a reload.
   }
 }
 
-/** Modes where players pick a team in the lobby (in Quest everyone in P1–P4 is on the same side). */
-export const usesTeams = (mode: GameMode) => mode !== 'ffa' && mode !== 'quest';
+/** Modes where players pick a team in the lobby (Quest uses its own per-player faction selector). */
+export const usesTeams = (mode: GameMode) => mode !== 'ffa' && !isQuestMode(mode);
 
 /**
  * Deal everyone who is playing into two teams at random, as evenly as possible (with an odd number,
@@ -171,10 +189,10 @@ export function toggleSkill(slot: SlotConfig, id: string): EquipResult {
 /** Why the current setup can't start, or null if it can. */
 export function validate(s: GameSettings): string | null {
   // Quest: only P1–P4 play (the enemies come from the stage).
-  const slots = s.mode === 'quest' ? s.slots.slice(0, QUEST.partySlots) : s.slots;
+  const slots = isQuestMode(s.mode) ? s.slots.slice(0, QUEST.partySlots) : s.slots;
   const active = slots.filter((x) => x.control !== 'off');
-  if (s.mode === 'quest' && active.length < 1) return T().needOne;
-  if (s.mode !== 'quest' && active.length < 2) return T().needTwo;
+  if (isQuestMode(s.mode) && active.length < 1) return T().needOne;
+  if (!isQuestMode(s.mode) && active.length < 2) return T().needTwo;
   const humans = active.map((x) => x.control).filter((c) => c !== 'cpu');
   if (humans.length > MAX_HUMANS) return T().tooManyHumans(MAX_HUMANS);
   if (new Set(humans).size !== humans.length) return T().sameControls;

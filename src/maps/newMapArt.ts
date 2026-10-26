@@ -12,6 +12,10 @@ export function paintTiles(ctx: Ctx, rand: () => number, base: string, grout: st
       ctx.strokeRect(x, y, tile, tile);
       ctx.fillStyle = `rgba(255,255,255,${rand() * 0.045})`;
       ctx.fillRect(x + 2, y + 2, tile - 4, tile - 4);
+      ctx.fillStyle = 'rgba(240,234,210,0.055)';
+      ctx.fillRect(x + 2, y + 2, tile - 4, 1);
+      ctx.fillStyle = 'rgba(9,14,20,0.12)';
+      ctx.fillRect(x + 2, y + tile - 3, tile - 4, 1);
     }
   }
 }

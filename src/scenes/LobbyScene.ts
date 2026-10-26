@@ -1,9 +1,10 @@
 import * as Phaser from 'phaser';
 import { connectedPads, halfLabels, halfName, padKind, padLabels, padName } from '../gamepads';
 import { isSplit, resolvePad } from '../padconfig';
-import { hidLabels, hidPad, hidPads } from '../joyhid';
-import { DIFFICULTIES, HEIGHT, MAX_PLAYERS, PLAYER_COLORS, QUEST, TEAM_COLORS, WEAPON_AREA, WIDTH } from '../config';
+import { directLabels, hidPad, hidPads, isProPad } from '../joyhid';
+import { isQuestMode, isStoredQuestRoute, prepareQuest, questStageNumber, rollQuestRoute, DIFFICULTIES, HEIGHT, MAX_PLAYERS, PLAYER_COLORS, QUEST, QUEST_BOSSES, QUEST_FIGHTS, QUEST_RULES, TEAM_COLORS, WEAPON_AREA, WIDTH } from '../config';
 import { KEY_SETS, MAX_PAD_SLOTS, isKeySet, keyLabel, parsePad, type ControlId } from '../controls';
+import { applyQuestRule, questFactions, questRuleOf, questSideOf } from '../questHell';
 import { T } from '../i18n';
 import { getSettings, keysOf, randomizeTeams, saveSettings, setControl, toggleSkill, usesTeams, validate, type SlotConfig } from '../settings';
 import { sfx } from '../sfx';
@@ -12,7 +13,7 @@ import {
   C, FocusNav, Petals, UIScene, addBackdrop, addButton, addSelector, drawFrame, drawSkillIcon, toHex, toast, txt, type Modal,
 } from '../ui';
 import { drawWeaponIcon } from '../art';
-import { drawLobbyCrest, drawLobbyDie, drawLobbyPortrait, drawQuestEmblem, drawRosterFrame } from '../lobbyArt';
+import { drawLobbyCrest, drawLobbyDie, drawLobbyPortrait, drawRosterFrame } from '../lobbyArt';
 import { addArenaTexture, getMap } from '../maps';
 import { ROLES, roleById } from '../roles';
 import { WEAPONS, drawShape, shapeArea, type Weapon } from '../weapons';
@@ -22,6 +23,8 @@ export interface LobbySceneData {
   /** The failed stage's starting checkpoint, preserved while editing the party. */
   retryQuest?: QuestState;
   slots?: SlotConfig[];
+  /** The route shown in the lobby, so leaving for controller setup does not re-roll it. */
+  questRoute?: number[];
 }
 
 // Two rows of four cards, below a separate header and settings bar.
@@ -34,6 +37,27 @@ const WEAPON_ROW = 34;
 const CARD_Y = 154;
 const cardX = (i: number) => 30 + (i % CARD_COLS) * (CARD_W + CARD_GAP);
 const cardY = (i: number) => CARD_Y + Math.floor(i / CARD_COLS) * (CARD_H + CARD_GAP);
+
+/** A small mark for one quest step: blades, a maze, or the final mask. */
+function drawPhaseIcon(g: Phaser.GameObjects.Graphics, phase: number, x: number, y: number, color: number) {
+  g.lineStyle(1, color, 0.35).strokeCircle(x, y, 34);
+  if (phase === 0) {
+    g.lineStyle(3, color, 0.9).lineBetween(x - 16, y + 14, x + 8, y - 16).lineBetween(x - 8, y + 16, x + 16, y - 14);
+    g.lineStyle(2, color, 0.55).lineBetween(x - 18, y - 8, x - 8, y - 16).lineBetween(x + 10, y + 16, x + 18, y + 8);
+  } else if (phase === 1) {
+    g.lineStyle(2, color, 0.85);
+    g.strokeRect(x - 16, y - 16, 32, 32);
+    g.strokeRect(x - 8, y - 8, 16, 16);
+    g.lineBetween(x - 16, y, x - 8, y);
+    g.lineBetween(x, y - 16, x, y - 8);
+    g.lineBetween(x + 8, y, x + 16, y);
+  } else {
+    g.fillStyle(color, 0.9).fillCircle(x, y + 4, 12);
+    g.fillTriangle(x - 14, y + 2, x - 8, y - 16, x - 2, y + 2);
+    g.fillTriangle(x + 14, y + 2, x + 8, y - 16, x + 2, y + 2);
+    g.fillStyle(0x1b140c, 1).fillCircle(x - 4, y + 2, 2).fillCircle(x + 4, y + 2, 2);
+  }
+}
 
 const K = Phaser.Input.Keyboard.KeyCodes;
 /** Keys the menus / battle already use, so they can't be bound. */
@@ -68,6 +92,8 @@ export class LobbyScene extends UIScene {
   /** Loadout window: which key box (0 = attack, 1–3 = skills, 4–5 = items) is waiting for a key press. */
   private bindingIdx: number | null = null;
   private retryQuest: QuestState | null = null;
+  /** Stage ids for the quest run this lobby is preparing. */
+  private questRoute: number[] = [];
 
   constructor() {
     super('Lobby');
@@ -78,8 +104,19 @@ export class LobbyScene extends UIScene {
     if (this.retryQuest) {
       const settings = getSettings();
       settings.mode = 'quest';
+      settings.questRule = questRuleOf(this.retryQuest);
       if (data.slots) settings.slots = structuredClone(data.slots);
+      applyQuestRule(settings.slots, settings.questRule);
       saveSettings();
+      const prepared = prepareQuest(this.retryQuest);
+      this.retryQuest.route = prepared.route;
+      this.retryQuest.stage = prepared.stage;
+      this.retryQuest.campaign = 'quest';
+      this.questRoute = prepared.route;
+    } else if (isQuestMode(getSettings().mode)) {
+      this.questRoute = isStoredQuestRoute(data.questRoute) ? [...data.questRoute!] : rollQuestRoute();
+    } else {
+      this.questRoute = [];
     }
   }
 
@@ -116,16 +153,17 @@ export class LobbyScene extends UIScene {
     this.layer.removeAll(true);
     this.nav.reset();
 
-    const active = (s.mode === 'quest' ? s.slots.slice(0, QUEST.partySlots) : s.slots).filter((slot) => slot.control !== 'off').length;
+    const active = (isQuestMode(s.mode) ? s.slots.slice(0, QUEST.partySlots) : s.slots).filter((slot) => slot.control !== 'off').length;
     const header = this.add.graphics();
     drawLobbyCrest(header, 55, 39, 25);
     header.fillStyle(0x172230, 1).fillRoundedRect(WIDTH - 236, 23, 206, 34, 17);
     header.fillStyle(validate(s) ? C.gold : 0x8ac79f, 1).fillCircle(WIDTH - 216, 40, 3);
     this.layer.add(header);
     this.layer.add(txt(this, 94, 30, this.retryQuest ? T().questEdit : T().lobbyTitle, 27, C.text, { title: true, bold: true, origin: [0, 0.5] }));
-    this.layer.add(txt(this, 96, 55, 'S H A D O W  &  S T E E L', 10, C.dim, { origin: [0, 0.5] }));
-    this.layer.add(txt(this, WIDTH / 2, 39, this.retryQuest ? T().questRetrySetup(this.retryQuest.stage + 1) : T().lobbyTagline, 15, '#bba983', { title: true, origin: 0.5 }));
-    this.layer.add(txt(this, WIDTH - 124, 40, T().lobbyCount(active, s.mode === 'quest' ? QUEST.partySlots : MAX_PLAYERS), 13, C.text, { bold: true, origin: 0.5 }));
+    const questHint = s.questRule === 'hell' ? T().hellHint : s.questRule === 'free' ? T().questFactionHint : T().questStandardHint;
+    this.layer.add(txt(this, 96, 55, isQuestMode(s.mode) ? questHint : 'S H A D O W  &  S T E E L', 10, C.dim, { origin: [0, 0.5] }));
+    this.layer.add(txt(this, WIDTH / 2, 39, this.retryQuest ? T().questRetrySetup(questStageNumber(this.questRoute, this.retryQuest.stage)) : T().lobbyTagline, 15, '#bba983', { title: true, origin: 0.5 }));
+    this.layer.add(txt(this, WIDTH - 124, 40, T().lobbyCount(active, isQuestMode(s.mode) ? QUEST.partySlots : MAX_PLAYERS), 13, C.text, { bold: true, origin: 0.5 }));
 
     const chip = (id: string, x: number, w: number, label: string, value: string, action?: () => void, valueColor = C.text) => {
       const g = this.add.graphics();
@@ -161,18 +199,35 @@ export class LobbyScene extends UIScene {
       });
     }
 
-    const mapX = usesTeams(s.mode) ? 710 : 496;
+    if (isQuestMode(s.mode)) {
+      const cycleRule = () => {
+        s.questRule = QUEST_RULES[(QUEST_RULES.indexOf(s.questRule) + 1) % QUEST_RULES.length];
+        applyQuestRule(s.slots, s.questRule);
+        saveSettings();
+        sfx.menuChange();
+        this.build();
+      };
+      const ruleColor = s.questRule === 'hell' ? '#eea08e' : s.questRule === 'free' ? '#e2c48b' : C.text;
+      chip('quest-side', 496, 200, T().questSide, T().questRules[s.questRule], this.retryQuest ? undefined : cycleRule, ruleColor);
+    }
+    const mapX = usesTeams(s.mode) || isQuestMode(s.mode) ? 710 : 496;
     const mapW = WIDTH - 30 - mapX;
-    const questMap = getMap(QUEST.maps[this.retryQuest?.stage ?? 0]);
-    const mapLabel = s.mode === 'quest' ? this.retryQuest ? T().mapName(questMap) : T().questMaps : s.mapId === 'random' ? T().randomShort : T().mapName(getMap(s.mapId));
-    chip('map', mapX, mapW, T().map, mapLabel, s.mode === 'quest' ? undefined : () => this.scene.start('Map'));
-    const preview = s.mode === 'quest' ? questMap : getMap(s.mapId === 'random' ? undefined : s.mapId);
-    this.layer.add(this.add.image(WIDTH - 105, 114, addArenaTexture(this, preview)).setDisplaySize(98, 42));
-    const previewTrim = this.add.graphics();
-    previewTrim.lineStyle(1, C.gold, 0.35).strokeRect(WIDTH - 154, 93, 98, 42);
-    this.layer.add(previewTrim);
+    const questMap = this.retryQuest ? getMap(QUEST.maps[this.retryQuest.stage]) : null;
+    const mapLabel = isQuestMode(s.mode) ? questMap ? T().mapName(questMap) : T().questMaps : s.mapId === 'random' ? T().randomShort : T().mapName(getMap(s.mapId));
+    chip('map', mapX, mapW, T().map, mapLabel, isQuestMode(s.mode) ? undefined : () => this.scene.start('Map'));
+    const preview = isQuestMode(s.mode) ? questMap : getMap(s.mapId === 'random' ? undefined : s.mapId);
+    if (preview) {
+      this.layer.add(this.add.image(WIDTH - 105, 114, addArenaTexture(this, preview)).setDisplaySize(98, 42));
+      const previewTrim = this.add.graphics();
+      previewTrim.lineStyle(1, C.gold, 0.35).strokeRect(WIDTH - 154, 93, 98, 42);
+      this.layer.add(previewTrim);
+    }
 
-    s.slots.forEach((slot, i) => this.buildCard(slot, i));
+    s.slots.forEach((slot, i) => {
+      if (isQuestMode(s.mode) && i >= QUEST.partySlots) return;
+      this.buildCard(slot, i);
+    });
+    if (isQuestMode(s.mode)) this.drawQuestStages();
 
     const footer = this.add.graphics();
     footer.fillStyle(0x121b29, 0.98).fillRoundedRect(30, 638, WIDTH - 60, 62, 10);
@@ -186,13 +241,50 @@ export class LobbyScene extends UIScene {
     launchLabel.setScale(Math.min(1, 168 / launchLabel.width));
     this.layer.add(launchLabel);
     this.nav.add({ id: 'fight', x: 1016, y: 645, w: 224, h: 47, onEnter: () => this.startBattle(), radius: 7 });
-    addButton(this, this.layer, this.nav, { id: 'pads', x: 323, y: 668, w: 230, h: 36, label: T().padOpen, size: 15, onPress: () => this.scene.start('Pads', { from: 'Lobby', fromData: this.retryQuest ? { retryQuest: this.retryQuest } : undefined }) });
+    addButton(this, this.layer, this.nav, { id: 'pads', x: 323, y: 668, w: 230, h: 36, label: T().padOpen, size: 15, onPress: () => this.scene.start('Pads', { from: 'Lobby', fromData: { ...(this.retryQuest ? { retryQuest: this.retryQuest } : {}), ...(this.questRoute.length ? { questRoute: this.questRoute } : {}) } }) });
     addButton(this, this.layer, this.nav, { id: 'back', x: 116, y: 668, w: 140, h: 36, label: `‹  ${T().back}`, size: 16, onPress: () => this.scene.start('Mode') });
     const connected = connectedPads().length + hidPads().filter((p) => p.connected).length;
     this.layer.add(txt(this, 482, 658, connected ? T().lobbyControllers(connected) : T().noPads, 12, C.dim, { origin: [0, 0.5] }));
     this.layer.add(txt(this, 482, 681, T().lobbyControllerHint, 11, C.faint, { origin: [0, 0.5] }));
     this.layer.add(txt(this, WIDTH / 2, 712, T().confirmHint, 10, C.faint, { origin: 0.5 }));
     this.nav.done('c0-control');
+  }
+
+  /** Three steps. The rolled maps stay hidden until each stage begins. */
+  private drawQuestStages() {
+    const phases = T().questPhases();
+    const gap = 16;
+    const n = phases.length;
+    const y = cardY(QUEST.partySlots);
+    const w = Math.floor((WIDTH - 60 - (n - 1) * gap) / n);
+    const here = this.retryQuest ? this.questRoute.indexOf(this.retryQuest.stage) : -1;
+    const stage = here < 0 ? undefined : this.retryQuest?.stage;
+    const current = stage === undefined ? -1
+      : (QUEST_FIGHTS as readonly number[]).includes(stage) ? 0
+      : (QUEST_BOSSES as readonly number[]).includes(stage) ? 2
+      : 1;
+    const tones = [0xc45b52, 0xc4a36a, 0xd2b15a];
+    phases.forEach((phase, index) => {
+      const x = 30 + index * (w + gap);
+      const color = tones[index] ?? 0xb69d7b;
+      const active = index === current;
+      const eg = this.add.graphics();
+      drawRosterFrame(eg, x, y, w, CARD_H, color, !active && current >= 0);
+      drawPhaseIcon(eg, index, x + w / 2, y + 78, color);
+      const dots = [2, 2, 1][index] ?? 1;
+      for (let k = 0; k < dots; k++) {
+        const cx = x + w / 2 + (k - (dots - 1) / 2) * 16;
+        eg.fillStyle(color, 0.85).fillCircle(cx, y + 198, 3.5);
+      }
+      this.layer.add(eg);
+      this.layer.add(txt(this, x + 16, y + 20, T().questPhaseLabel(index + 1), 13, '#bba18b', { bold: true, origin: [0, 0.5] }));
+      const name = txt(this, x + w / 2, y + 124, phase.name, 22, '#e6d7c4', { title: true, bold: true, origin: 0.5 });
+      name.setScale(Math.min(1, (w - 36) / Math.max(1, name.width)));
+      this.layer.add(name);
+      const detail = txt(this, x + w / 2, y + 150, phase.detail, 13, C.dim, { wrap: w - 48, align: 'center', origin: [0.5, 0] });
+      this.layer.add(detail);
+      if (active) this.layer.add(txt(this, x + w - 16, y + 20, T().questPhaseMark, 12, '#e2c48b', { bold: true, origin: [1, 0.5] }));
+    });
   }
 
   private buildCard(slot: SlotConfig, i: number) {
@@ -204,30 +296,6 @@ export class LobbyScene extends UIScene {
     const cpu = slot.control === 'cpu';
     const L = this.layer;
     const inner = CARD_W - 24;
-
-    // The uneditable enemy row becomes an illustrated preview of Quest's four stages.
-    if (s.mode === 'quest' && i >= QUEST.partySlots) {
-      const stage = i - QUEST.partySlots;
-      const map = getMap(QUEST.maps[stage]);
-      const eg = this.add.graphics();
-      drawRosterFrame(eg, x, y, CARD_W, CARD_H, 0x9a7d9c, true);
-      drawQuestEmblem(eg, x + 62, y + 111, stage);
-      // Lock badge: these slots are controlled by the stage.
-      eg.lineStyle(2, 0x758297, 0.6).strokeCircle(x + CARD_W - 26, y + 15, 5);
-      eg.fillStyle(0x758297, 0.8).fillRoundedRect(x + CARD_W - 33, y + 15, 14, 10, 2);
-      for (let k = 0; k < QUEST.maps.length; k++) {
-        const cx = x + CARD_W / 2 + (k - 1.5) * 22;
-        eg.fillStyle(k === stage ? 0xb69d7b : 0x354052, k === stage ? 1 : 0.6).fillCircle(cx, y + 184, k === stage ? 4 : 2.5);
-      }
-      L.add(eg);
-      L.add(txt(this, x + 16, y + 19, T().questStage(stage + 1), 14, '#bba18b', { bold: true, origin: [0, 0.5] }));
-      const name = txt(this, x + 113, y + 92, T().mapName(map), 18, '#c5bdcc', { title: true, bold: true, origin: [0, 0.5] });
-      name.setScale(Math.min(1, (CARD_W - 127) / name.width));
-      L.add(name);
-      L.add(txt(this, x + 113, y + 116, T().questGoals[stage], 12, C.dim, { wrap: CARD_W - 129 }));
-      L.add(txt(this, x + CARD_W / 2, y + 208, T().questEnemyDesc, 11, C.faint, { origin: 0.5 }));
-      return;
-    }
 
     const g = this.add.graphics();
     drawRosterFrame(g, x, y, CARD_W, CARD_H, color, off);
@@ -261,7 +329,8 @@ export class LobbyScene extends UIScene {
     const hidSel = /^hid(\d)$/.exec(slot.control);
     if (hidSel) {
       const j = hidPad(Number(hidSel[1]));
-      L.add(txt(this, x + CARD_W / 2, y + 79, j ? `Joy-Con (${j.side}) ⚡${j.slow ? ` ⚠ ${j.rate} Hz` : ''}` : T().hidMissing, 10, j?.slow ? '#ff8a8a' : C.goldHex, { origin: 0.5 }));
+      const name = j ? (isProPad(j) ? T().hidProName : `Joy-Con (${j.side})`) : '';
+      L.add(txt(this, x + CARD_W / 2, y + 79, j ? `${name} ⚡${j.slow ? ` ⚠ ${j.rate} Hz` : ''}` : T().hidMissing, 10, j?.slow ? '#ff8a8a' : C.goldHex, { origin: 0.5 }));
     }
     if (off) {
       g.lineStyle(1, 0x68788d, 0.24).strokeCircle(x + CARD_W / 2, y + 130, 29);
@@ -273,7 +342,18 @@ export class LobbyScene extends UIScene {
       return;
     }
 
-    if (usesTeams(s.mode)) {
+    if (isQuestMode(s.mode)) {
+      const side = s.questRule === 'free' ? questSideOf(slot, 'heroes') : s.questRule;
+      const bx = x + CARD_W - 112;
+      const tint = side === 'hell' ? 0xe1877c : 0x82c9bc;
+      const choosing = s.questRule === 'free' && !this.retryQuest;
+      g.fillStyle(tint, 0.15).fillRoundedRect(bx, y + 8, 100, 22, 11);
+      L.add(txt(this, bx + 50, y + 19, `${T().questSides[side]}${choosing ? ' ›' : ''}`, 10, toHex(tint), { bold: true, origin: 0.5 }));
+      if (choosing) {
+        const cycleSide = () => { slot.questSide = side === 'hell' ? 'heroes' : 'hell'; rebuild(); };
+        this.nav.add({ id: `c${i}-faction`, x: bx, y: y + 8, w: 100, h: 22, onEnter: cycleSide, onAdjust: cycleSide, radius: 11 });
+      }
+    } else if (usesTeams(s.mode)) {
       const bx = x + CARD_W - 94;
       g.fillStyle(TEAM_COLORS[slot.team], 0.12).fillRoundedRect(bx, y + 8, 80, 22, 11);
       g.fillStyle(TEAM_COLORS[slot.team], 0.85).fillCircle(bx + 12, y + 19, 3);
@@ -312,7 +392,7 @@ export class LobbyScene extends UIScene {
     L.add(weaponName);
     const role = roleById(slot.role);
     for (const [n, label, value, tint] of [
-      [0, 'HP', Math.round(role.maxHp * (s.mode === 'quest' ? QUEST.partyHp : 1)), 0xce7b7b],
+      [0, 'HP', Math.round(role.maxHp * (isQuestMode(s.mode) ? QUEST.partyHp : 1)), 0xce7b7b],
       [1, 'PE', role.maxPe, 0xc4aa6b],
     ] as const) {
       const bx = x + 107 + n * 90;
@@ -339,7 +419,7 @@ export class LobbyScene extends UIScene {
   private bindLabel(slot: SlotConfig, n: number) {
     if (isKeySet(slot.control)) return keyLabel(slot.binds[n]);
     const hid = /^hid(\d)$/.exec(slot.control);
-    if (hid) return hidLabels(hidPad(Number(hid[1]))?.side ?? 'R')[n];
+    if (hid) return directLabels(hidPad(Number(hid[1])))[n];
     const sel = parsePad(slot.control);
     if (sel) {
       if (sel.side) return halfLabels(sel.side)[n];
@@ -351,7 +431,7 @@ export class LobbyScene extends UIScene {
   private startBattle() {
     const s = getSettings();
     // Every player on a gamepad needs it connected (press a button on it so the browser sees it).
-    const active = s.mode === 'quest' ? s.slots.slice(0, QUEST.partySlots) : s.slots;
+    const active = isQuestMode(s.mode) ? s.slots.slice(0, QUEST.partySlots) : s.slots;
     const missing = active
       .map((sl, i) => ({ sel: parsePad(sl.control), hid: /^hid(\d)$/.exec(sl.control), i, off: sl.control === 'off' }))
       .filter((x) => !x.off && ((x.sel && !resolvePad(x.sel.index)) || (x.hid && !hidPad(Number(x.hid[1])))));
@@ -361,11 +441,23 @@ export class LobbyScene extends UIScene {
       toast(this, err);
       return;
     }
+    if (isQuestMode(s.mode)) {
+      const rule = this.retryQuest ? questRuleOf(this.retryQuest) : s.questRule;
+      applyQuestRule(s.slots, rule);
+      const side = questFactions(s.slots, rule === 'hell' ? 'hell' : 'heroes').side;
+      saveSettings();
+      sfx.start();
+      const base = this.retryQuest
+        ? structuredClone(this.retryQuest)
+        : (isStoredQuestRoute(this.questRoute) ? { stage: this.questRoute[0], route: [...this.questRoute], campaign: 'quest' as const } : undefined);
+      this.scene.start('Loading', { slots: structuredClone(s.slots), mode: s.mode, mapId: s.mapId,
+        quest: { ...base, ...prepareQuest(base), side, rule },
+      });
+      return;
+    }
     saveSettings();
     sfx.start();
-    this.scene.start('Loading', { slots: structuredClone(s.slots), mode: s.mode, mapId: s.mapId,
-      ...(this.retryQuest ? { quest: structuredClone(this.retryQuest) } : {}),
-    });
+    this.scene.start('Loading', { slots: structuredClone(s.slots), mode: s.mode, mapId: s.mapId });
   }
 
   // ---------- loadout window ----------

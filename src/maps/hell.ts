@@ -1,12 +1,19 @@
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '../config';
+import { GROVE } from './grove';
+import { SEALS } from './seals';
+import { LANTERN } from './lantern';
+import { WARDENS } from './wardens';
 import { PRISON } from './prison';
+import { SNARE } from './snare';
+import { NIGHT } from './night';
+import { DIRGE } from './dirge';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, mirrored, paintShadow, paintVignette,
   type ChestSpot, type Ctx, type GameMap, type Obstacle,
 } from './common';
 
 /**
- * 地獄 The Underworld: the four 闖關 Quest stages. They aren't offered in map
+ * 地獄 The Underworld: the eight stages shared by 闖關 and 闖關2. They aren't offered in map
  * select; each stage always uses its own.
  */
 
@@ -154,7 +161,7 @@ export const YAMA: GameMap = {
   },
 };
 
-// ---------- stage 4: 鬼王殿 Oni King's Hall ----------
+// ---------- Quest stage 4: 鬼王殿 Oni King's Hall ----------
 
 const ONIHALL_OBSTACLES: Obstacle[] = [
   { kind: 'blood', low: true, x: CX, y: MID, w: 200, h: 110 },
@@ -181,9 +188,13 @@ export const ONIHALL: GameMap = {
   id: 'onihall',
   name: "Oni King's Hall",
   zh: '鬼王殿',
-  desc: 'The Oni King waits on his throne among burning braziers. A pool of blood fills the middle of the hall.',
-  descZh: '鬼王坐鎮殿中，火盆熊熊燃燒，大殿中央是一池血水。',
+  desc: 'The Oni King waits on his throne. Braziers burst and leave fire on the floor; step on the flames and you burn. A pool of blood fills the middle of the hall.',
+  descZh: '鬼王坐鎮殿中。火盆會炸出地面火焰，踩上去會被灼傷。大殿中央是一池血水。',
   obstacles: ONIHALL_OBSTACLES,
+  flames: {
+    spots: ONIHALL_OBSTACLES.filter((o) => o.kind === 'brazier').map(({ x, y }) => ({ x, y })),
+    interval: 6.5, count: 2, warn: 1.15, radius: 78, dps: 16, life: 4.2,
+  },
   chests: ONIHALL_CHESTS,
   particles: 'embers',
   paint(ctx, rand) {
@@ -195,7 +206,7 @@ export const ONIHALL: GameMap = {
   },
 };
 
-export const QUEST_MAPS: GameMap[] = [SANZU, YAMA, PRISON, ONIHALL];
+export const QUEST_MAPS: GameMap[] = [SANZU, YAMA, PRISON, GROVE, SEALS, LANTERN, ONIHALL, WARDENS, SNARE, NIGHT, DIRGE];
 
 // ---------- painting ----------
 

@@ -2,7 +2,7 @@ import * as Phaser from 'phaser';
 import { HEIGHT, WIDTH } from '../config';
 import { T, getLang } from '../i18n';
 import { MAX_PAD_SLOTS } from '../controls';
-import { configurable, connectJoyCons, hidKeys, hidPad, hidPads, hidSupported, joyLabel, lastError, setHidMap, type HidMap, type JoyButtons } from '../joyhid';
+import { configurable, connectJoyCons, hidKeys, hidPad, hidPads, hidState, hidSupported, isProPad, joyLabel, lastError, setHidMap, type HidMap, type JoyButtons } from '../joyhid';
 import { padKind, padName, type PadSide } from '../gamepads';
 import {
   PAD_GRIPS, PAD_MODES, getPadGrip, getPadMode, isSplit, readController, resetPadMaps, setPadGrip, setPadMap, setPadMode, type PadMap,
@@ -97,7 +97,7 @@ export class PadScene extends UIScene {
   }
 
   private sig() {
-    const direct = hidPads().map((j) => `${j.side}${j.connected ? 1 : 0}`).join(',');
+    const direct = hidPads().map((j) => `${isProPad(j) ? 'P' : j.side}${j.connected ? 1 : 0}`).join(',');
     return this.pads().map((p) => (p ? `${p.id}|${getPadMode(p.id)}|${getPadGrip(p.id)}` : '-')).join('#') + `@${direct}`;
   }
 
@@ -227,10 +227,14 @@ export class PadScene extends UIScene {
     });
   }
 
-  /** A Joy-Con connected directly: its own buttons, SL and SR included. */
+  /** A Joy-Con or Pro Controller connected directly. */
   private buildHidRow(n: number, y: number, glow: Phaser.GameObjects.Graphics) {
     const j = hidPad(n);
     if (!j) return;
+    if (isProPad(j)) {
+      this.buildProRow(n, y, glow);
+      return;
+    }
     this.layer.add(txt(this, ROW_X + 84, y + 16, T().hidRow(n), 21, C.text, { title: true, bold: true }));
     this.layer.add(txt(this, ROW_X + 84, y + 48, `Joy-Con (${j.side}) ⚡`, 14, C.text, { bold: true }));
     const link = txt(this, ROW_X + 84, y + 70, '', 10, C.dim);
@@ -240,7 +244,7 @@ export class PadScene extends UIScene {
     this.layer.add([link, warn, raw, test]);
     this.updaters.push(() => {
       const now = hidPad(n);
-      if (!now) return;
+      if (!now || isProPad(now)) return;
       const bat = now.battery >= 0 ? `${T().hidBattery[now.battery]}${now.charging ? ' ⚡' : ''}` : '–';
       link.setText(T().hidRate(now.rate, bat));
       link.setColor(now.slow ? '#ff8a8a' : '#9fe89a');
@@ -264,6 +268,32 @@ export class PadScene extends UIScene {
     addButton(this, this.layer, this.nav, { id: `h${n}-r`, x: ROW_X + 790 + 56 + 150 + 10 + 45, y: y + 40, w: 90, h: 34, label: T().padReset, size: 15, onPress: () => { setHidMap(j.side, null); this.build(); } });
   }
 
+  /** The B01-style Pro Controller: Switch face buttons, left stick moves, right stick aims. */
+  private buildProRow(n: number, y: number, glow: Phaser.GameObjects.Graphics) {
+    this.layer.add(txt(this, ROW_X + 84, y + 16, T().hidRow(n), 21, C.text, { title: true, bold: true }));
+    this.layer.add(txt(this, ROW_X + 84, y + 48, `${T().hidProName} ⚡`, 14, C.text, { bold: true }));
+    this.layer.add(txt(this, ROW_X + 84, y + 72, 'B · X · A · Y · ZR · ZL', 12, C.dim));
+    const raw = txt(this, ROW_X + 340, y + 18, '', 12, C.dim);
+    const test = txt(this, ROW_X + 340, y + 48, '', 14, C.text, { bold: true });
+    this.layer.add([raw, test]);
+    this.updaters.push(() => {
+      const now = hidPad(n);
+      if (!now || !isProPad(now)) return;
+      if (!now.ready) {
+        raw.setText(T().hidWaiting);
+        test.setText('');
+        return;
+      }
+      const st = hidState(now);
+      const held = now.held();
+      raw.setText(T().hidRaw(held.length ? held.join(' ') : '–', `${st.mx.toFixed(2)} / ${st.my.toFixed(2)}   ${st.ax.toFixed(2)} / ${st.ay.toFixed(2)}`));
+      test.setText(T().padTest('', actLine(st.actions), `${st.mx.toFixed(1)}, ${st.my.toFixed(1)}`));
+      test.setColor(st.actions.some(Boolean) || held.length > 0 ? '#ffd27a' : C.text);
+      glow.clear();
+      if (held.length > 0) glow.lineStyle(3, C.gold, 0.9).strokeRoundedRect(ROW_X, y, ROW_W, ROW_H - 10, 12);
+    });
+  }
+
   update(_t: number, dms: number) {
     this.petals.update(dms / 1000);
     if (!this.cal && this.sig() !== this.signature) this.build();
@@ -284,7 +314,7 @@ export class PadScene extends UIScene {
       who = `${T().padSlot(index + 1)}${side ? ` ${side === 'L' ? T().padHalfL : T().padHalfR}` : ''}`;
     } else {
       const j = hidPad(index);
-      if (!j) return;
+      if (!j || isProPad(j)) return;
       side = j.side;
       j.takeEdges();
       who = `${T().hidRow(index)} (${j.side})`;
@@ -405,7 +435,7 @@ export class PadScene extends UIScene {
   /** A directly connected Joy-Con: every new press arrives as an event, so even a very quick tap is caught. */
   private pollHidCalibration(cal: CalState) {
     const j = hidPad(cal.index);
-    if (!j) return;
+    if (!j || isProPad(j)) return;
     const allowed = configurable(j.side);
     const key = j.takeEdges().find((k) => allowed.includes(k));
     if (!key) return;

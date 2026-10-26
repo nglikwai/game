@@ -65,7 +65,7 @@ export type MapId = 'courtyard' | 'river' | 'snow' | 'town' | 'lava' | 'garden' 
   | 'doors' | 'powder' | 'bell' | 'barrier' | 'whirlpool' | 'herbs'
   | 'tea' | 'storm' | 'sunken' | 'frostfire' | 'orchard' | 'astral'
   /** 闖關 Quest stages only. */
-  | 'sanzu' | 'yama' | 'prison' | 'onihall';
+  | 'sanzu' | 'yama' | 'prison' | 'grove' | 'seals' | 'lantern' | 'onihall' | 'wardens' | 'snare' | 'night' | 'dirge';
 
 export interface GameMap {
   id: MapId;
@@ -90,8 +90,10 @@ export interface GameMap {
   route?(fx: number, fy: number, tx: number, ty: number): { x: number; y: number } | null;
   /** Lightning storm: every `interval` s, `strikes` spots are marked and struck `warn` s later. */
   lightning?: { interval: number; strikes: number; radius: number; damage: number; warn: number };
-  /** Fire vents at fixed spots: every `interval` s, `count` of them are marked and erupt `warn` s later. */
+  /** Fire vents at fixed spots: every `interval` s, `count` of them are marked and erupt `warn` s later. The flame stays on the ground. */
   vents?: { spots: { x: number; y: number }[]; interval: number; count: number; radius: number; damage: number; warn: number };
+  /** Braziers and such: every `interval` s, `count` spots are marked, then they burst and leave fire for `life` s. Standing in it burns. */
+  flames?: { spots: { x: number; y: number }[]; interval: number; count: number; warn: number; radius: number; dps: number; life: number };
   /** Portal pairs (design coords): walk into one, come out of the other. */
   portals?: { a: { x: number; y: number }; b: { x: number; y: number }; color: number }[];
   /** Rolling boulders: every `interval` s one rolls along a random lane (design y), after a `warn` s warning. */
@@ -289,12 +291,17 @@ export function paintShadow(ctx: Ctx, o: Obstacle) {
 export function stoneBlock(ctx: Ctx, x: number, y: number, w: number, h: number, base: string, light: string, dark: string) {
   ctx.fillStyle = base;
   ctx.fillRect(x, y, w, h);
+  const b = Math.min(6, w * 0.12, h * 0.12);
   ctx.fillStyle = light;
-  ctx.fillRect(x, y, w, 3);
-  ctx.fillRect(x, y, 3, h);
+  ctx.beginPath();
+  ctx.moveTo(x, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w - b, y + b);
+  ctx.lineTo(x + b, y + b); ctx.lineTo(x + b, y + h - b); ctx.lineTo(x, y + h); ctx.closePath(); ctx.fill();
   ctx.fillStyle = dark;
-  ctx.fillRect(x, y + h - 3, w, 3);
-  ctx.fillRect(x + w - 3, y, 3, h);
+  ctx.beginPath();
+  ctx.moveTo(x + w, y); ctx.lineTo(x + w, y + h); ctx.lineTo(x, y + h);
+  ctx.lineTo(x + b, y + h - b); ctx.lineTo(x + w - b, y + h - b); ctx.lineTo(x + w - b, y + b); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = 'rgba(255,247,225,0.1)';
+  ctx.fillRect(x + b, y + b, Math.max(0, w - b * 2), 1);
 }
 
 export function paintLanternGlow(ctx: Ctx, o: Obstacle) {

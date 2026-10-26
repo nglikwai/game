@@ -1,20 +1,23 @@
 import * as Phaser from 'phaser';
 import { playMusic, type Track } from '../music';
-import { HARD_CPU_HP, SOUL_CAST_TIME, MAIN_TOWER, MAIN_TOWER_HEAL, SMALL_TOWER, RESPAWN_TOWER_COST, TOWER_RESPAWN_HP, TOWER_RESPAWN_SOUL_KEEP, SOUL_REAPER, SOUL_FIRE, SOUL_TREE, SOUL_MISS_PARALYZE, SOUL_LEVELS, SOUL_PER_LEVEL, SOUL_FROM_HURT, SOUL_THUNDER, TEAM_RESPAWN, TOWER_AURA, TOWER_FIRE_INTERVAL, TOWER_HP, TOWER_RANGE, MAP_SCALE, MAX_PLAYERS, BIG_CHEST_HP, BIG_CHEST_ITEMS, CHEST_HP, maxRandomChests, randomChestInterval, startRandomChests, BATTLE_READY_SECONDS, COUNTDOWN, QUEST, ALTAR, EMPTY_CHEST_CHANCE, HEIGHT, HUD_HEIGHT, MAX_HP, MAX_PE, PLAYER_COLORS, PRINCESS_WALL_HP, RES, RESPAWN_DELAY, TEAM_COLORS, WIDTH, type GameMode } from '../config';
-import { createController, type WorldView } from '../controls';
+import { isQuestMode, prepareQuest, questStageNumber, nextQuestStage, type QuestMode, type QuestRule, type QuestSide, HARD_CPU_HP, SOUL_CAST_TIME, MAIN_TOWER, MAIN_TOWER_HEAL, SMALL_TOWER, RESPAWN_TOWER_COST, TOWER_RESPAWN_HP, TOWER_RESPAWN_SOUL_KEEP, SOUL_REAPER, SOUL_FIRE, SOUL_TREE, SOUL_MISS_PARALYZE, SOUL_LEVELS, SOUL_PER_LEVEL, SOUL_FROM_HURT, SOUL_THUNDER, TEAM_RESPAWN, TOWER_AURA, TOWER_FIRE_INTERVAL, TOWER_HP, TOWER_RANGE, MAP_SCALE, MAX_PLAYERS, BIG_CHEST_HP, BIG_CHEST_ITEMS, CHEST_HP, QUEST_MAX_CHESTS, chestsWithinCap, maxRandomChests, randomChestInterval, startRandomChests, BATTLE_READY_SECONDS, COUNTDOWN, QUEST, QUEST_TACTICS, QUEST_BOSSES, ALTAR, EMPTY_CHEST_CHANCE, HEIGHT, HUD_HEIGHT, MAX_HP, MAX_PE, PLAYER_COLORS, PRINCESS_WALL_HP, RES, RESPAWN_DELAY, TEAM_COLORS, WIDTH, type GameMode, type GroveIllusion, type GroveRole } from '../config';
+import { AIController, createController, type WorldView } from '../controls';
 import { Fighter, type Arena } from '../Fighter';
+import { hellSlots, hellBossSlots, questFactions, questSideOf } from '../questHell';
 import { POCKET_SIZE, rollItem, type Item, type ItemEffect } from '../items';
-import { skillById, skillCooldownFor, type SkillEffect } from '../skills';
+import { SKILL_SLOTS, skillById, skillCooldownFor, summonStrikeCount, type SkillEffect } from '../skills';
 import { roleById, type Role } from '../roles';
-import { rollCpuLoadouts } from '../cpuLoadout';
-import { WEAPONS, drawShape, rayAngles, shapeHits, shapeHitsRect } from '../weapons';
+import { CPU_ENEMY_SKILLS, questFoeSkills, randomCpuEquipment, rollCpuLoadouts } from '../cpuLoadout';
+import { WEAPONS, drawShape, rayAngles, rollOniWeapon, shapeHits, shapeHitsRect } from '../weapons';
 import { T } from '../i18n';
 import { sfx } from '../sfx';
 import { ARENA as SCREEN_ARENA, ARENA_MID_Y as SCREEN_MID_Y, MAPS, MAP_RES, addArenaTexture, chestsFor, getMap, obstaclesFor, sideOf, spawnPoint, towerSpots, type GameMap, type MapId, type Obstacle, type TerrainKind } from '../maps';
 import { drawHeldWeapon, drawWeaponIcon, drawItemIcon, drawLog, kunai, ninjaTexture, type Pose } from '../art';
 import { createMatchStats, type MatchStats } from '../matchStats';
 import { performanceScore, rankMatchResults, selectMatchAwards } from '../matchAwards';
-import { pickTreeSummon, type TreeSummon } from '../questTree';
+import { groveSummonHitChance, pickTreeSummon, type TreeSummon } from '../questTree';
+import { chargeSeal, type SealPoint } from '../questSeals';
+import { advanceLantern, createLantern, distanceToEscortPath, type SpiritLantern } from '../questEscort';
 import { Fx, REAPER_SWING } from '../fx';
 import type { FighterState } from '../Fighter';
 import { getSettings, type SlotConfig } from '../settings';
@@ -52,6 +55,11 @@ interface Tower {
   team: number;
   /** A living tree uses main-tower HP, aura and respawns, but casts summons instead of arrows. */
   tree?: boolean;
+  /** Cursed grove: which of the three jobs this tree drew. */
+  grove?: GroveRole;
+  /** Small snare tree. `prisoner` is the ally sealed inside, if any. */
+  snare?: boolean;
+  prisoner?: Fighter;
   /** The big main tower (本陣) at the back. */
   main: boolean;
   range: number;
@@ -108,6 +116,12 @@ export interface Chest {
 /** 闖關 Quest: which stage (0-based) and what the party brought along from the stage before. */
 export interface QuestState {
   stage: number;
+  /** Six stage ids for this run: five trials, then one boss. */
+  route?: number[];
+  campaign?: QuestMode;
+  side?: QuestSide;
+  /** heroes: everyone is a hero. hell: everyone plays Hell. free: each player chose. */
+  rule?: QuestRule;
   carry?: {
     /** Per party slot: pocket items and soul. */
     players: Record<number, { pocket: Item[]; soul: number }>;
@@ -125,7 +139,19 @@ export interface BattleStartData {
 
 /** The boss: crimson, with a fixed loadout. */
 const BOSS_COLOR = 0xb3202e;
-const BOSS_GEAR = { weapon: Math.max(0, WEAPONS.findIndex((w) => w.id === 'hammer')), skills: ['fury', 'fireball', 'golden-bell'], role: 'samurai' as const };
+const BOSS_GEAR = { weapon: Math.max(0, WEAPONS.findIndex((w) => w.id === 'hammer')), skills: ['fury', 'thunder', 'golden-bell', 'blink'], role: 'samurai' as const };
+const DIRGE_COLOR = 0xd7a15a;
+const DIRGE_GEAR = { weapon: Math.max(0, WEAPONS.findIndex((w) => w.id === 'flail')), skills: ['golden-bell', 'fury', 'thunder', 'blink'], role: 'samurai' as const };
+const NIGHT_BOSS_GEAR = { weapon: Math.max(0, WEAPONS.findIndex((w) => w.id === 'ninjato')), skills: ['fury', 'blink', 'thunder', 'second-wind'] as const };
+export const WARDEN_GEAR = [
+  { weapon: WEAPONS.findIndex((w) => w.id === 'hammer'), skills: ['fury', 'golden-bell', 'blink', 'thunder'], role: 'samurai' as const },
+  { weapon: WEAPONS.findIndex((w) => w.id === 'talisman'), skills: ['fireball', 'holy-fire', 'sprint', 'second-wind'], role: 'mystic' as const },
+];
+
+export function wardenRole(partySize: number, index: number): Role {
+  return { ...roleById(WARDEN_GEAR[index].role), maxHp: QUEST.wardens.hpBase + QUEST.wardens.hpPerPlayer * partySize,
+    speed: 1.05, skillCooldown: 0.85, poise: 1, knockbackTaken: 0.4, healReceived: 1 };
+}
 
 export function bossRole(partySize: number): Role {
   const b = QUEST.boss;
@@ -135,12 +161,37 @@ export function bossRole(partySize: number): Role {
   };
 }
 
+export function nightBossRole(partySize: number): Role {
+  const b = QUEST.night.captain;
+  return {
+    ...roleById('ronin'), name: 'Night Oni', zh: '夜叉',
+    maxHp: b.hpBase + b.hpPerPlayer * partySize, speed: b.speed, skillCooldown: b.skillCooldown, poise: 1, knockbackTaken: b.knockbackTaken, healReceived: 1,
+  };
+}
+
+export function dirgeRole(partySize: number): Role {
+  const b = QUEST.dirge;
+  return {
+    ...roleById('samurai'), name: 'Bell Oni', zh: '鐘鬼',
+    maxHp: b.hpBase + b.hpPerPlayer * partySize, speed: b.speed, skillCooldown: b.skillCooldown, poise: 1, knockbackTaken: b.knockbackTaken, healReceived: 1,
+  };
+}
+
 /** Quest slots: the party (P1–P4, all on team 0) plus the stage's enemies (P5–P8, team 1). */
 function questSlots(lobby: SlotConfig[], stage: number): SlotConfig[] {
   const party = lobby.slice(0, QUEST.partySlots).map((sl) => ({ ...sl, team: 0 }));
   const n = party.filter((sl) => sl.control !== 'off').length;
   // Final stage prepares all guard slots; excess guards wait off-field for the boss to summon.
-  const enemies = stage === QUEST.bossStage ? Math.min(QUEST.boss.maxEnemies, MAX_PLAYERS - QUEST.partySlots) : Math.min(MAX_PLAYERS - QUEST.partySlots, n + 1);
+  const enemies = stage === QUEST.wardenStage ? QUEST.wardens.enemies
+    : stage === QUEST.bossStage ? Math.min(QUEST.boss.maxEnemies, MAX_PLAYERS - QUEST.partySlots)
+      : stage === QUEST.dirgeStage ? 1
+      : stage === QUEST.groveStage ? QUEST.grove.enemies
+        : stage === QUEST.rescueStage ? QUEST.rescue.enemies
+          : stage === QUEST.sealStage ? QUEST.seals.enemies
+        : stage === QUEST.escortStage ? QUEST.escort.enemies
+          : stage === QUEST.snareStage ? QUEST.snare.enemies
+            : stage === QUEST.nightStage ? QUEST.night.enemies
+            : Math.min(MAX_PLAYERS - QUEST.partySlots, n + 1);
   const base = lobby[QUEST.partySlots] ?? lobby[0];
   const foes = Array.from({ length: MAX_PLAYERS - QUEST.partySlots }, (_, k): SlotConfig => ({ ...base, control: k < enemies ? 'cpu' : 'off', team: 1 }));
   return [...party, ...foes];
@@ -169,11 +220,23 @@ interface QuestTreeCast {
   elapsed: number;
 }
 
+/** A night-alley lantern. Lit candles flare; a hero's swing blows one out until the flame returns. */
+interface NightCandle {
+  x: number;
+  y: number;
+  lit: boolean;
+  /** Seconds until the next flare, or until the flame returns when dark. */
+  timer: number;
+  /** Seconds the warning ring has been showing, when a flare is coming. */
+  warn: number | null;
+}
+
 
 
 
 /** A summon strike's hit chance for the soul level spent (1–4). */
 const soulHitChance = (byLevel: number[], level: number) => byLevel[Math.min(byLevel.length, Math.max(1, level)) - 1];
+export const summonHitChance = (base: number, boss = false) => Math.min(1, base + (boss ? QUEST.boss.summonHitBonus : 0));
 
 export class BattleScene extends UIScene implements Arena {
   protected bgm: Track = 'battle';
@@ -195,6 +258,10 @@ export class BattleScene extends UIScene implements Arena {
   /** When the fight started (after the countdown), in scene time (s). */
   private fightStart = 0;
   private ventMarks: { x: number; y: number; t: number }[] = [];
+  /** Ground fire: a warning ring, then a patch that burns anyone standing in it. */
+  private flameT = 0;
+  private flameMarks: { x: number; y: number; r: number; dps: number; life: number; t: number }[] = [];
+  private flamePatches: { x: number; y: number; r: number; t: number; life: number; dps: number; tick: number }[] = [];
   /** Portals: a fighter who just came out of one can't use it again until they step off. */
   private portalLock = new Map<Fighter, { x: number; y: number }>();
   /** Rolling boulders: time to the next one, the warning, and the boulders on their way. */
@@ -231,6 +298,41 @@ export class BattleScene extends UIScene implements Arena {
   private questTreeT = QUEST.rescue.tree.initialDelay;
   private questTreeCast: QuestTreeCast | null = null;
   private questTree: Tower | null = null;
+  /** Rescue seal, in world x. Closed until both princess walls break. */
+  private rescueGateX = 0;
+  private rescueGateOpen = false;
+  /** Cursed grove: the three trees, in spot order, after their jobs are shuffled. */
+  private groveTrees: Tower[] = [];
+  private groveLabels: Phaser.GameObjects.Text[] = [];
+  private groveVeil?: Phaser.GameObjects.Graphics;
+  private groveT = 0;
+  private groveIllusion: GroveIllusion = 'sand';
+  private groveCast: QuestTreeCast | null = null;
+  private groveSummonT = 0;
+  private groveRespawnT = 0;
+  /** Which effect window has already been announced, so the banner plays once. */
+  private groveAnnounced = '';
+  /** Small summon and illusion trees, and the allies sealed inside them. */
+  private snareTrees: Tower[] = [];
+  private snareLabels: Phaser.GameObjects.Text[] = [];
+  private snareVeil?: Phaser.GameObjects.Graphics;
+  private snareCast: QuestTreeCast | null = null;
+  private snareSummonT = 0;
+  private snareIllusion: GroveIllusion = 'sand';
+  /** Screen-space darkness for the night alley, with holes cut around lights. */
+  private nightShade?: Phaser.GameObjects.RenderTexture;
+  private nightLights?: Phaser.GameObjects.Graphics;
+  private nightFlames?: Phaser.GameObjects.Graphics;
+  private nightCandles: NightCandle[] = [];
+  /** Seconds until the Dirge bell starts its warning, and the warning itself. */
+  private dirgeTollT = QUEST.dirge.tollEvery;
+  private dirgeWarn: { elapsed: number } | null = null;
+  private seals: SealPoint[] = [];
+  private sealRespawnT = QUEST.seals.respawnEvery;
+  private lantern: SpiritLantern | null = null;
+  private escortRespawnT = QUEST.escort.respawnEvery;
+  private wardenReviveT = -1;
+  private wardenGruntT = QUEST.wardens.gruntRespawn;
   private bossRespawnT = QUEST.boss.respawnInterval;
   private bossReserves = new Set<Fighter>();
   private chests: Chest[] = [];
@@ -279,9 +381,12 @@ export class BattleScene extends UIScene implements Arena {
   private g!: Phaser.GameObjects.Graphics;
   private hud!: Phaser.GameObjects.Graphics;
   private nameTags: Phaser.GameObjects.Text[] = [];
+  private hudNames: Phaser.GameObjects.Text[] = [];
+  private hudSkillGlyphs: Phaser.GameObjects.Text[][] = [];
   private keyLabels: Phaser.GameObjects.Text[][] = [];
   private over = false;
   private winningTeam: number | null = null;
+  private questBossSeats: number[] = [];
   /** Seconds left in the battlefield preview plus the pre-round countdown. */
   private countdown = 0;
   private overT = 0;
@@ -290,19 +395,62 @@ export class BattleScene extends UIScene implements Arena {
     super('Battle');
   }
 
+  private get hasHellPlayers() { return !!this.quest && questFactions(this.lobbySlots, this.quest.side).hell; }
+  private get isMixedQuest() { return !!this.quest && questFactions(this.lobbySlots, this.quest.side).mixed; }
+  private get isHell() { return !!this.quest && questFactions(this.lobbySlots, this.quest.side).side === 'hell'; }
+
+  /** Stable lobby identity even when P2, for example, plays battlefield seat 6. */
+  private questPlayerSlot(index: number): number | null {
+    const slot = index % QUEST.partySlots;
+    const config = this.lobbySlots[slot];
+    if (!config || config.control === 'off') return null;
+    const team = questSideOf(config, this.quest?.side) === 'hell' ? 1 : 0;
+    return Math.floor(index / QUEST.partySlots) === team ? slot : null;
+  }
+  private get questTeam() { return this.isHell ? 1 : 0; }
+
+  /** Versus keeps red then blue. In a quest the heroes are blue and the other side is red. */
+  private sideColor(team: number) {
+    if (!this.quest) return TEAM_COLORS[team] ?? TEAM_COLORS[0];
+    return team === 0 ? TEAM_COLORS[1] : TEAM_COLORS[0];
+  }
+
+  /** Four readable shades so teammates stay distinct inside the blue or red side. */
+  private questOutfit(team: number, nth: number) {
+    const blues = [0x3b82f6, 0x60a5fa, 0x1d4ed8, 0xbfdbfe];
+    const reds = [0xe8473c, 0xff6b63, 0xb42318, 0xffc1bb];
+    return (team === 0 ? blues : reds)[nth % 4]!;
+  }
+
+  private questGoal(stage: number) {
+    return this.isMixedQuest ? `${T().questVersus} · ${T().questGoals[stage]}` : (this.isHell ? T().hellGoals : T().questGoals)[stage];
+  }
+
+  private fighterLabel(f: Fighter): string {
+    if (!this.hasHellPlayers) return `P${f.index + 1}`;
+    const slot = this.questPlayerSlot(f.index);
+    if (slot !== null) return `P${slot + 1}`;
+    return f.team === 0 ? `${T().heroTag} ${f.index + 1}` : T().hellGuard;
+  }
+
   init(data: BattleStartData) {
     this.lobbySlots = data.slots;
     this.mode = data.mode ?? 'ffa';
-    this.quest = this.mode === 'quest' ? data.quest ?? { stage: 0 } : null;
+    this.quest = isQuestMode(this.mode) ? { ...data.quest, ...prepareQuest(data.quest) } : null;
     // The underworld has its own music; the last stage gets the boss theme.
-    this.bgm = this.quest ? (this.quest.stage === QUEST.bossStage ? 'boss' : 'hell') : 'battle';
-    this.slots = this.quest ? questSlots(data.slots, this.quest.stage) : data.slots;
+    this.bgm = this.quest ? (this.quest.stage === QUEST.bossStage || this.quest.stage === QUEST.wardenStage || this.quest.stage === QUEST.dirgeStage ? 'boss' : 'hell') : 'battle';
+    this.slots = this.hasHellPlayers ? hellSlots(data.slots, this.quest?.side ?? 'heroes') : this.quest ? questSlots(data.slots, this.quest.stage) : data.slots;
+    this.questBossSeats = this.hasHellPlayers ? hellBossSlots(data.slots, this.quest!.stage, this.quest?.side ?? 'heroes')
+      : this.quest?.stage === QUEST.bossStage || this.quest?.stage === QUEST.dirgeStage ? [QUEST.partySlots] : this.quest?.stage === QUEST.wardenStage ? [QUEST.partySlots, QUEST.partySlots + 1] : [];
     // 'random' picks a new map each round (and rematches keep it random). Quest stages have their own maps.
     this.mapChoice = this.quest ? QUEST.maps[this.quest.stage] : data.mapId ?? 'courtyard';
     this.wave = 1;
     this.waveT = -1;
     this.stormMarks = [];
     this.ventMarks = [];
+    this.flameMarks = [];
+    this.flamePatches = [];
+    this.flameT = 0;
     this.portalLock = new Map();
     this.rollWarn = null;
     this.boulders = [];
@@ -322,6 +470,42 @@ export class BattleScene extends UIScene implements Arena {
     this.questTreeT = QUEST.rescue.tree.initialDelay;
     this.questTreeCast = null;
     this.questTree = null;
+    this.rescueGateOpen = false;
+    this.rescueGateX = this.quest?.stage === QUEST.rescueStage ? QUEST.rescue.tree.gateX * S : 0;
+    this.groveTrees = [];
+    this.groveLabels = [];
+    this.groveVeil = undefined;
+    this.groveT = 0;
+    this.groveIllusion = 'sand';
+    this.groveCast = null;
+    this.groveSummonT = QUEST.grove.summonInterval;
+    this.groveRespawnT = QUEST.grove.respawnEvery;
+    this.groveAnnounced = '';
+    this.snareTrees = [];
+    this.snareLabels = [];
+    this.snareVeil = undefined;
+    this.snareCast = null;
+    this.snareSummonT = QUEST.snare.summonInterval;
+    this.snareIllusion = 'sand';
+    this.nightShade = undefined;
+    this.nightLights = undefined;
+    this.nightFlames = undefined;
+    this.nightCandles = this.quest?.stage === QUEST.nightStage
+      ? this.map.obstacles.filter((o) => o.kind === 'lantern').map((o, i) => ({
+        ...toWorld(o), lit: true, timer: QUEST.night.flareEvery * (0.45 + i * 0.22), warn: null,
+      }))
+      : [];
+    this.dirgeTollT = QUEST.dirge.tollEvery;
+    this.dirgeWarn = null;
+    this.seals = this.quest?.stage === QUEST.sealStage ? QUEST.seals.spots.map((p, i) => ({
+      ...toWorld(p), team: 0, radius: QUEST.seals.radius * S, allies: QUEST.seals.allies[i] ?? 1, progress: 0, sealed: false, contested: false,
+    })) : [];
+    this.sealRespawnT = QUEST.seals.respawnEvery;
+    this.lantern = this.quest?.stage === QUEST.escortStage
+      ? createLantern(data.slots.slice(0, QUEST.partySlots).filter((sl) => sl.control !== 'off').length, S, HUD_HEIGHT) : null;
+    this.escortRespawnT = QUEST.escort.respawnEvery;
+    this.wardenReviveT = -1;
+    this.wardenGruntT = QUEST.wardens.gruntRespawn;
     this.bossRespawnT = QUEST.boss.respawnInterval;
     this.bossReserves.clear();
     this.spawns = [];
@@ -346,6 +530,8 @@ export class BattleScene extends UIScene implements Arena {
     this.paused = false;
     this.stats = PLAYER_COLORS.map((_, i) => createMatchStats(this.quest?.carry?.stats[i]));
     this.nameTags = [];
+    this.hudNames = [];
+    this.hudSkillGlyphs = [];
     this.keyLabels = [];
     this.over = false;
     this.winningTeam = null;
@@ -355,7 +541,7 @@ export class BattleScene extends UIScene implements Arena {
 
   /** Party bonuses use a copy so enemies and later versus matches retain their role stats. */
   private roleForSlot(base: Role, index: number): Role {
-    return this.quest && index < QUEST.partySlots
+    return this.quest && (index < QUEST.partySlots || this.hasHellPlayers && !this.questBossSeats.includes(index))
       ? { ...base, peRegen: base.peRegen * QUEST.partyPeRegen, speed: base.speed * QUEST.partySpeed }
       : base;
   }
@@ -386,7 +572,9 @@ export class BattleScene extends UIScene implements Arena {
     // Random each round: which side red starts on (team modes) and who starts where.
     const flip = this.mode !== 'ffa' && !this.quest && Math.random() < 0.5;
     const obstacles = obstaclesFor(this.map, this.mode, flip)
-      .filter((o) => !(this.quest?.stage === QUEST.rescueStage && o.kind === 'deadtree' && o.x === QUEST.rescue.tree.x && o.y === QUEST.rescue.tree.y))
+      .filter((o) => !(o.kind === 'deadtree' && (
+        (this.quest?.stage === QUEST.rescueStage && o.x === QUEST.rescue.tree.x && o.y === QUEST.rescue.tree.y) ||
+        this.quest?.stage === QUEST.groveStage)))
       .map(toWorldRect);
     const walls = obstacles.map((o) => {
       const wall = o.kind === 'cage' ? this.makeWall(o) : undefined;
@@ -403,6 +591,7 @@ export class BattleScene extends UIScene implements Arena {
     this.startAmbience();
     this.stormT = this.map.lightning?.interval ?? 0;
     this.ventT = this.map.vents?.interval ?? 0;
+    this.flameT = this.map.flames ? this.map.flames.interval * 0.55 : 0;
     this.fightStart = this.time.now / 1000 + BATTLE_READY_SECONDS + COUNTDOWN;
     this.rollT = this.map.rollers?.interval ?? 0;
 
@@ -418,37 +607,62 @@ export class BattleScene extends UIScene implements Arena {
     const startAt = this.assignStarts(flip);
     const partySize = this.slots.slice(0, QUEST.partySlots).filter((sl) => sl.control !== 'off').length;
     const fixedRoles = new Map<number, Role['id']>();
-    if (this.quest?.stage === QUEST.bossStage) fixedRoles.set(QUEST.partySlots, BOSS_GEAR.role);
+    if (this.quest?.stage === QUEST.bossStage) fixedRoles.set(this.questBossSeats[0], BOSS_GEAR.role);
+    if (this.quest?.stage === QUEST.dirgeStage) fixedRoles.set(this.questBossSeats[0], DIRGE_GEAR.role);
+    if (this.quest?.stage === QUEST.wardenStage) WARDEN_GEAR.forEach((gear, k) => fixedRoles.set(this.questBossSeats[k], gear.role));
     const cpuGear = rollCpuLoadouts(this.mode, this.slots, fixedRoles);
+    const oniWeapon = this.quest?.stage === QUEST.bossStage ? rollOniWeapon() : null;
     this.slots.forEach((slot, i) => {
       const controller = createController(this, slot.control, slot.binds, getSettings().difficulty);
       if (!controller) return;
       // The final Quest stage: the first enemy is the boss, waiting by his throne.
-      const isBoss = this.quest?.stage === QUEST.bossStage && i === QUEST.partySlots;
-      const sp = isBoss ? this.freeSpot(toWorld({ x: WIDTH - 140, y: SCREEN_MID_Y }), [], QUEST.boss.radius + 4) : startAt[i];
+      const warden = this.quest?.stage === QUEST.wardenStage ? this.questBossSeats.indexOf(i) : -1;
+      const isBoss = this.questBossSeats.includes(i);
+      const dirge = this.quest?.stage === QUEST.dirgeStage && isBoss;
+      const sp = isBoss ? this.freeSpot(toWorld(warden >= 0 ? { x: 900, y: warden === 0 ? 265 : 547 } : dirge ? { x: QUEST.dirge.bell.x + 90, y: QUEST.dirge.bell.y } : { x: WIDTH - 140, y: SCREEN_MID_Y }), [], (dirge ? QUEST.dirge.radius : QUEST.boss.radius) + 4) : startAt[i];
       this.spawns[i] = sp;
-      const r = isBoss ? QUEST.boss.radius : 18;
+      const r = isBoss ? (dirge ? QUEST.dirge.radius : QUEST.boss.radius) : 18;
       const body = this.physics.add.body(sp.x - r, sp.y - r, r * 2, r * 2);
       body.setCircle(r);
       body.setCollideWorldBounds(true);
       // CPUs roll a fresh, sensible loadout every round (the lobby settings aren't touched).
-      const gear = isBoss ? BOSS_GEAR : cpuGear.get(i) ?? slot;
-      const skills = gear.skills.map(skillById);
-      const baseRole = isBoss ? bossRole(partySize) : roleById(gear.role);
+      const gear = warden >= 0 ? WARDEN_GEAR[warden] : dirge ? DIRGE_GEAR : isBoss ? BOSS_GEAR : cpuGear.get(i) ?? slot;
+      const finaleBoss = isBoss && slot.control === 'cpu' && QUEST_BOSSES.includes(this.quest?.stage ?? -1);
+      const middleFoe = !!this.quest && QUEST_TACTICS.includes(this.quest.stage) && slot.control === 'cpu' && !isBoss
+        && (this.isHell ? slot.team === 0 : i >= QUEST.partySlots);
+      const skillIds = finaleBoss ? questFoeSkills('boss')
+        : middleFoe ? questFoeSkills('middle')
+          : isBoss && slot.control !== 'cpu' ? gear.skills.slice(0, SKILL_SLOTS) : gear.skills;
+      const skills = skillIds.map(skillById);
+      const weapon = oniWeapon && isBoss ? oniWeapon : WEAPONS[gear.weapon];
+      const baseRole = warden >= 0 ? wardenRole(partySize, warden) : dirge ? dirgeRole(partySize) : isBoss ? bossRole(partySize) : roleById(gear.role);
       const role = this.roleForSlot(baseRole, i);
-      const color = isBoss ? BOSS_COLOR : PLAYER_COLORS[i];
-      const f = new Fighter(i, color, WEAPONS[gear.weapon], skills, role, controller, body, this);
+      const dyed = this.quest
+        ? this.questOutfit(slot.team, (this.hasHellPlayers ? this.questPlayerSlot(i) ?? i : i) % QUEST.partySlots)
+        : PLAYER_COLORS[this.hasHellPlayers ? this.questPlayerSlot(i) ?? i : i];
+      const color = warden >= 0 ? [0xe8473c, 0xff8f7a][warden] : dirge ? 0xc4453c : isBoss ? BOSS_COLOR : dyed;
+      const f = new Fighter(i, color, weapon, skills, role, controller, body, this);
       Object.assign(f.stats, this.stats[i]);
       this.stats[i] = f.stats;
       if (teams) f.team = slot.team;
-      // Quest: the party is sturdier than usual.
-      if (this.quest && i < QUEST.partySlots) f.maxHp = f.hp = Math.round(role.maxHp * QUEST.partyHp);
+      const nightFoe = this.quest?.stage === QUEST.nightStage && f.team === (this.isHell ? 0 : 1);
+      // Quest: the party is sturdier than usual. The night squad is tougher than a normal wave.
+      if (nightFoe) {
+        const hard = slot.control === 'cpu' && getSettings().difficulty === 'hard' ? HARD_CPU_HP : 1;
+        f.maxHp = f.hp = Math.round(role.maxHp * QUEST.night.hp * hard);
+      } else if (this.quest && i < QUEST.partySlots) f.maxHp = f.hp = Math.round(role.maxHp * QUEST.partyHp * (this.isHell && getSettings().difficulty === 'hard' ? HARD_CPU_HP : 1));
+      else if (this.quest && i >= QUEST.partySlots && (this.quest.stage === QUEST.sealStage || this.quest.stage === QUEST.escortStage)) {
+        const tougher = this.quest.stage === QUEST.sealStage ? QUEST.seals.guardHp : QUEST.escort.guardHp;
+        const hard = !this.isHell && slot.control === 'cpu' && getSettings().difficulty === 'hard' ? HARD_CPU_HP : 1;
+        f.maxHp = f.hp = Math.round(role.maxHp * tougher * hard);
+      }
       // Hard: the CPU fighters on the other side are tougher too.
-      else if (slot.control === 'cpu' && !isBoss && getSettings().difficulty === 'hard') f.maxHp = f.hp = Math.round(role.maxHp * HARD_CPU_HP);
+      else if (this.isHell && !isBoss && i >= QUEST.partySlots) f.maxHp = f.hp = Math.round(role.maxHp * QUEST.partyHp);
+      else if (!this.isHell && slot.control === 'cpu' && !isBoss && getSettings().difficulty === 'hard') f.maxHp = f.hp = Math.round(role.maxHp * HARD_CPU_HP);
       if (isBoss) {
         f.boss = true;
         f.radius = r;
-        f.damageScale = QUEST.boss.damage;
+        f.damageScale = warden >= 0 ? QUEST.wardens.damage : dirge ? QUEST.dirge.damage : QUEST.boss.damage;
       }
       this.prepareBossReserve(f, partySize);
       // Quest: items and soul carry over from the last stage.
@@ -462,15 +676,16 @@ export class BattleScene extends UIScene implements Arena {
       this.prevStates[i] = f.state;
       f.facing = Math.atan2(WORLD_CENTER.y - sp.y, WORLD_CENTER.x - sp.x);
       this.fighters.push(f);
-      this.tagTexts[i] = this.quest && i >= QUEST.partySlots
-        ? isBoss ? `${T().bossTag}・${T().bossName}` : T().enemyTag
+      this.tagTexts[i] = this.hasHellPlayers ? `${this.fighterLabel(f)}${f.boss ? `・${this.bossTitle(f)}` : ''}` : this.quest && i >= QUEST.partySlots
+        ? isBoss ? `${T().bossTag}・${this.bossTitle(f)}` : T().enemyTag
         : slot.control === 'cpu' ? `P${i + 1} ${T().cpuTag}` : `P${i + 1}`;
-      const tagColor = teams ? toHex(TEAM_COLORS[slot.team]) : '#ffffff';
+      const tagColor = teams ? toHex(this.sideColor(slot.team)) : '#ffffff';
       this.nameTags[i] = this.add
         .text(0, 0, this.tagTexts[i], { fontFamily: FONT, resolution: RES, fontSize: '16px', fontStyle: 'bold', color: tagColor, stroke: '#000000', strokeThickness: 3 })
         .setOrigin(0.5, 1);
       this.lTop.add(this.nameTags[i]);
     });
+    this.spawnNightBoss(partySize);
 
     const bodies = this.fighters.map((f) => f.body);
     this.physics.add.collider(bodies, walls);
@@ -481,15 +696,26 @@ export class BattleScene extends UIScene implements Arena {
     if (this.quest) {
       if (this.quest.stage === 1) this.placeQuestTowers(partySize);
       if (this.quest.stage === QUEST.rescueStage) this.placeQuestTree(partySize);
+      if (this.quest.stage === QUEST.groveStage) this.placeGroveTrees(partySize);
+      if (this.quest.stage === QUEST.wardenStage) this.placeWardenTree(partySize);
+      if (this.quest.stage === QUEST.snareStage) this.placeSnareTrees(partySize);
+      if (this.quest.stage === QUEST.nightStage) {
+        this.nightShade = this.add.renderTexture(0, 0, WIDTH, HEIGHT).setOrigin(0, 0).setDepth(3);
+        this.nightLights = this.add.graphics().setVisible(false);
+        this.nightFlames = this.add.graphics().setDepth(4);
+      }
     } else if (teams) this.placeTowers(flip);
     this.setupMapFeatures();
     const spots = chestsFor(this.map, this.mode)
       .map((p) => ({ ...p, ...toWorld(p) }))
       .filter((p) => !this.towers.some((tw) => Math.abs(p.x - tw.x) < 60 && Math.abs(p.y - tw.y) < 55));
-    spots.forEach((p, n) => this.addChest(p.x, p.y, -0.3 - (n * 2.4) / spots.length, !!p.big, p.empty ?? EMPTY_CHEST_CHANCE));
+    const placed = this.quest ? chestsWithinCap(spots, QUEST_MAX_CHESTS) : spots;
+    placed.forEach((p, n) => this.addChest(p.x, p.y, -0.3 - (n * 2.4) / Math.max(1, placed.length), !!p.big, p.empty ?? EMPTY_CHEST_CHANCE));
     // More fighters, more chests: a few random extras from the start, and more often during the fight.
+    // Quest stops at QUEST_MAX_CHESTS, counting the map chests already placed.
     const n = this.fighters.length;
-    for (let k = 0; k < startRandomChests(n); k++) this.dropRandomChest(-0.5 - k * 0.3);
+    const extras = this.quest ? Math.max(0, QUEST_MAX_CHESTS - this.chests.length) : startRandomChests(n);
+    for (let k = 0; k < extras; k++) this.dropRandomChest(-0.5 - k * 0.3);
     this.chestTimer = randomChestInterval(n);
 
     this.world = {
@@ -505,11 +731,20 @@ export class BattleScene extends UIScene implements Arena {
           }
         : undefined,
       chests: this.chests,
+      lootChests: !this.quest,
       towers: this.towers,
-      siege: this.mode === 'siege' || this.quest?.stage === 1 || this.quest?.stage === QUEST.rescueStage,
-      defendTeam: this.quest?.stage === 1 || this.quest?.stage === QUEST.rescueStage ? 0 : undefined,
+      capturePoints: this.seals,
+      escort: this.lantern ?? undefined,
+      siege: this.mode === 'siege' || this.quest?.stage === 1 || this.quest?.stage === QUEST.rescueStage || this.quest?.stage === QUEST.groveStage || this.quest?.stage === QUEST.snareStage,
+      coordinateCaptures: this.hasHellPlayers,
+      defendTeam: this.isHell ? 1 : this.quest?.stage === 1 || this.quest?.stage === QUEST.rescueStage || this.quest?.stage === QUEST.groveStage || this.quest?.stage === QUEST.sealStage || this.quest?.stage === QUEST.escortStage || this.quest?.stage === QUEST.snareStage ? 0 : undefined,
       safe: this.map.barrier ? () => this.barrierCircle() : undefined,
       herbs: this.map.herbs ? () => this.herbs.filter((h) => h.grown) : undefined,
+      fires: () => [
+        ...this.flameMarks.map((m) => ({ x: m.x, y: m.y, r: m.r })),
+        ...this.flamePatches.map((p) => ({ x: p.x, y: p.y, r: p.r })),
+        ...(this.map.vents ? this.ventMarks.map((m) => ({ x: m.x, y: m.y, r: this.map.vents!.radius })) : []),
+      ],
     };
     if (this.walls.length > 0) this.showPrincessIntro();
     if (this.mode === 'siege') this.showBanner(T().siegeGoal);
@@ -555,6 +790,44 @@ export class BattleScene extends UIScene implements Arena {
     return out;
   }
 
+  /** The alley captain stands with the four enemies. The eight HUD seats stay the squad. */
+  private spawnNightBoss(partySize: number) {
+    if (this.quest?.stage !== QUEST.nightStage) return;
+    const index = MAX_PLAYERS;
+    const team = this.isHell ? 0 : 1;
+    const b = QUEST.night.captain;
+    const role = nightBossRole(partySize);
+    const r = b.radius;
+    const screen = { x: this.isHell ? 220 : WIDTH - 220, y: SCREEN_MID_Y };
+    const sp = this.freeSpot(toWorld(screen), this.fighters.map((f) => ({ x: f.x, y: f.y })), r + 4);
+    this.spawns[index] = sp;
+    const body = this.physics.add.body(sp.x - r, sp.y - r, r * 2, r * 2);
+    body.setCircle(r);
+    body.setCollideWorldBounds(true);
+    const skills = NIGHT_BOSS_GEAR.skills.map((id) => skillById(id));
+    const controller = createController(this, 'cpu', this.slots[0]?.binds ?? [], getSettings().difficulty)!;
+    const color = this.sideColor(team);
+    const f = new Fighter(index, color, WEAPONS[NIGHT_BOSS_GEAR.weapon], skills, this.roleForSlot(role, index), controller, body, this);
+    const hard = getSettings().difficulty === 'hard' ? HARD_CPU_HP : 1;
+    f.maxHp = f.hp = Math.round(role.maxHp * hard);
+    f.team = team;
+    f.boss = true;
+    f.radius = r;
+    f.damageScale = b.damage;
+    this.stats[index] = f.stats;
+    this.sprites[index] = this.add.image(sp.x, sp.y, ninjaTexture(this, color)).setScale(r / 18 / RES);
+    this.lSprites.add(this.sprites[index]);
+    this.prevStates[index] = f.state;
+    f.facing = Math.atan2(WORLD_CENTER.y - sp.y, WORLD_CENTER.x - sp.x);
+    this.fighters.push(f);
+    this.tagTexts[index] = `${T().bossTag}・${T().nightBossName}`;
+    const tagColor = toHex(this.sideColor(team));
+    this.nameTags[index] = this.add
+      .text(0, 0, this.tagTexts[index], { fontFamily: FONT, resolution: RES, fontSize: '16px', fontStyle: 'bold', color: tagColor, stroke: '#000000', strokeThickness: 3 })
+      .setOrigin(0.5, 1);
+    this.lTop.add(this.nameTags[index]);
+  }
+
   /** The nearest point to `p` that's clear of obstacles and other fighters' starts. */
   private freeSpot(p: { x: number; y: number }, taken: { x: number; y: number }[], r = 20) {
     const clear = (x: number, y: number) =>
@@ -589,6 +862,7 @@ export class BattleScene extends UIScene implements Arena {
     } else {
       for (const f of this.fighters) f.update(dt, f.controller.read(f, this.world, dt));
     }
+    if (!this.over) this.updateRescueGate();
     this.updateProjectiles(dt);
     this.updateCaltrops(dt);
     this.petals.update(dt);
@@ -604,6 +878,7 @@ export class BattleScene extends UIScene implements Arena {
     if (this.countdown <= 0 && !this.over) {
       this.updateStorm(dt);
       this.updateVents(dt);
+      this.updateFlames(dt);
       this.updatePortals();
       this.updateRollers(dt);
       this.updateSpikes(dt);
@@ -633,7 +908,7 @@ export class BattleScene extends UIScene implements Arena {
       for (const team of [0, 1]) {
         if (this.towers.some((tw) => tw.team === team && tw.alive)) continue;
         const winner = this.fighters.find((f) => f.team === 1 - team);
-        this.endRound(winner, T().siegeWin(T().teamNames[1 - team]), TEAM_COLORS[1 - team]);
+        this.endRound(winner, T().siegeWin(T().teamNames[1 - team]), this.sideColor(1 - team));
         break;
       }
     }
@@ -666,7 +941,9 @@ export class BattleScene extends UIScene implements Arena {
       const dx = t.x - f.x;
       const dy = t.y - f.y;
       const d = Math.hypot(dx, dy) || 1;
+      const taken = t.stats.taken;
       this.dealDamage(f, t, w.damage * f.damageMult, dx / d, dy / d, w.knockback * f.damageMult, w.hitstun);
+      if (t.stats.taken > taken) this.fx.weaponImpact(w.id, t.x - dx / d * t.radius * 0.5, t.y - dy / d * t.radius * 0.5, f.facing, f.color);
       if (w.id === 'staff') {
         // The Ice Staff leaves its victim frosted.
         this.fx.frostBurst(t.x, t.y);
@@ -682,6 +959,8 @@ export class BattleScene extends UIScene implements Arena {
     }
 
     for (const c of [...this.chests]) {
+      // Quest allies leave every chest for the players. An enemy can break one a swing happens to hit.
+      if (this.quest && f.controller instanceof AIController && (f.team ?? this.questTeam) === this.questTeam) break;
       if (f.swingHits.has(c) || !shapeHitsRect(w.shape, f.x, f.y, f.facing, c.x, c.y, c.w, c.h)) continue;
       f.swingHits.add(c);
       const dmg = w.damage * f.damageMult;
@@ -697,6 +976,23 @@ export class BattleScene extends UIScene implements Arena {
       if (!shapeHitsRect(w.shape, f.x, f.y, f.facing, tw.x, tw.y, tw.w, tw.h)) continue;
       f.swingHits.add(tw);
       this.damageTower(tw, w.damage * f.damageMult, f);
+    }
+
+    if (this.quest?.stage === QUEST.nightStage && f.team === 0) {
+      const hit = 40 * S;
+      for (const candle of this.nightCandles) {
+        if (!candle.lit || f.swingHits.has(candle)) continue;
+        if (!shapeHitsRect(w.shape, f.x, f.y, f.facing, candle.x, candle.y, hit, hit)) continue;
+        f.swingHits.add(candle);
+        this.snuffCandle(candle);
+      }
+    }
+
+    const lantern = this.lantern;
+    if (lantern?.alive && f.team !== lantern.team && !f.swingHits.has(lantern) &&
+      shapeHitsRect(w.shape, f.x, f.y, f.facing, lantern.x, lantern.y, lantern.w, lantern.h)) {
+      f.swingHits.add(lantern);
+      this.damageLantern(w.damage * f.damageMult, f);
     }
 
     // You can only break your own team's princess out.
@@ -730,6 +1026,16 @@ export class BattleScene extends UIScene implements Arena {
     });
   }
 
+  onSkillCast(f: Fighter, e: SkillEffect, mx: number, my: number) {
+    const facing = Math.hypot(mx, my) > 0.1 && e.kind === 'dash' ? Math.atan2(my, mx) : f.facing;
+    this.fx.skillCast(() => ({ x: f.x, y: f.y }), e, facing);
+    if (e.kind.startsWith('team')) {
+      for (const ally of this.fighters) {
+        if (ally !== f && ally.alive && !f.isEnemy(ally)) this.fx.skillCast(() => ({ x: ally.x, y: ally.y }), e, ally.facing);
+      }
+    }
+  }
+
   popText(x: number, y: number, text: string, color: string) {
     const t = this.add
       .text(x, y, text, { fontFamily: FONT, resolution: RES, fontSize: '21px', fontStyle: 'bold', color, stroke: '#000000', strokeThickness: 3 })
@@ -742,6 +1048,7 @@ export class BattleScene extends UIScene implements Arena {
 
   /** Apply a hit and record it in the round stats. */
   private dealDamage(from: Fighter | undefined, to: Fighter, dmg: number, dx: number, dy: number, knockback: number, hitstun: number, soulGain = true) {
+    if (to.trapped) return;
     const before = to.hp;
     const taken = to.stats.taken;
     to.takeHit(dmg, dx, dy, knockback, hitstun);
@@ -781,7 +1088,7 @@ export class BattleScene extends UIScene implements Arena {
       this.padHoldPaused = !this.paused;
       if (this.padHoldPaused) this.setPaused(true);
     }
-    const who = lost.map((f) => `P${f.index + 1}`).join(' ');
+    const who = lost.map((f) => this.fighterLabel(f)).join(' ');
     if (!this.padOverlay) {
       const dim = this.add.rectangle(0, 0, WIDTH, HEIGHT, 0x000000, 0.55).setOrigin(0, 0);
       const msg = txt(this, WIDTH / 2, HEIGHT / 2, T().padLost(who), 28, '#ffd27a', { title: true, bold: true, origin: 0.5, stroke: '#000000', strokeThickness: 5, wrap: 900, align: 'center' });
@@ -828,10 +1135,10 @@ export class BattleScene extends UIScene implements Arena {
 
   private openResults(msg: string, color: string) {
     // Extra column: wall damage (Save the Princess) or tower damage (Siege).
-    const objective = this.mode === 'princess' || this.mode === 'siege' || this.mode === 'quest';
+    const objective = this.mode === 'princess' || this.mode === 'siege' || isQuestMode(this.mode);
     // In Quest only the party is listed.
-    const listed = this.quest ? this.fighters.filter((f) => f.team === 0) : this.fighters;
-    const awards = selectMatchAwards(listed, this.winningTeam, !!this.quest);
+    const listed = this.quest && !this.isMixedQuest ? this.fighters.filter((f) => f.team === this.questTeam) : this.fighters;
+    const awards = selectMatchAwards(listed, this.winningTeam, !!this.quest && !this.isMixedQuest);
     this.openModal({
       w: 1160,
       // Grows with the number of fighters (up to 8 rows).
@@ -858,7 +1165,7 @@ export class BattleScene extends UIScene implements Arena {
           if (f) drawWeaponIcon(ag, f.weapon.id, x + 28, y + 28, 27, f.color);
           m.content.add(ag);
           m.content.add(txt(this, x + 52, y + 14, award.label, 13, award.textColor, { bold: true, origin: [0, 0.5] }));
-          m.content.add(txt(this, x + 52, y + 35, f ? `P${f.index + 1}  ${T().weaponName(f.weapon)}` : T().noAward, 17, C.text, { bold: true, origin: [0, 0.5] }));
+          m.content.add(txt(this, x + 52, y + 35, f ? `${this.fighterLabel(f)}  ${T().weaponName(f.weapon)}` : T().noAward, 17, C.text, { bold: true, origin: [0, 0.5] }));
           if (f) m.content.add(txt(this, x + awardW - 18, y + 28, T().awardScore(Math.round(performanceScore(f.stats))), 18, award.textColor, { bold: true, origin: [1, 0.5] }));
         });
         const left = m.x + 32;
@@ -893,9 +1200,9 @@ export class BattleScene extends UIScene implements Arena {
           rg.fillStyle(r % 2 ? 0x1a1f2a : 0x161a23, 1).fillRoundedRect(left, y - 18, m.w - 64, 36, 6);
           if (award) rg.lineStyle(1, awardColor, 0.7).strokeRoundedRect(left, y - 18, m.w - 64, 36, 6);
           rg.fillStyle(f.color, 1).fillCircle(left + 14, y, 7);
-          if (this.mode !== 'ffa') rg.lineStyle(2, TEAM_COLORS[f.team], 1).strokeCircle(left + 14, y, 10);
+          if (this.mode !== 'ffa') rg.lineStyle(2, this.sideColor(f.team), 1).strokeCircle(left + 14, y, 10);
           m.content.add(rg);
-          const player = txt(this, left + 30, y - (award ? 5 : 0), `P${f.index + 1}  ${T().weaponName(f.weapon)}`, 16, C.text, { bold: true, origin: [0, 0.5] });
+          const player = txt(this, left + 30, y - (award ? 5 : 0), `${this.fighterLabel(f)}  ${T().weaponName(f.weapon)}`, 16, C.text, { bold: true, origin: [0, 0.5] });
           player.setScale(Math.min(1, (playerW - 38) / player.width));
           m.content.add(player);
           if (award) m.content.add(txt(this, left + 30, y + 11, award, 10, toHex(awardColor), { bold: true, origin: [0, 0.5] }));
@@ -906,7 +1213,7 @@ export class BattleScene extends UIScene implements Arena {
         const by = m.y + m.h - 46;
         // A finished game goes back to the fighter setup (no instant rematch); Quest keeps its own retry.
         const buttons: { id: string; label: string; onPress: () => void }[] = [
-          ...(this.quest ? [{ id: 'again', label: T().questRestart, onPress: () => this.enterRound({ slots: this.lobbySlots, mode: this.mode, mapId: this.mapChoice }) }] : []),
+          ...(this.quest ? [{ id: 'again', label: T().questRestart, onPress: () => this.enterRound({ slots: this.lobbySlots, mode: this.mode, mapId: this.mapChoice, quest: { ...prepareQuest(), side: this.quest?.side, rule: this.quest?.rule } }) }] : []),
           { id: 'lobby', label: T().toLobby, onPress: () => this.scene.start('Lobby') },
           { id: 'title', label: T().toTitle, onPress: () => this.scene.start('Title') },
         ];
@@ -936,13 +1243,14 @@ export class BattleScene extends UIScene implements Arena {
         sfx.crystal();
       }
       const out = !Phaser.Geom.Rectangle.Contains(this.arenaRect, p.x, p.y);
+      const sealed = this.quest?.stage === QUEST.rescueStage && !this.rescueGateOpen && p.team === 0 && p.x > this.rescueGateX;
       const wall =
         this.shotBlockers.some((r) => Phaser.Geom.Rectangle.Contains(r, p.x, p.y)) ||
         this.chests.some((c) => Math.abs(p.x - c.x) < c.w / 2 && Math.abs(p.y - c.y) < c.h / 2);
       const tower = p.ignoreObstacles ? undefined : this.towers.find((tw) => tw.alive && Phaser.Geom.Rectangle.Contains(tw.rect, p.x, p.y));
       if (tower) {
         // Enemy shots damage the tower; friendly ones just stop.
-        if (tower.team !== p.team) this.damageTower(tower, e.damage, p.owner);
+        if (tower.team !== p.team) this.damageTower(tower, e.damage * (p.owner?.role.attack ?? 1), p.owner);
         p.dead = true;
         continue;
       }
@@ -952,12 +1260,22 @@ export class BattleScene extends UIScene implements Arena {
         p.dead = true;
         continue;
       }
-      if (out || (wall && !p.ignoreObstacles) || p.traveled > e.range) { p.dead = true; continue; }
+      if (out || sealed || (wall && !p.ignoreObstacles) || p.traveled > e.range) {
+        if (sealed) this.fx.sparks(this.rescueGateX, p.y, 0xd4a9ef, 4);
+        p.dead = true;
+        continue;
+      }
+      const lantern = this.lantern;
+      if (lantern?.alive && p.team !== lantern.team && Math.abs(p.x - lantern.x) <= lantern.w / 2 + p.radius && Math.abs(p.y - lantern.y) <= lantern.h / 2 + p.radius) {
+        this.damageLantern(e.damage * (p.owner?.role.attack ?? 1), p.owner);
+        p.dead = true;
+        continue;
+      }
       for (const t of this.fighters) {
         if (t.team === p.team || !t.alive || t.untouchable) continue;
         if (Math.hypot(t.x - p.x, t.y - p.y) > t.radius + p.radius) continue;
         const s = Math.hypot(p.vx, p.vy);
-        this.dealDamage(p.owner, t, e.damage, p.vx / s, p.vy / s, e.knockback, e.hitstun);
+        this.dealDamage(p.owner, t, e.damage * (p.owner?.role.attack ?? 1), p.vx / s, p.vy / s, e.knockback, e.hitstun);
         p.dead = true;
         break;
       }
@@ -1012,8 +1330,9 @@ export class BattleScene extends UIScene implements Arena {
     }
   }
 
-  thunderStrike(f: Fighter, count: number) {
-    // The nearest `count` enemies, struck one after another from closest to farthest.
+  thunderStrike(f: Fighter, level: number) {
+    // The nearest enemies, struck one after another from closest to farthest.
+    const count = summonStrikeCount('soulThunder', level, f.boss);
     const targets = this.summonTargets(f, count);
     const tally = this.summonTally(f, '⚡', 0xc9d6ff, targets.length);
     targets.forEach((t, k) => {
@@ -1021,9 +1340,10 @@ export class BattleScene extends UIScene implements Arena {
         if (!t.alive || t.untouchable || this.over) return tally(null);
         sfx.skyThunder();
         this.fx.skyBolt(t.x, t.y);
-        this.screenFlash(0xffffff, 0.35);
+        this.fx.summonPulse(() => ({ x: f.x, y: f.y }), 0xffffff, 0.35);
         // Every bolt paralyses; one that hits also hurts and paralyses longer.
-        if (Math.random() >= soulHitChance(SOUL_THUNDER.hitChance, count)) {
+        // Hit chance follows soul spent, with a small boss-only bonus.
+        if (Math.random() >= summonHitChance(soulHitChance(SOUL_THUNDER.hitChance, level), f.boss)) {
           this.summonResult(t, false, 0xc9d6ff);
           t.paralyze(SOUL_MISS_PARALYZE);
           return tally(false);
@@ -1095,7 +1415,8 @@ export class BattleScene extends UIScene implements Arena {
     }
   }
 
-  holyFireStrike(f: Fighter, count: number) {
+  holyFireStrike(f: Fighter, level: number) {
+    const count = summonStrikeCount('soulFire', level, f.boss);
     const targets = this.summonTargets(f, count);
     const tally = this.summonTally(f, '🔥', 0xffd27a, targets.length);
     targets.forEach((t, k) => {
@@ -1103,8 +1424,8 @@ export class BattleScene extends UIScene implements Arena {
         if (!t.alive || t.untouchable || this.over) return tally(null);
         sfx.holyFire();
         this.fx.holyFlame(t.x, t.y);
-        this.screenFlash(0xffc04a, 0.15);
-        if (Math.random() >= soulHitChance(SOUL_FIRE.hitChance, count)) {
+        this.fx.summonPulse(() => ({ x: f.x, y: f.y }), 0xffc04a, 0.15);
+        if (Math.random() >= summonHitChance(soulHitChance(SOUL_FIRE.hitChance, level), f.boss)) {
           this.summonResult(t, false, 0xffd27a);
           t.paralyze(SOUL_MISS_PARALYZE);
           return tally(false);
@@ -1117,15 +1438,16 @@ export class BattleScene extends UIScene implements Arena {
     });
   }
 
-  treeStrike(f: Fighter, count: number) {
-    const targets = this.summonTargets(f, count * SOUL_TREE.perLevel);
+  treeStrike(f: Fighter, level: number) {
+    const count = summonStrikeCount('soulTree', level, f.boss);
+    const targets = this.summonTargets(f, count);
     const tally = this.summonTally(f, '🌳', 0x9fe89a, targets.length);
     targets.forEach((t, k) => {
       this.time.delayedCall(k * SOUL_TREE.stagger * 1000, () => {
         if (!t.alive || t.untouchable || this.over) return tally(null);
         sfx.sacredTree();
         this.fx.treeRoots(t.x, t.y);
-        if (Math.random() >= SOUL_TREE.hitChance) {
+        if (Math.random() >= summonHitChance(SOUL_TREE.hitChance, f.boss)) {
           this.summonResult(t, false, 0x9fe89a);
           t.paralyze(SOUL_MISS_PARALYZE);
           return tally(false);
@@ -1136,20 +1458,21 @@ export class BattleScene extends UIScene implements Arena {
         tally(true);
       });
     });
-    this.screenFlash(0x6adf7a, 0.15);
+    this.fx.summonPulse(() => ({ x: f.x, y: f.y }), 0x6adf7a, 0.15);
   }
 
-  reaperStrike(f: Fighter, count: number) {
+  reaperStrike(f: Fighter, level: number) {
+    const count = summonStrikeCount('soulReaper', level, f.boss);
     const targets = this.summonTargets(f, count);
     const tally = this.summonTally(f, '☠', 0xc9a6ff, targets.length);
     targets.forEach((t, k) => {
       this.time.delayedCall(k * SOUL_REAPER.stagger * 1000, () => {
         if (!t.alive || t.untouchable || this.over) return tally(null);
         // The reaper rises behind them; whether he catches them is decided now and shown in the effect.
-        const hit = Math.random() < soulHitChance(SOUL_REAPER.hitChance, count);
+        const hit = Math.random() < summonHitChance(soulHitChance(SOUL_REAPER.hitChance, level), f.boss);
         sfx.reaper();
         this.fx.reaperCatch(() => ({ x: t.x, y: t.y }), hit);
-        this.screenFlash(0x5a1a8a, 0.3);
+        this.fx.summonPulse(() => ({ x: f.x, y: f.y }), 0x5a1a8a, 0.3);
         this.time.delayedCall(REAPER_SWING * 1000, () => tally(this.reaperSwing(f, t, hit)));
       });
     });
@@ -1164,16 +1487,16 @@ export class BattleScene extends UIScene implements Arena {
       t.paralyze(SOUL_MISS_PARALYZE);
       return false;
     }
-    // Caught. (Substitution can still cheat it.)
+    // Caught. Substitution can still step aside; damage reduction cannot.
     this.summonResult(t, true, 0xff6a8a);
-    this.screenFlash(0xff2a4a, 0.3);
-    this.dealDamage(f, t, SOUL_REAPER.damage, 0, 0, 0, 0, false);
+    this.fx.summonPulse(() => ({ x: f.x, y: f.y }), 0xff2a4a, 0.3);
+    if (!this.reap(f, t)) return false;
     if (t.alive) {
       t.paralyze(SOUL_REAPER.paralyze);
       return true;
     }
     this.popText(t.x, t.y - 36, T().reaperKill, '#ff4a6a');
-    this.screenFlash(0xff2a4a, 0.4);
+    this.fx.summonPulse(() => ({ x: f.x, y: f.y }), 0xff2a4a, 0.4);
     sfx.deathGong();
     // A big 死 stamped over the fallen.
     const stamp = txt(this, t.x, t.y, T().deathStamp, 72, '#ff3a5a', { title: true, bold: true, origin: 0.5, stroke: '#1a0008', strokeThickness: 8 });
@@ -1229,6 +1552,10 @@ export class BattleScene extends UIScene implements Arena {
 
   private damageTower(tw: Tower, dmg: number, by: Fighter | undefined) {
     if (!tw.alive || this.over) return;
+    if (by && tw === this.questTree && this.rescueTreeSealed()) {
+      this.popText(tw.x, tw.y - tw.h / 2 - 16, T().rescueSealed, '#d4a9ef');
+      return;
+    }
     const real = Math.min(tw.hp, dmg);
     tw.hp -= real;
     tw.shakeT = 0.12;
@@ -1241,14 +1568,16 @@ export class BattleScene extends UIScene implements Arena {
 
   private destroyTower(tw: Tower) {
     tw.alive = false;
+    if (tw.snare) this.releaseSnarePrisoner(tw);
     if (tw.tree) this.questTreeCast = null;
+    if (tw.grove === 'summon') this.groveCast = null;
     tw.collider.destroy();
     tw.body.destroy();
     this.obstacleRects.splice(this.obstacleRects.indexOf(tw.rect), 1);
     sfx.wallBreak();
     this.fx.smoke(tw.x, tw.y, 24, 1.4);
     this.fx.hammerSmash(tw.x, tw.y, 50);
-    this.showBanner(tw.tree ? T().questTreeDestroyed : (tw.main ? T().mainTowerDown : T().towerDown)(T().teamNames[tw.team]), TEAM_COLORS[tw.team]);
+    this.showBanner(tw.grove ? T().groveTreeDown(tw.grove) : tw.tree ? T().questTreeDestroyed : (tw.main ? T().mainTowerDown : T().towerDown)(T().teamNames[tw.team]), this.sideColor(tw.team));
     // The attackers get a short War Drum.
     for (const f of this.fighters) if (f.alive && f.team !== tw.team) f.empower(1.3, 5);
   }
@@ -1311,8 +1640,87 @@ export class BattleScene extends UIScene implements Arena {
         const d = Math.hypot(dx, dy);
         if (d < V.radius + f.radius) this.dealDamage(undefined, f, V.damage, dx / (d || 1), dy / (d || 1), 380, 0.35);
       }
+      this.ignite(m.x, m.y, V.radius, 3.4, 14);
     }
     this.ventMarks = this.ventMarks.filter((m) => m.t < V.warn);
+  }
+
+  /** Leave a patch of fire. A fresh burst on the same spot keeps the old one burning. */
+  private ignite(x: number, y: number, r: number, life: number, dps: number) {
+    const existing = this.flamePatches.find((p) => Math.hypot(p.x - x, p.y - y) < 24);
+    if (existing) {
+      existing.t = 0;
+      existing.life = life;
+      existing.r = Math.max(existing.r, r);
+      existing.dps = Math.max(existing.dps, dps);
+      return;
+    }
+    this.flamePatches.push({ x, y, r, t: 0, life, dps, tick: 0 });
+  }
+
+  /** Braziers mark a spot, burst, and leave fire that burns anyone standing in it. */
+  private updateFlames(dt: number) {
+    const F = this.map.flames;
+    if (F) {
+      this.flameT -= dt;
+      if (this.flameT <= 0) {
+        this.flameT = F.interval;
+        const busy = [...this.flameMarks, ...this.flamePatches];
+        const free = F.spots.filter((s) => {
+          const p = toWorld(s);
+          return !busy.some((b) => Math.hypot(b.x - p.x, b.y - p.y) < 24);
+        });
+        const spots = [...(free.length ? free : F.spots)].sort(() => Math.random() - 0.5).slice(0, F.count);
+        for (const s of spots) this.flameMarks.push({ ...toWorld(s), r: F.radius, dps: F.dps, life: F.life, t: 0 });
+        if (spots.length) sfx.rumble();
+      }
+    }
+    const warn = F?.warn ?? 1.2;
+    for (const m of this.flameMarks) {
+      m.t += dt;
+      if (m.t < warn) continue;
+      sfx.eruption();
+      this.fx.eruption(m.x, m.y, m.r);
+      this.ignite(m.x, m.y, m.r, m.life, m.dps);
+    }
+    this.flameMarks = this.flameMarks.filter((m) => m.t < warn);
+    for (const p of this.flamePatches) {
+      p.t += dt;
+      p.tick += dt;
+      if (p.tick < 0.5) continue;
+      p.tick -= 0.5;
+      for (const f of this.fighters) {
+        if (!f.alive || f.untouchable || f.trapped) continue;
+        if (Math.hypot(f.x - p.x, f.y - p.y) >= p.r) continue;
+        f.takeChip(p.dps * 0.5);
+      }
+    }
+    this.flamePatches = this.flamePatches.filter((p) => p.t < p.life);
+  }
+
+  private renderFlames(now: number) {
+    const warn = this.map.flames?.warn ?? 1.2;
+    for (const m of this.flameMarks) {
+      const k = Math.min(1, m.t / warn);
+      const pulse = 0.5 + 0.5 * Math.sin(now * (12 + k * 28));
+      this.g.fillStyle(0xff5a1a, 0.1 + 0.24 * k).fillCircle(m.x, m.y, m.r * (0.4 + 0.6 * k));
+      this.g.lineStyle(3, 0xffb03a, 0.4 + 0.5 * pulse).strokeCircle(m.x, m.y, m.r);
+      if (Math.random() < 0.3) this.fx.ember(m.x + (Math.random() - 0.5) * 20, m.y + (Math.random() - 0.5) * 20);
+    }
+    for (const p of this.flamePatches) {
+      const fade = Math.max(0.35, 1 - p.t / p.life);
+      const flick = 0.8 + 0.2 * Math.sin(now * 9 + p.x);
+      this.g.fillStyle(0x2a1006, 0.5 * fade).fillCircle(p.x, p.y, p.r);
+      this.gGlow.fillStyle(0xff6a1a, 0.28 * flick).fillCircle(p.x, p.y, p.r * 0.9);
+      for (let k = 0; k < 7; k++) {
+        const a = (k / 7) * Math.PI * 2 + now * 0.4;
+        const px = p.x + Math.cos(a) * p.r * 0.42;
+        const py = p.y + Math.sin(a) * p.r * 0.42;
+        const h = (12 + 10 * Math.sin(now * 8 + k)) * flick;
+        const sway = Math.sin(now * 6 + k) * 3;
+        this.g.fillStyle(k % 2 ? 0xffe08a : 0xff6a1a, 0.85 * fade).fillTriangle(px - 6, py, px + 6, py, px + sway, py - h);
+      }
+    }
   }
 
   private renderVents(now: number) {
@@ -1815,7 +2223,7 @@ export class BattleScene extends UIScene implements Arena {
     if (!z) return;
     const r = toWorldRect(z);
     const held = this.altarTeam >= 0;
-    const color = held ? (this.mode === 'ffa' ? PLAYER_COLORS[this.altarTeam] ?? 0xb57bff : TEAM_COLORS[this.altarTeam]) : 0xb57bff;
+    const color = held ? (this.mode === 'ffa' ? PLAYER_COLORS[this.altarTeam] ?? 0xb57bff : this.sideColor(this.altarTeam)) : 0xb57bff;
     const pulse = 0.5 + 0.5 * Math.sin(now * (held ? 8 : 2));
     this.gGlow.lineStyle(3, color, 0.4 + 0.4 * pulse).strokeCircle(r.x, r.y, r.w / 2);
     this.gGlow.fillStyle(color, (held ? 0.14 : 0.06) + 0.06 * pulse).fillCircle(r.x, r.y, r.w / 2);
@@ -1893,18 +2301,25 @@ export class BattleScene extends UIScene implements Arena {
 
   // ---------- 闖關 Quest ----------
 
-  /** The prison tree marks one random living party member, then strikes that fixed spot. */
+  /** Prison tree or the warden-stage tree at the back. Null on every other stage. */
+  private summonTreeConfig() {
+    if (this.quest?.stage === QUEST.rescueStage) return QUEST.rescue.tree;
+    if (this.quest?.stage === QUEST.wardenStage) return QUEST.wardens.tree;
+    return null;
+  }
+
+  /** The summon tree marks one random living party member, then strikes that fixed spot. */
   private updateQuestTree(dt: number) {
-    if (this.quest?.stage !== QUEST.rescueStage || this.over || !this.questTree?.alive) {
+    const config = this.summonTreeConfig();
+    if (!config || this.over || !this.questTree?.alive) {
       this.questTreeCast = null;
       return;
     }
     if (this.paused || this.countdown > 0) return;
-    const config = QUEST.rescue.tree;
     if (this.questTreeCast) {
       const cast = this.questTreeCast;
       cast.elapsed += dt;
-      if (cast.elapsed < cast.spell.warn) return;
+      if (cast.elapsed < cast.spell.warn * config.warnScale) return;
       this.questTreeCast = null;
       this.questTreeT = config.interval;
       this.strikeQuestTree(cast);
@@ -1924,12 +2339,14 @@ export class BattleScene extends UIScene implements Arena {
 
   private strikeQuestTree(cast: QuestTreeCast) {
     const { spell, x, y } = cast;
+    const tree = this.questTree;
+    if (tree?.alive) this.fx.summonPulse(() => ({ x: tree.x, y: tree.y }), spell.color, 0.12);
     if (spell.kind === 'soulReaper') {
       const hit = Math.random() < spell.hitChance;
       sfx.reaper();
       this.fx.reaperCatch(() => ({ x, y }), hit);
       this.time.delayedCall(REAPER_SWING * 1000, () => {
-        if (this.over || this.quest?.stage !== QUEST.rescueStage || !this.questTree?.alive) return;
+        if (this.over || !this.summonTreeConfig() || !this.questTree?.alive) return;
         sfx.scythe();
         this.applyQuestTreeHit(cast, hit);
       });
@@ -1938,37 +2355,54 @@ export class BattleScene extends UIScene implements Arena {
     if (spell.kind === 'soulFire') { sfx.holyFire(); this.fx.holyFlame(x, y); }
     else if (spell.kind === 'soulThunder') { sfx.skyThunder(); this.fx.skyBolt(x, y); }
     else { sfx.sacredTree(); this.fx.treeRoots(x, y); }
-    this.screenFlash(spell.color, 0.12);
     this.applyQuestTreeHit(cast);
   }
 
   private applyQuestTreeHit(cast: QuestTreeCast, hit = Math.random() < cast.spell.hitChance) {
-    if (this.over || this.quest?.stage !== QUEST.rescueStage || !this.questTree?.alive) return;
+    const config = this.summonTreeConfig();
+    if (this.over || !config || !this.questTree?.alive) return;
     const { target, spell } = cast;
     if (target.team !== 0 || !target.alive || target.untouchable) return;
     // Moving out of the warning circle avoids damage and paralysis entirely.
-    if (Math.hypot(target.x - cast.x, target.y - cast.y) > QUEST.rescue.tree.radius + target.radius) {
+    if (Math.hypot(target.x - cast.x, target.y - cast.y) > config.radius + target.radius) {
       this.summonResult(target, false, spell.color);
       return;
     }
     this.summonResult(target, hit, spell.color);
     if (!hit) { target.paralyze(SOUL_MISS_PARALYZE); return; }
+    if (spell.kind === 'soulReaper') {
+      if (this.reap(undefined, target) && target.alive) target.paralyze(spell.paralyze);
+      return;
+    }
     this.dealDamage(undefined, target, Phaser.Math.Between(spell.minDamage, spell.maxDamage), 0, 0, 0, 0, false);
     if (target.alive) target.paralyze(spell.paralyze);
   }
 
+  /** Reaper hit: protection does not reduce it. Under 80 HP dies; otherwise left at 20. */
+  private reap(from: Fighter | undefined, target: Fighter): boolean {
+    const before = target.hp;
+    const taken = target.stats.taken;
+    if (!target.sufferReaper()) return false;
+    this.fx.hitSpark(target.x, target.y, from?.color ?? 0xff4a6a);
+    if (!from) return true;
+    this.stats[from.index].dealt += target.stats.taken - taken;
+    if (before > 0 && !target.alive) this.stats[from.index].kos++;
+    return true;
+  }
+
   private renderQuestTree(now: number) {
-    if (this.quest?.stage !== QUEST.rescueStage || this.over || !this.questTree?.alive) return;
+    const config = this.summonTreeConfig();
+    if (!config || this.over || !this.questTree?.alive) return;
     const cast = this.questTreeCast;
-    const tree = toWorld(QUEST.rescue.tree);
+    const tree = this.questTree;
     const color = cast?.spell.color ?? 0xa86aff;
     this.gGlow.fillStyle(color, 0.12 + 0.06 * Math.sin(now * 3)).fillCircle(tree.x, tree.y, 90);
     if (!cast) return;
-    const progress = Math.min(1, cast.elapsed / cast.spell.warn);
-    this.fx.summonCircle(this.g, this.gGlow, tree.x, tree.y, progress, color, now);
-    this.fx.targetMark(this.gOver, cast.x, cast.y, progress, color, now);
-    this.g.fillStyle(color, 0.08 + progress * 0.2).fillCircle(cast.x, cast.y, QUEST.rescue.tree.radius);
-    this.g.lineStyle(3, color, 0.7).strokeCircle(cast.x, cast.y, QUEST.rescue.tree.radius);
+    const progress = Math.min(1, cast.elapsed / (cast.spell.warn * config.warnScale));
+    this.fx.summonCircle(this.g, this.gGlow, tree.x, tree.y, progress, color, now, cast.spell.kind);
+    this.fx.targetMark(this.gOver, cast.x, cast.y, progress, color, now, cast.spell.kind);
+    this.g.fillStyle(color, 0.08 + progress * 0.2).fillCircle(cast.x, cast.y, config.radius);
+    this.g.lineStyle(3, color, 0.7).strokeCircle(cast.x, cast.y, config.radius);
     this.gGlow.lineStyle(2, color, 0.25 + progress * 0.35).lineBetween(tree.x, tree.y, cast.x, cast.y);
   }
 
@@ -2022,10 +2456,527 @@ export class BattleScene extends UIScene implements Arena {
     this.towers.push(this.questTree);
   }
 
+  /** A summon tree behind the twin wardens. It does not revive them. */
+  private placeWardenTree(partySize: number) {
+    const config = QUEST.wardens.tree;
+    const p = toWorld(config);
+    const w = 88 * S, h = 100 * S;
+    const hp = config.hpBase + config.hpPerPlayer * partySize;
+    const body = this.physics.add.staticBody(p.x - w / 2, p.y - h / 2, w, h);
+    const collider = this.physics.add.collider(this.fighters.map((f) => f.body), body);
+    const rect = new Phaser.Geom.Rectangle(p.x - w / 2, p.y - h / 2, w, h);
+    this.obstacleRects.push(rect);
+    this.questTree = {
+      team: 1, main: false, tree: true, x: p.x, y: p.y, w, h, hp, maxHp: hp, alive: true, shakeT: 0,
+      body, collider, rect, range: 0, fireInterval: 1, reload: 0, aura: config.aura, arrow: TOWER_ARROW,
+    };
+    this.towers.push(this.questTree);
+    this.questTreeT = config.initialDelay;
+  }
+
+  /** Three live trees. Their jobs are dealt onto the fixed spots at random. */
+  private placeGroveTrees(partySize: number) {
+    const roles: GroveRole[] = ['respawn', 'summon', 'illusion'];
+    for (let i = roles.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [roles[i], roles[j]] = [roles[j], roles[i]];
+    }
+    const illusions: GroveIllusion[] = ['sand', 'heat', 'ice'];
+    this.groveIllusion = illusions[Math.floor(Math.random() * illusions.length)];
+    this.groveVeil = this.add.graphics().setDepth(12);
+    const baseHp = QUEST.grove.hpBase + QUEST.grove.hpPerPlayer * partySize;
+    QUEST.grove.spots.forEach((spot, i) => {
+      const hp = baseHp * (roles[i] === 'summon' ? QUEST.grove.summonHp : 1);
+      const p = toWorld(spot);
+      const w = 88 * S, h = 100 * S;
+      const body = this.physics.add.staticBody(p.x - w / 2, p.y - h / 2, w, h);
+      const collider = this.physics.add.collider(this.fighters.map((f) => f.body), body);
+      const rect = new Phaser.Geom.Rectangle(p.x - w / 2, p.y - h / 2, w, h);
+      this.obstacleRects.push(rect);
+      const tree: Tower = {
+        team: 1, main: false, tree: true, grove: roles[i], x: p.x, y: p.y, w, h, hp, maxHp: hp, alive: true, shakeT: 0,
+        body, collider, rect, range: 0, fireInterval: 1, reload: 0, aura: QUEST.grove.aura, arrow: TOWER_ARROW,
+      };
+      this.groveTrees.push(tree);
+      this.towers.push(tree);
+      const label = this.add.text(p.x, p.y - h / 2 - 28, T().groveRole(roles[i]), {
+        fontFamily: FONT, resolution: RES, fontSize: '15px', fontStyle: 'bold', color: '#ffe9b0', stroke: '#000000', strokeThickness: 4,
+      }).setOrigin(0.5);
+      this.lTop.add(label);
+      this.groveLabels.push(label);
+    });
+  }
+
+  /** Which two trees are on duty. Effects last `interval - rest` seconds, then both rest. */
+  private grovePhase(): { index: number; roles: GroveRole[]; active: boolean; restLeft: number } {
+    const order = QUEST.grove.order;
+    if (this.countdown > 0) return { index: 0, roles: [], active: false, restLeft: 0 };
+    const { interval, rest } = QUEST.grove;
+    const index = Math.floor(this.groveT / interval) % order.length;
+    const into = this.groveT % interval;
+    const scheduled: GroveRole[] = [order[index]!, order[(index + 1) % order.length]!];
+    const roles = scheduled.filter((role) => this.groveTrees.some((tree) => tree.grove === role && tree.alive));
+    return { index, roles, active: into < interval - rest && roles.length > 0, restLeft: Math.max(0, interval - into) };
+  }
+
+  private paintGroveVeil(phase: { roles: readonly GroveRole[]; active: boolean }) {
+    const veil = this.groveVeil;
+    if (!veil) return;
+    veil.clear();
+    if (!(phase.active && phase.roles.includes('illusion'))) return;
+    const [color, alpha] = this.groveIllusion === 'sand' ? [0xc4a36a, 0.34] as const
+      : this.groveIllusion === 'heat' ? [0xff7a3a, 0.14] as const
+      : [0xb9dcff, 0.18] as const;
+    veil.fillStyle(color, alpha).fillRect(0, HUD_HEIGHT, WIDTH, HEIGHT - HUD_HEIGHT);
+  }
+
+  /** Two trees work at once. Destroying a tree silences only that one. */
+  private updateGrove(dt: number) {
+    if (this.countdown > 0 || this.paused) return;
+    this.groveT += dt;
+    const phase = this.grovePhase();
+    this.paintGroveVeil(phase);
+    this.groveTrees.forEach((tree, i) => this.groveLabels[i]?.setAlpha(tree.alive ? 1 : 0.35));
+    if (phase.active && this.groveAnnounced !== String(phase.index)) {
+      this.groveAnnounced = String(phase.index);
+      this.showBanner(T().groveDuty(phase.roles, this.groveIllusion), 0xe2c56a);
+    }
+    if (!phase.active) this.groveAnnounced = '';
+    if (phase.active && phase.roles.includes('respawn')) this.updateGroveRespawn(dt);
+    else this.groveRespawnT = QUEST.grove.respawnEvery;
+    if (phase.active && phase.roles.includes('summon')) this.updateGroveSummon(dt);
+    else {
+      this.groveCast = null;
+      this.groveSummonT = 1.2;
+    }
+  }
+
+  /** While the respawn tree works, fallen enemies come back one at a time, never past four alive. */
+  private updateGroveRespawn(dt: number) {
+    const tree = this.groveTrees.find((t) => t.grove === 'respawn' && t.alive);
+    if (!tree) return;
+    const enemies = this.fighters.filter((f) => f.team === 1);
+    const dead = enemies.filter((f) => !f.alive);
+    if (!dead.length || enemies.filter((f) => f.alive).length >= QUEST.grove.maxEnemies) {
+      this.groveRespawnT = QUEST.grove.respawnEvery;
+      return;
+    }
+    this.groveRespawnT -= dt;
+    if (this.groveRespawnT > 0) return;
+    const guard = dead[0];
+    const spot = this.freeSpot({ x: tree.x + (guard.index % 2 ? 80 : -80), y: tree.y + 70 }, this.fighters.filter((f) => f.alive).map((f) => ({ x: f.x, y: f.y })));
+    guard.revive(spot.x, spot.y, guard.maxHp * TOWER_RESPAWN_HP);
+    guard.pocket.length = 0;
+    guard.selectedItem = 0;
+    guard.soul *= TOWER_RESPAWN_SOUL_KEEP;
+    this.nameTags[guard.index]?.setVisible(true);
+    this.onRevived(guard);
+    this.fx.respawnBeam(tree.x, tree.y, spot.x, spot.y, 0xc45a4a);
+    sfx.respawn();
+    this.popText(tree.x, tree.y - 70, T().groveRole('respawn'), '#e7a090');
+    // The same price as a Quest tower: 10% of max HP, and the last revive can fell the tree.
+    this.damageTower(tree, tree.maxHp * RESPAWN_TOWER_COST, undefined);
+    this.groveRespawnT = QUEST.grove.respawnEvery;
+  }
+
+  /** While the summon tree works, it marks one living party member and casts a summon there. */
+  private updateGroveSummon(dt: number) {
+    const tree = this.groveTrees.find((t) => t.grove === 'summon' && t.alive);
+    if (!tree) { this.groveCast = null; return; }
+    if (this.groveCast) {
+      this.groveCast.elapsed += dt;
+      if (this.groveCast.elapsed < this.groveCast.spell.warn) return;
+      const cast = this.groveCast;
+      this.groveCast = null;
+      this.groveSummonT = QUEST.grove.summonInterval;
+      this.strikeGroveSummon(cast);
+      return;
+    }
+    this.groveSummonT -= dt;
+    if (this.groveSummonT > 0) return;
+    const targets = this.fighters.filter((f) => f.team === 0 && f.alive && !f.untouchable);
+    if (!targets.length) return;
+    const target = targets[Math.floor(Math.random() * targets.length)];
+    const spell = pickTreeSummon();
+    this.groveCast = { spell, target, x: target.x, y: target.y, elapsed: 0 };
+    this.popText(tree.x, tree.y - 75, T().groveTreeCast(T().skillName(skillById(spell.skillId)!), target.index + 1), toHex(spell.color));
+    sfx.summonCharge(spell.kind, spell.warn);
+  }
+
+  private strikeGroveSummon(cast: QuestTreeCast) {
+    const { spell, x, y } = cast;
+    const tree = this.groveTrees.find((t) => t.grove === 'summon' && t.alive);
+    if (tree) this.fx.summonPulse(() => ({ x: tree.x, y: tree.y }), spell.color, 0.12);
+    const treeAlive = () => !!this.groveTrees.find((t) => t.grove === 'summon' && t.alive);
+    if (spell.kind === 'soulReaper') {
+      const hit = Math.random() < groveSummonHitChance(spell);
+      sfx.reaper();
+      this.fx.reaperCatch(() => ({ x, y }), hit);
+      this.time.delayedCall(REAPER_SWING * 1000, () => {
+        if (this.over || !treeAlive()) return;
+        sfx.scythe();
+        this.applyGroveHit(cast, hit);
+      });
+      return;
+    }
+    if (spell.kind === 'soulFire') { sfx.holyFire(); this.fx.holyFlame(x, y); }
+    else if (spell.kind === 'soulThunder') { sfx.skyThunder(); this.fx.skyBolt(x, y); }
+    else { sfx.sacredTree(); this.fx.treeRoots(x, y); }
+    this.applyGroveHit(cast);
+  }
+
+  private applyGroveHit(cast: QuestTreeCast, hit = Math.random() < groveSummonHitChance(cast.spell)) {
+    if (this.over || !this.groveTrees.find((t) => t.grove === 'summon' && t.alive)) return;
+    const { target, spell } = cast;
+    if (target.team !== 0 || !target.alive || target.untouchable) return;
+    if (Math.hypot(target.x - cast.x, target.y - cast.y) > QUEST.grove.radius + target.radius) {
+      this.summonResult(target, false, spell.color);
+      return;
+    }
+    this.summonResult(target, hit, spell.color);
+    if (!hit) { target.paralyze(SOUL_MISS_PARALYZE); return; }
+    if (spell.kind === 'soulReaper') {
+      if (this.reap(undefined, target) && target.alive) target.paralyze(spell.paralyze);
+      return;
+    }
+    this.dealDamage(undefined, target, Phaser.Math.Between(spell.minDamage, spell.maxDamage), 0, 0, 0, 0, false);
+    if (target.alive) target.paralyze(spell.paralyze);
+  }
+
+  /** The side whose allies can be sealed in the saplings. */
+  private snareSide() {
+    return this.isHell ? 1 : 0;
+  }
+
+  /** Two small trees. Jobs are shuffled, and the last allies on that side start inside them. */
+  private placeSnareTrees(partySize: number) {
+    const roles: GroveRole[] = Math.random() < 0.5 ? ['summon', 'illusion'] : ['illusion', 'summon'];
+    const illusions: GroveIllusion[] = ['sand', 'heat', 'ice'];
+    this.snareIllusion = illusions[Math.floor(Math.random() * illusions.length)]!;
+    this.snareVeil = this.add.graphics().setDepth(12);
+    const base = QUEST.snare.hpBase + QUEST.snare.hpPerPlayer * partySize;
+    const side = this.snareSide();
+    QUEST.snare.spots.forEach((spot, i) => {
+      const role = roles[i]!;
+      const hp = base * (role === 'summon' ? QUEST.snare.summonHp : 1);
+      const p = toWorld(spot);
+      const w = 56 * S;
+      const h = 66 * S;
+      const body = this.physics.add.staticBody(p.x - w / 2, p.y - h / 2, w, h);
+      const collider = this.physics.add.collider(this.fighters.map((f) => f.body), body);
+      const rect = new Phaser.Geom.Rectangle(p.x - w / 2, p.y - h / 2, w, h);
+      this.obstacleRects.push(rect);
+      const tree: Tower = {
+        team: side === 0 ? 1 : 0, main: false, tree: true, snare: true, grove: role,
+        x: p.x, y: p.y, w, h, hp, maxHp: hp, alive: true, shakeT: 0,
+        body, collider, rect, range: 0, fireInterval: 1, reload: 0, aura: QUEST.snare.aura, arrow: TOWER_ARROW,
+      };
+      this.snareTrees.push(tree);
+      this.towers.push(tree);
+      const label = this.add.text(p.x, p.y - h / 2 - 22, T().groveRole(role), {
+        fontFamily: FONT, resolution: RES, fontSize: '13px', fontStyle: 'bold', color: '#e7f0c8', stroke: '#000000', strokeThickness: 4,
+      }).setOrigin(0.5);
+      this.lTop.add(label);
+      this.snareLabels.push(label);
+    });
+    const allies = this.fighters.filter((f) => f.team === side && f.alive);
+    const prisoners = allies.slice(Math.max(1, allies.length - 2));
+    prisoners.forEach((f, i) => {
+      const tree = this.snareTrees[i];
+      if (!tree) return;
+      tree.prisoner = f;
+      f.trapped = true;
+      f.body.enable = false;
+      f.body.reset(tree.x - f.radius, tree.y - f.radius);
+    });
+  }
+
+  private releaseSnarePrisoner(tree: Tower) {
+    const f = tree.prisoner;
+    if (!f?.trapped) return;
+    f.trapped = false;
+    const spot = this.freeSpot({ x: tree.x, y: tree.y + 48 }, this.fighters.filter((o) => o.alive && !o.trapped).map((o) => ({ x: o.x, y: o.y })));
+    f.body.enable = true;
+    f.revive(spot.x, spot.y);
+    this.sprites[f.index]?.setVisible(true);
+    this.showBanner(T().snareFreed(f.index + 1), 0x9ddeb0);
+    this.fx.respawnBeam(tree.x, tree.y, spot.x, spot.y, f.color);
+  }
+
+  private paintSnareVeil() {
+    const veil = this.snareVeil;
+    if (!veil) return;
+    veil.clear();
+    const illusion = this.snareTrees.some((t) => t.grove === 'illusion' && t.alive) && this.snareIllusion === 'sand';
+    if (!illusion) return;
+    veil.fillStyle(0xc4a36a, 0.28).fillRect(0, HUD_HEIGHT, WIDTH, HEIGHT - HUD_HEIGHT);
+  }
+
+  /** Both saplings work until they fall. The summon one marks someone on the trapped side. */
+  private updateSnare(dt: number) {
+    if (this.countdown > 0 || this.paused) return;
+    this.paintSnareVeil();
+    this.snareTrees.forEach((tree, i) => this.snareLabels[i]?.setAlpha(tree.alive ? 1 : 0.35));
+    const tree = this.snareTrees.find((t) => t.grove === 'summon' && t.alive);
+    if (!tree) { this.snareCast = null; return; }
+    if (this.snareCast) {
+      this.snareCast.elapsed += dt;
+      if (this.snareCast.elapsed < this.snareCast.spell.warn) return;
+      const cast = this.snareCast;
+      this.snareCast = null;
+      this.snareSummonT = QUEST.snare.summonInterval;
+      this.strikeSnare(cast);
+      return;
+    }
+    this.snareSummonT -= dt;
+    if (this.snareSummonT > 0) return;
+    const side = this.snareSide();
+    const targets = this.fighters.filter((f) => f.team === side && f.alive && !f.trapped && !f.untouchable);
+    if (!targets.length) return;
+    const target = targets[Math.floor(Math.random() * targets.length)]!;
+    const spell = pickTreeSummon();
+    this.snareCast = { spell, target, x: target.x, y: target.y, elapsed: 0 };
+    this.popText(tree.x, tree.y - 46, T().groveTreeCast(T().skillName(skillById(spell.skillId)!), target.index + 1), toHex(spell.color));
+    sfx.summonCharge(spell.kind, spell.warn);
+  }
+
+  private strikeSnare(cast: QuestTreeCast) {
+    const { spell, x, y } = cast;
+    const tree = this.snareTrees.find((t) => t.grove === 'summon' && t.alive);
+    if (tree) this.fx.summonPulse(() => ({ x: tree.x, y: tree.y }), spell.color, 0.12);
+    const chance = Math.min(1, spell.hitChance + QUEST.snare.summonHitBonus);
+    if (spell.kind === 'soulReaper') {
+      const hit = Math.random() < chance;
+      sfx.reaper();
+      this.fx.reaperCatch(() => ({ x, y }), hit);
+      this.time.delayedCall(REAPER_SWING * 1000, () => {
+        if (this.over || !this.snareTrees.some((t) => t.grove === 'summon' && t.alive)) return;
+        sfx.scythe();
+        this.applySnareHit(cast, hit);
+      });
+      return;
+    }
+    if (spell.kind === 'soulFire') { sfx.holyFire(); this.fx.holyFlame(x, y); }
+    else if (spell.kind === 'soulThunder') { sfx.skyThunder(); this.fx.skyBolt(x, y); }
+    else { sfx.sacredTree(); this.fx.treeRoots(x, y); }
+    this.applySnareHit(cast, Math.random() < chance);
+  }
+
+  private applySnareHit(cast: QuestTreeCast, hit: boolean) {
+    if (this.over || !this.snareTrees.some((t) => t.grove === 'summon' && t.alive)) return;
+    const { target, spell } = cast;
+    const side = this.snareSide();
+    if (target.team !== side || !target.alive || target.trapped || target.untouchable) return;
+    if (Math.hypot(target.x - cast.x, target.y - cast.y) > QUEST.snare.radius + target.radius) {
+      this.summonResult(target, false, spell.color);
+      return;
+    }
+    this.summonResult(target, hit, spell.color);
+    if (!hit) { target.paralyze(SOUL_MISS_PARALYZE); return; }
+    if (spell.kind === 'soulReaper') {
+      if (this.reap(undefined, target) && target.alive) target.paralyze(spell.paralyze);
+      return;
+    }
+    this.dealDamage(undefined, target, Phaser.Math.Between(spell.minDamage, spell.maxDamage), 0, 0, 0, 0, false);
+    if (target.alive) target.paralyze(spell.paralyze);
+  }
+
+  /** The center bell warns, then strikes everyone who is not on the Bell Oni's side. */
+  private updateDirge(dt: number) {
+    if (this.countdown > 0 || this.paused || this.over) return;
+    const boss = this.fighters.find((f) => f.boss && f.alive);
+    if (!boss) { this.dirgeWarn = null; return; }
+    if (this.dirgeWarn) {
+      this.dirgeWarn.elapsed += dt;
+      if (this.dirgeWarn.elapsed < QUEST.dirge.tollWarn) return;
+      this.dirgeWarn = null;
+      this.dirgeTollT = QUEST.dirge.tollEvery;
+      const bell = toWorld(QUEST.dirge.bell);
+      let struck = false;
+      for (const f of this.fighters) {
+        if (!f.alive || f.trapped || f.team === boss.team) continue;
+        if (Math.hypot(f.x - bell.x, f.y - bell.y) > QUEST.dirge.tollRadius + f.radius) continue;
+        this.dealDamage(undefined, f, QUEST.dirge.tollDamage, 0, 0, 40, 0.2, false);
+        if (f.alive) f.paralyze(QUEST.dirge.tollParalyze);
+        struck = true;
+      }
+      if (struck) this.showBanner(T().dirgeToll, DIRGE_COLOR);
+      sfx.bell();
+      return;
+    }
+    this.dirgeTollT = Math.max(0, this.dirgeTollT - dt);
+    if (this.dirgeTollT > 0) return;
+    this.dirgeWarn = { elapsed: 0 };
+  }
+
+  private renderDirge() {
+    if (this.quest?.stage !== QUEST.dirgeStage) return;
+    const bell = toWorld(QUEST.dirge.bell);
+    const warn = this.dirgeWarn;
+    const r = QUEST.dirge.tollRadius;
+    this.g.lineStyle(2, DIRGE_COLOR, 0.35).strokeCircle(bell.x, bell.y, r);
+    if (!warn) return;
+    const progress = Math.min(1, warn.elapsed / QUEST.dirge.tollWarn);
+    this.g.fillStyle(DIRGE_COLOR, 0.05 + progress * 0.12).fillCircle(bell.x, bell.y, r * progress);
+    this.g.lineStyle(3, DIRGE_COLOR, 0.85).strokeCircle(bell.x, bell.y, r);
+  }
+
+  /** Darken the alley, then cut a light around every burning candle and living fighter. */
+  private renderNight(now: number) {
+    const shade = this.nightShade;
+    const lights = this.nightLights;
+    if (!shade || !lights || this.quest?.stage !== QUEST.nightStage) return;
+    shade.clear();
+    shade.fill(0x02030a, QUEST.night.veil, 0, HUD_HEIGHT, WIDTH, HEIGHT - HUD_HEIGHT);
+    lights.clear();
+    lights.fillStyle(0xffffff, 1);
+    const add = (x: number, y: number, r: number) => {
+      lights.fillCircle(x, y, r);
+      lights.fillStyle(0xffffff, 0.35);
+      lights.fillCircle(x, y, r * 1.45);
+      lights.fillStyle(0xffffff, 1);
+    };
+    for (const candle of this.nightCandles) if (candle.lit) add(candle.x / S, candle.y / S + HUD_HEIGHT, QUEST.night.lantern);
+    for (const f of this.fighters) if (f.alive && !f.trapped) add(f.x / S, f.y / S + HUD_HEIGHT, QUEST.night.light);
+    shade.erase(lights);
+    this.renderNightFlames(now);
+  }
+
+  /** A lit candle warns, then scorches heroes inside its light. A dark one climbs back onto the wick. */
+  private updateNight(dt: number) {
+    if (this.countdown > 0 || this.paused || this.over) return;
+    for (const candle of this.nightCandles) {
+      if (!candle.lit) {
+        candle.timer -= dt;
+        if (candle.timer > 0) continue;
+        candle.lit = true;
+        candle.timer = QUEST.night.flareEvery;
+        candle.warn = null;
+        this.popText(candle.x, candle.y - 36, T().nightRelight, '#ffb45a');
+        continue;
+      }
+      if (candle.warn !== null) {
+        candle.warn += dt;
+        if (candle.warn < QUEST.night.flareWarn) continue;
+        this.flareCandle(candle);
+        continue;
+      }
+      candle.timer -= dt;
+      if (candle.timer <= 0) candle.warn = 0;
+    }
+  }
+
+  private flareCandle(candle: NightCandle) {
+    candle.warn = null;
+    candle.timer = QUEST.night.flareEvery;
+    const radius = QUEST.night.lantern * S;
+    let struck = false;
+    for (const f of this.fighters) {
+      if (!f.alive || f.trapped || f.team !== 0) continue;
+      const dx = f.x - candle.x;
+      const dy = f.y - candle.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      if (dist > radius + f.radius) continue;
+      this.dealDamage(undefined, f, QUEST.night.flareDamage, dx / dist, dy / dist, 90, 0.2, false);
+      struck = true;
+    }
+    this.fx.holyFlame(candle.x, candle.y);
+    if (struck) this.popText(candle.x, candle.y - 36, T().nightFlare, '#ffb45a');
+    sfx.holyFire();
+  }
+
+  private snuffCandle(candle: NightCandle) {
+    candle.lit = false;
+    candle.warn = null;
+    candle.timer = QUEST.night.relight;
+    this.fx.smoke(candle.x, candle.y, 10, 1);
+    this.popText(candle.x, candle.y - 36, T().nightSnuff, '#f3d7a1');
+    sfx.vanish();
+  }
+
+  private renderNightFlames(now: number) {
+    const g = this.nightFlames;
+    if (!g) return;
+    g.clear();
+    const radius = QUEST.night.lantern * S;
+    for (const candle of this.nightCandles) {
+      const bob = Math.sin(now * 6 + candle.x) * 3;
+      g.fillStyle(0x3a2a22, 1).fillRect(candle.x - 4, candle.y - 18, 8, 28);
+      if (!candle.lit) {
+        const back = 1 - Math.max(0, candle.timer) / QUEST.night.relight;
+        g.fillStyle(0x6a5a48, 0.9).fillCircle(candle.x, candle.y - 20, 3);
+        g.lineStyle(2, 0xf3d7a1, 0.55);
+        g.beginPath();
+        g.arc(candle.x, candle.y, 22, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * back, false);
+        g.strokePath();
+        continue;
+      }
+      const h = 18 + bob;
+      g.fillStyle(0xffb45a, 0.95).fillTriangle(candle.x - 8, candle.y - 16, candle.x + 8, candle.y - 16, candle.x, candle.y - 16 - h);
+      g.fillStyle(0xfff1c9, 1).fillCircle(candle.x, candle.y - 18 - h * 0.4, 4);
+      if (candle.warn === null) continue;
+      const progress = Math.min(1, candle.warn / QUEST.night.flareWarn);
+      g.lineStyle(3, 0xffb45a, 0.45 + progress * 0.5).strokeCircle(candle.x, candle.y, radius);
+      g.fillStyle(0xff8a3a, 0.06 + progress * 0.14).fillCircle(candle.x, candle.y, radius * progress);
+    }
+  }
+
+  private renderSnareCast(now: number) {
+    const cast = this.snareCast;
+    const tree = this.snareTrees.find((t) => t.grove === 'summon' && t.alive);
+    if (!cast || !tree) return;
+    const color = cast.spell.color;
+    const progress = Math.min(1, cast.elapsed / cast.spell.warn);
+    this.fx.summonCircle(this.g, this.gGlow, tree.x, tree.y, progress, color, now, cast.spell.kind);
+    this.fx.targetMark(this.gOver, cast.x, cast.y, progress, color, now, cast.spell.kind);
+    this.g.fillStyle(color, 0.1 + progress * 0.16).fillCircle(cast.x, cast.y, QUEST.snare.radius);
+    this.g.lineStyle(2, color, 0.7).strokeCircle(cast.x, cast.y, QUEST.snare.radius);
+  }
+
+  private renderSnareTree(g: Phaser.GameObjects.Graphics, over: Phaser.GameObjects.Graphics, tree: Tower, now: number) {
+    const x = tree.x + (tree.shakeT > 0 ? Math.sin(now * 80) * 2 : 0);
+    const y = tree.y;
+    const tint = tree.grove === 'illusion' ? 0xe2c56a : 0x945bc2;
+    const wood = tree.grove === 'illusion' ? 0x6e6240 : 0x554631;
+    if (!tree.alive) {
+      g.fillStyle(0x24231f, 1).fillEllipse(x, y, 36, 24);
+      g.lineStyle(3, 0x514536, 1).lineBetween(x - 16, y + 6, x + 14, y - 10);
+      return;
+    }
+    g.fillStyle(tint, 0.08).fillCircle(x, y, tree.aura);
+    g.lineStyle(2, tint, 0.45).strokeCircle(x, y, tree.aura);
+    for (let k = 0; k < 7; k++) {
+      const a = k * Math.PI * 2 / 7;
+      g.lineStyle(5, wood, 1).lineBetween(x, y, x + Math.cos(a) * 28, y + Math.sin(a) * 22);
+    }
+    over.fillStyle(0x5a4534, 1).fillEllipse(x, y, 28, 40);
+    over.lineStyle(2, tint, 1).strokeEllipse(x, y, 28, 40);
+    over.fillStyle(tint, 0.9).fillCircle(x - 5, y - 4, 2.4).fillCircle(x + 5, y - 4, 2.4);
+    if (tree.prisoner?.trapped) over.fillStyle(tree.prisoner.color, 1).fillCircle(x, y + 8, 6);
+    const bw = tree.w;
+    over.fillStyle(0x080b10, 0.9).fillRoundedRect(x - bw / 2, y - tree.h / 2 - 12, bw, 7, 2);
+    over.fillStyle(tint, 1).fillRoundedRect(x - bw / 2 + 1, y - tree.h / 2 - 11, (bw - 2) * Math.max(0, tree.hp / tree.maxHp), 5, 2);
+  }
+
+  private renderGroveCast(now: number) {
+    const cast = this.groveCast;
+    const tree = this.groveTrees.find((t) => t.grove === 'summon' && t.alive);
+    if (!cast || !tree) return;
+    const color = cast.spell.color;
+    const progress = Math.min(1, cast.elapsed / cast.spell.warn);
+    this.fx.summonCircle(this.g, this.gGlow, tree.x, tree.y, progress, color, now, cast.spell.kind);
+    this.fx.targetMark(this.gOver, cast.x, cast.y, progress, color, now, cast.spell.kind);
+    this.g.fillStyle(color, 0.08 + progress * 0.2).fillCircle(cast.x, cast.y, QUEST.grove.radius);
+    this.g.lineStyle(3, color, 0.7).strokeCircle(cast.x, cast.y, QUEST.grove.radius);
+  }
+
   /** Every Quest stage entry, including retries, goes through the shared loading screen. */
   private enterRound(data: BattleStartData) {
-    if (data.mode === 'quest') this.scene.start('Loading', structuredClone(data));
-    else this.scene.restart(data);
+    if (isQuestMode(data.mode)) {
+      const next = structuredClone(data);
+      next.quest = { ...next.quest, ...prepareQuest(next.quest) };
+      this.scene.start('Loading', next);
+    } else this.scene.restart(data);
   }
 
   private restartRound() {
@@ -2034,11 +2985,11 @@ export class BattleScene extends UIScene implements Arena {
 
   private createQuestHud() {
     const q = this.quest!;
-    this.showBanner(T().questStageTitle(q.stage + 1, T().questGoals[q.stage]), 0xf2c94c);
+    this.showBanner(T().questStageTitle(questStageNumber(q.route ?? [], q.stage), this.questGoal(q.stage)), 0xf2c94c);
     this.questText = txt(this, SCREEN_ARENA.x + 12, HEIGHT - 14, '', 15, '#ffe9b0', { bold: true, origin: [0, 1], stroke: '#000000', strokeThickness: 4, depth: 15 });
     if (this.fighters.some((f) => f.boss)) {
       this.bossBar = this.add.graphics().setDepth(15);
-      this.bossName = txt(this, WIDTH / 2, HEIGHT - 40, `${T().bossTag}・${T().bossName}`, 16, '#ff8a8a', { title: true, bold: true, origin: [0.5, 1], stroke: '#000000', strokeThickness: 4, depth: 16 });
+      this.bossName = txt(this, WIDTH / 2, HEIGHT - 40, `${T().bossTag}・${q.stage === QUEST.wardenStage ? T().wardensTitle : q.stage === QUEST.dirgeStage ? T().dirgeName : q.stage === QUEST.nightStage ? T().nightBossName : T().bossName}`, 16, '#ff8a8a', { title: true, bold: true, origin: [0.5, 1], stroke: '#000000', strokeThickness: 4, depth: 16 });
     }
   }
 
@@ -2047,15 +2998,34 @@ export class BattleScene extends UIScene implements Arena {
     const q = this.quest!;
     const foes = this.fighters.filter((f) => f.team === 1);
     const left = foes.filter((f) => f.alive).length;
-    const status = q.stage === 0
-      ? `${T().questStage(1)}  ${T().questWaveOf(this.wave, QUEST.waves)} · ${T().questLeft(left)}`
+    const stageNo = T().questStage(questStageNumber(q.route ?? [], q.stage));
+    const grove = q.stage === QUEST.groveStage ? this.grovePhase() : null;
+    const candles = q.stage === QUEST.nightStage ? ` · ${T().nightCandles(this.nightCandles.filter((c) => c.lit).length)}` : '';
+    const status = this.isHell
+      ? `${stageNo}  ${T().hellStatus(this.fighters.filter((f) => f.team === 0 && f.alive).length)}${q.stage === 0 ? ` · ${T().questWaveOf(this.wave, QUEST.waves)}` : q.stage === QUEST.wardenStage && this.wardenReviveT >= 0 ? ` · ${Math.ceil(this.wardenReviveT)}s` : ''}${candles}`
+      : q.stage === 0
+      ? `${stageNo}  ${T().questWaveOf(this.wave, QUEST.waves)} · ${T().questLeft(left)}`
       : q.stage === 1
-        ? `${T().questStage(2)}  ${T().questTowersLeft(this.towers.filter((tw) => tw.team === 1 && tw.alive).length)}`
+        ? `${stageNo}  ${T().questTowersLeft(this.towers.filter((tw) => tw.team === 1 && tw.alive).length)}`
+        : q.stage === QUEST.nightStage
+          ? `${stageNo}  ${T().questLeft(left)}${candles}`
         : q.stage === QUEST.rescueStage
-          ? `${T().questStage(q.stage + 1)}  ${T().questRescueProgress(this.walls.filter((w) => w.rescued).length, this.walls.length)} · ${T().questLeft(left)} · ${T().questTreeState(!!this.questTree?.alive)}`
-          : `${T().questStage(q.stage + 1)}  ${T().questBossHint}`;
+          ? `${stageNo}  ${T().questRescueProgress(this.walls.filter((w) => w.rescued).length, this.walls.length)} · ${T().questLeft(left)} · ${T().questTreeState(!!this.questTree?.alive)}`
+          : q.stage === QUEST.groveStage
+            ? `${stageNo}  ${T().groveTreesLeft(this.groveTrees.filter((t) => t.alive).length)} · ${T().questLeft(left)}${this.countdown > 0 || !grove ? '' : ` · ${grove.active ? T().groveDuty(grove.roles, this.groveIllusion) : T().groveRest(Math.ceil(grove.restLeft))}`}`
+            : q.stage === QUEST.snareStage
+              ? `${stageNo}  ${T().snareStatus(this.snareTrees.filter((t) => t.alive).length, this.fighters.filter((f) => f.trapped).length)} · ${T().questLeft(left)}`
+            : q.stage === QUEST.sealStage
+              ? `${stageNo}  ${T().sealProgress(this.seals.filter((s) => s.sealed).length, this.seals.length)}`
+              : q.stage === QUEST.escortStage && this.lantern
+                ? `${stageNo}  ${T().escortProgress(Math.floor(this.lantern.progress * 100), this.lantern.push)}`
+                : q.stage === QUEST.wardenStage
+                  ? `${stageNo}  ${T().wardenStatus(this.wardenReviveT < 0 ? -1 : Math.ceil(this.wardenReviveT))}`
+                  : q.stage === QUEST.dirgeStage
+                    ? `${stageNo}  ${T().dirgeStatus(this.dirgeWarn ? -1 : Math.ceil(this.dirgeTollT))}`
+                  : `${stageNo}  ${T().questBossHint}`;
     if (this.questText && this.questText.text !== status) this.questText.setText(status);
-    const boss = foes.find((f) => f.boss);
+    const boss = (q.stage === QUEST.nightStage ? this.fighters : foes).find((f) => f.boss);
     if (boss && this.bossBar) {
       const w = 460;
       const x = WIDTH / 2 - w / 2;
@@ -2064,16 +3034,70 @@ export class BattleScene extends UIScene implements Arena {
       g.clear();
       g.fillStyle(0x000000, 0.6).fillRoundedRect(x - 4, y - 4, w + 8, 18, 5);
       g.fillStyle(0x3a0c10, 1).fillRect(x, y, w, 10);
-      g.fillStyle(0xe5484d, 1).fillRect(x, y, w * Math.max(0, boss.hp) / boss.maxHp, 10);
+      if (q.stage === QUEST.wardenStage) {
+        const wardens = foes.filter((f) => f.boss);
+        wardens.forEach((f, i) => {
+          const bx = x + i * (w / 2 + 3), bw = w / 2 - 3;
+          g.fillStyle(f.color, 1).fillRect(bx, y, bw * Math.max(0, f.hp) / f.maxHp, 10);
+          g.lineStyle(1, f.color, 0.8).strokeRect(bx, y, bw, 10);
+        });
+      } else g.fillStyle(0xe5484d, 1).fillRect(x, y, w * Math.max(0, boss.hp) / boss.maxHp, 10);
       g.lineStyle(1.5, 0xd9ae4a, 1).strokeRect(x, y, w, 10);
     }
   }
 
+  /** Hell defends the same world objectives while the invading heroes use their normal AI. */
+  private updateHellQuest(dt: number) {
+    if (!this.quest || this.over || this.paused || this.countdown > 0) return;
+    const stage = this.quest.stage;
+    const heroes = this.fighters.filter((f) => f.team === 0);
+    const hell = this.fighters.filter((f) => f.team === 1);
+    const bosses = hell.filter((f) => f.boss);
+    const lost = stage === 1 ? !this.towers.some((t) => t.team === 1 && t.alive)
+      : stage === QUEST.rescueStage ? this.walls.length === 2 && this.walls.every((w) => w.rescued)
+      : stage === QUEST.groveStage ? this.groveTrees.length === 3 && this.groveTrees.every((t) => !t.alive)
+      : stage === QUEST.snareStage ? !hell.some((f) => f.alive && !f.trapped)
+      : stage === QUEST.sealStage ? this.seals.length > 0 && this.seals.every((s) => s.sealed)
+      : stage === QUEST.escortStage ? !!this.lantern?.arrived
+      : stage === QUEST.bossStage || stage === QUEST.dirgeStage ? bosses.length > 0 && !bosses.some((f) => f.alive)
+      : stage === QUEST.wardenStage ? bosses.length === 2 && !bosses.some((f) => f.alive) : false;
+    if (lost) { this.questFail(); return; }
+
+    // Existing tower/tree reinforcements are now the player's reinforcements.
+    const canReturn = this.towers.some((t) => t.team === 1 && t.main && t.alive)
+      || stage === QUEST.groveStage && this.groveTrees.some((t) => t.grove === 'respawn' && t.alive)
+      || stage === QUEST.sealStage || stage === QUEST.escortStage;
+    if (!hell.some((f) => f.alive) && !canReturn) { this.questFail(); return; }
+    if (stage === QUEST.escortStage && this.lantern?.lost) { this.questClear(); return; }
+
+    if (!heroes.some((f) => f.alive)) {
+      if (stage === 0 && this.wave < QUEST.waves) {
+        if (this.waveT < 0) {
+          this.waveT = QUEST.waveDelay;
+          this.showBanner(T().questWave(this.wave + 1), this.sideColor(0));
+        } else {
+          this.waveT -= dt;
+          if (this.waveT <= 0) this.nextWave(heroes);
+        }
+      } else this.questClear();
+      return;
+    }
+    if (stage === QUEST.groveStage) this.updateGrove(dt);
+    else if (stage === QUEST.snareStage) this.updateSnare(dt);
+    else if (stage === QUEST.sealStage) this.updateSeals(dt);
+    else if (stage === QUEST.escortStage) this.updateEscort(dt);
+    else if (stage === QUEST.bossStage) this.updateBossReinforcements(dt);
+    else if (stage === QUEST.dirgeStage) this.updateDirge(dt);
+    else if (stage === QUEST.nightStage) this.updateNight(dt);
+    else if (stage === QUEST.wardenStage) { this.updateQuestTree(dt); this.updateWardens(dt); }
+  }
+
   private updateQuest(dt: number) {
+    if (this.isHell) { this.updateHellQuest(dt); return; }
     const q = this.quest!;
     const party = this.fighters.filter((f) => f.team === 0);
     const foes = this.fighters.filter((f) => f.team === 1);
-    if (!party.some((f) => f.alive)) {
+    if (!party.some((f) => f.alive && !f.trapped)) {
       this.questFail();
       return;
     }
@@ -2084,20 +3108,239 @@ export class BattleScene extends UIScene implements Arena {
       } else if (!foes.some((f) => f.alive)) {
         if (this.wave < QUEST.waves) {
           this.waveT = QUEST.waveDelay;
-          this.showBanner(T().questWave(this.wave + 1), TEAM_COLORS[1]);
+          this.showBanner(T().questWave(this.wave + 1), this.sideColor(1));
         } else this.questClear();
       }
     } else if (q.stage === 1) {
       if (!this.towers.some((tw) => tw.team === 1 && tw.alive)) this.questClear();
     } else if (q.stage === QUEST.rescueStage) {
       if (this.walls.length === 2 && this.walls.every((w) => w.rescued) && this.questTree && !this.questTree.alive && !foes.some((f) => f.alive)) this.questClear();
+    } else if (q.stage === QUEST.groveStage) {
+      this.updateGrove(dt);
+      if (this.groveTrees.length === 3 && this.groveTrees.every((t) => !t.alive)) this.questClear();
+    } else if (q.stage === QUEST.snareStage) {
+      this.updateSnare(dt);
+      if (this.snareTrees.length === 2 && this.snareTrees.every((t) => !t.alive) && !foes.some((f) => f.alive)) this.questClear();
+    } else if (q.stage === QUEST.sealStage) {
+      this.updateSeals(dt);
+      if (this.seals.length === QUEST.seals.spots.length && this.seals.every((s) => s.sealed) && !foes.some((f) => f.alive)) this.questClear();
+    } else if (q.stage === QUEST.escortStage) {
+      this.updateEscort(dt);
+      if (this.lantern && (!this.lantern.alive || this.lantern.lost)) this.questFail();
+      else if (this.lantern?.arrived) this.questClear();
+    } else if (q.stage === QUEST.wardenStage) {
+      this.updateQuestTree(dt);
+      this.updateWardens(dt);
+    } else if (q.stage === QUEST.nightStage) {
+      if (!foes.some((f) => f.alive)) this.questClear();
+      else this.updateNight(dt);
+    } else if (q.stage === QUEST.dirgeStage) {
+      this.updateDirge(dt);
+      if (!foes.some((f) => f.boss && f.alive)) this.questClear();
     } else if (!foes.some((f) => f.boss && f.alive)) this.questClear();
     else this.updateBossReinforcements(dt);
   }
 
+  private bossTitle(f: Fighter) {
+    if (this.quest?.stage === QUEST.wardenStage) return T().wardenName(this.questBossSeats.indexOf(f.index));
+    if (this.quest?.stage === QUEST.dirgeStage) return T().dirgeName;
+    if (this.quest?.stage === QUEST.nightStage) return T().nightBossName;
+    return T().bossName;
+  }
+
+  private renderWardenBond(now: number) {
+    if (this.quest?.stage !== QUEST.wardenStage) return;
+    const wardens = this.fighters.filter((f) => f.boss && f.team === 1);
+    if (wardens.length !== 2) return;
+    const [a, b] = wardens;
+    if (a.alive && b.alive) {
+      this.g.lineStyle(2, 0xd4b985, 0.25).lineBetween(a.x, a.y, b.x, b.y);
+      for (const offset of [0, 0.5]) {
+        const t = (now * 0.35 + offset) % 1;
+        this.gGlow.fillStyle(0xe5d4a0, 0.65).fillCircle(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, 3);
+      }
+    } else if (this.wardenReviveT >= 0) {
+      const fallen = wardens.find((f) => !f.alive)!;
+      const spot = this.spawns[fallen.index];
+      const progress = 1 - this.wardenReviveT / QUEST.wardens.reviveAfter;
+      this.g.lineStyle(2, fallen.color, 0.6).strokeCircle(spot.x, spot.y, 48);
+      this.g.fillStyle(fallen.color, 0.05 + progress * 0.1).fillCircle(spot.x, spot.y, 44);
+      for (let i = 0; i < 12; i++) {
+        const angle = -Math.PI / 2 + i * Math.PI / 6;
+        this.g.lineStyle(5, fallen.color, i / 12 < progress ? 0.9 : 0.15);
+        this.g.lineBetween(spot.x + Math.cos(angle) * 43, spot.y + Math.sin(angle) * 43, spot.x + Math.cos(angle) * 53, spot.y + Math.sin(angle) * 53);
+      }
+    }
+  }
+
+  /** The soul bond breaks only when both wardens fall before the revival window expires. */
+  private updateWardens(dt: number) {
+    if (this.quest?.stage !== QUEST.wardenStage || this.over || this.paused || this.countdown > 0) return;
+    const wardens = this.fighters.filter((f) => f.boss && f.team === 1);
+    if (wardens.length !== 2) return;
+    const fallen = wardens.filter((f) => !f.alive);
+    if (fallen.length === 2) { if (this.isHell) this.questFail(); else this.questClear(); return; }
+    this.updateWardenGrunt(dt);
+    if (!fallen.length) { this.wardenReviveT = -1; return; }
+    if (this.wardenReviveT < 0) this.wardenReviveT = QUEST.wardens.reviveAfter;
+    this.wardenReviveT = Math.max(0, this.wardenReviveT - dt);
+    if (this.wardenReviveT > 0) return;
+    const warden = fallen[0];
+    const spot = this.freeSpot(this.spawns[warden.index], this.fighters.filter((f) => f.alive).map((f) => ({ x: f.x, y: f.y })));
+    warden.revive(spot.x, spot.y, warden.maxHp * QUEST.wardens.reviveHp);
+    warden.pocket.length = 0;
+    warden.selectedItem = 0;
+    warden.soul *= TOWER_RESPAWN_SOUL_KEEP;
+    this.onRevived(warden);
+    this.nameTags[warden.index]?.setVisible(true);
+    this.fx.smoke(spot.x, spot.y, 18, 1);
+    this.showBanner(T().wardenRevived, 0x93d8bf);
+    sfx.respawn();
+    this.wardenReviveT = -1;
+  }
+
+  /** The extra guard on the warden stage keeps walking back in, so the bosses are never fought alone. */
+  private updateWardenGrunt(dt: number) {
+    const grunt = this.fighters.find((f) => f.team === 1 && !f.boss);
+    if (!grunt || grunt.alive) { this.wardenGruntT = QUEST.wardens.gruntRespawn; return; }
+    this.wardenGruntT -= dt;
+    if (this.wardenGruntT > 0) return;
+    const spot = this.freeSpot(this.spawns[grunt.index] ?? { x: grunt.x, y: grunt.y },
+      this.fighters.filter((f) => f.alive).map((f) => ({ x: f.x, y: f.y })));
+    grunt.revive(spot.x, spot.y, grunt.maxHp * TOWER_RESPAWN_HP);
+    grunt.pocket.length = 0;
+    grunt.selectedItem = 0;
+    grunt.soul *= TOWER_RESPAWN_SOUL_KEEP;
+    this.onRevived(grunt);
+    this.nameTags[grunt.index]?.setVisible(true);
+    this.fx.smoke(spot.x, spot.y, 12, 1);
+    sfx.respawn();
+    this.wardenGruntT = QUEST.wardens.gruntRespawn;
+  }
+
+  private damageLantern(damage: number, attacker?: Fighter) {
+    const lantern = this.lantern;
+    if (!lantern?.alive || lantern.arrived || lantern.lost || this.over || this.paused || this.countdown > 0) return;
+    const taken = Math.min(lantern.hp, damage);
+    lantern.hp = Math.max(0, lantern.hp - damage);
+    lantern.alive = lantern.hp > 0;
+    if (attacker) attacker.stats.wall += taken;
+    this.fx.hitSpark(lantern.x, lantern.y, 0xffcc80);
+    sfx.wallHit();
+    if (!lantern.alive) this.fx.sparks(lantern.x, lantern.y, 0x90dfc3, 24);
+  }
+
+  private updateEscort(dt: number) {
+    const lantern = this.lantern;
+    if (!lantern || this.over || this.paused || this.countdown > 0) return;
+    advanceLantern(lantern, this.fighters, dt);
+    if (!lantern.alive || lantern.arrived || lantern.lost) return;
+    const guard = this.fighters.find((f) => f.team === 1 && !f.alive);
+    if (!guard) { this.escortRespawnT = QUEST.escort.respawnEvery; return; }
+    this.escortRespawnT -= dt;
+    if (this.escortRespawnT > 0) return;
+    // Alternate northern/southern ambushes ahead of the lantern, with room to react.
+    const side = guard.index % 2;
+    const spot = this.freeSpot({ x: Math.min(ARENA.x + ARENA.w - 90, lantern.x + 240 * S), y: side ? ARENA.y + ARENA.h - 70 : ARENA.y + 70 },
+      this.fighters.filter((f) => f.alive).map((f) => ({ x: f.x, y: f.y })));
+    guard.revive(spot.x, spot.y, guard.maxHp * TOWER_RESPAWN_HP);
+    guard.pocket.length = 0;
+    guard.selectedItem = 0;
+    guard.soul *= TOWER_RESPAWN_SOUL_KEEP;
+    this.onRevived(guard);
+    this.nameTags[guard.index]?.setVisible(true);
+    this.fx.smoke(spot.x, spot.y, 12, 1);
+    sfx.respawn();
+    this.escortRespawnT = QUEST.escort.respawnEvery;
+  }
+
+  private renderLantern(now: number) {
+    const lantern = this.lantern;
+    if (!lantern) return;
+    const { x, y, radius: r } = lantern;
+    const g = this.g;
+    const color = !lantern.alive || lantern.lost ? 0x647b78 : lantern.push < 0 || lantern.hp < lantern.maxHp * 0.3 ? 0xff967a : 0x99e7c6;
+    g.fillStyle(color, 0.04).fillCircle(x, y, r);
+    g.lineStyle(2, color, 0.5).strokeCircle(x, y, r);
+    // The ring fills with journey progress; the bar directly above is lantern HP.
+    for (let i = 0; i < 40; i++) {
+      const angle = -Math.PI / 2 + i * Math.PI / 20;
+      g.lineStyle(4, color, i / 40 < lantern.progress ? 0.9 : 0.12);
+      g.lineBetween(x + Math.cos(angle) * (r - 5), y + Math.sin(angle) * (r - 5), x + Math.cos(angle) * (r + 2), y + Math.sin(angle) * (r + 2));
+    }
+    g.fillStyle(0x000000, 0.25).fillEllipse(x, y + 22, 62, 22);
+    const bob = lantern.alive ? Math.sin(now * 3) * 3 : 8;
+    const ly = y + bob;
+    g.fillStyle(0x243d3c, 1).fillRoundedRect(x - 25, ly - 32, 50, 57, 7);
+    g.fillStyle(color, lantern.alive ? 0.55 : 0.12).fillRoundedRect(x - 20, ly - 27, 40, 47, 5);
+    g.lineStyle(3, 0xc1ae7b, 1).strokeRoundedRect(x - 25, ly - 32, 50, 57, 7);
+    for (const dx of [-12, 12]) g.lineBetween(x + dx, ly - 31, x + dx, ly + 25);
+    g.fillStyle(0xbfa570, 1).fillRect(x - 31, ly - 38, 62, 7).fillRect(x - 31, ly + 25, 62, 7);
+    g.lineStyle(3, 0xbfa570, 1).lineBetween(x, ly - 45, x, ly - 38).lineBetween(x, ly + 32, x, ly + 44);
+    if (lantern.alive) {
+      this.gGlow.fillStyle(0x86e9ba, 0.07).fillCircle(x, ly - 3, 47);
+      this.gGlow.fillStyle(0xffe5a1, 0.9).fillEllipse(x, ly - 4, 12 + Math.sin(now * 7) * 2, 26);
+    }
+    g.fillStyle(0x102025, 0.95).fillRoundedRect(x - 43, y - 66, 86, 12, 3);
+    g.fillStyle(color, 1).fillRect(x - 40, y - 63, 80 * lantern.hp / lantern.maxHp, 6);
+  }
+
+  /** Seals charge only during play. Guards keep returning until all three are broken. */
+  private updateSeals(dt: number) {
+    if (this.quest?.stage !== QUEST.sealStage || this.over || this.paused || this.countdown > 0) return;
+    this.seals.forEach((seal, i) => {
+      if (chargeSeal(seal, this.fighters, dt)) {
+        this.showBanner(T().sealBroken(i + 1), 0x83dfd4);
+        this.fx.sparks(seal.x, seal.y, 0x83dfd4, 24);
+      }
+    });
+    if (this.seals.every((s) => s.sealed)) return;
+    const guard = this.fighters.find((f) => f.team === 1 && !f.alive);
+    if (!guard) { this.sealRespawnT = QUEST.seals.respawnEvery; return; }
+    this.sealRespawnT -= dt;
+    if (this.sealRespawnT > 0) return;
+    const spot = this.freeSpot(this.spawns[guard.index], this.fighters.filter((f) => f.alive).map((f) => ({ x: f.x, y: f.y })));
+    guard.revive(spot.x, spot.y, guard.maxHp * TOWER_RESPAWN_HP);
+    guard.pocket.length = 0;
+    guard.selectedItem = 0;
+    guard.soul *= TOWER_RESPAWN_SOUL_KEEP;
+    this.onRevived(guard);
+    this.nameTags[guard.index]?.setVisible(true);
+    this.fx.smoke(spot.x, spot.y, 12, 1);
+    sfx.respawn();
+    this.sealRespawnT = QUEST.seals.respawnEvery;
+  }
+
+  private renderSeals(now: number) {
+    for (const seal of this.seals) {
+      const { x, y, radius: r } = seal;
+      const color = seal.sealed ? 0x83dfd4 : seal.contested ? 0xf28b65 : 0xe5bb6d;
+      const g = this.g;
+      g.fillStyle(0x151221, 0.45).fillCircle(x, y, r);
+      g.fillStyle(color, seal.sealed ? 0.12 : 0.05 + Math.sin(now * 3) * 0.02).fillCircle(x, y, r - 6);
+      g.lineStyle(2, color, 0.55).strokeCircle(x, y, r);
+      g.lineStyle(1, color, 0.3).strokeCircle(x, y, r - 12);
+      // Segments show charge without covering fighters.
+      for (let k = 0; k < 32; k++) {
+        const a = -Math.PI / 2 + k * Math.PI / 16;
+        g.lineStyle(5, color, k / 32 < seal.progress ? 0.95 : 0.1);
+        g.lineBetween(x + Math.cos(a) * (r - 5), y + Math.sin(a) * (r - 5), x + Math.cos(a) * (r + 3), y + Math.sin(a) * (r + 3));
+      }
+      if (seal.sealed) {
+        g.lineStyle(5, color, 0.9).lineBetween(x - 16, y, x - 4, y + 12).lineBetween(x - 4, y + 12, x + 21, y - 16);
+      } else {
+        const n = seal.allies;
+        for (let i = 0; i < n; i++) {
+          const cx = x + (i - (n - 1) / 2) * 16;
+          g.fillStyle(color, 0.95).fillCircle(cx, y, 5);
+        }
+      }
+    }
+  }
+
   /** Preserve the initial party-scaled enemy count, preparing extra guards off-field for later summons. */
   private prepareBossReserve(f: Fighter, partySize: number) {
-    if (this.quest?.stage !== QUEST.bossStage || f.index < QUEST.partySlots + 1 + Math.min(QUEST.boss.maxEnemies - 1, partySize)) return;
+    if (this.hasHellPlayers || this.quest?.stage !== QUEST.bossStage || f.index < QUEST.partySlots + 1 + Math.min(QUEST.boss.maxEnemies - 1, partySize)) return;
     this.bossReserves.add(f);
     f.hp = 0;
     f.state = 'dead';
@@ -2124,6 +3367,13 @@ export class BattleScene extends UIScene implements Arena {
     const spot = this.freeSpot({ x: boss.x - 80, y: boss.y + (guard.index % 2 ? -60 : 60) }, this.fighters.filter((f) => f.alive).map((f) => ({ x: f.x, y: f.y })));
     boss.hp -= cost;
     boss.flashT = 0.15;
+    if (!this.hasHellPlayers || this.slots[guard.index].control === 'cpu') {
+      const gear = randomCpuEquipment('quest', guard.role.id, ['lifeline'], CPU_ENEMY_SKILLS);
+      guard.weapon = WEAPONS[gear.weapon];
+      guard.skills.splice(0, guard.skills.length, ...gear.skills.map(skillById));
+      guard.cooldowns.length = guard.skills.length;
+      this.refreshHudLoadout(guard);
+    }
     guard.revive(spot.x, spot.y, guard.maxHp * TOWER_RESPAWN_HP);
     guard.pocket.length = 0;
     guard.selectedItem = 0;
@@ -2156,32 +3406,34 @@ export class BattleScene extends UIScene implements Arena {
   /** What the party takes into the next stage. */
   private questCarry(): QuestState['carry'] {
     const players: Record<number, { pocket: Item[]; soul: number }> = {};
-    for (const f of this.fighters) if (f.team === 0) players[f.index] = { pocket: [...f.pocket], soul: f.soul };
+    for (const f of this.fighters) if (this.isMixedQuest || f.team === this.questTeam) players[f.index] = { pocket: [...f.pocket], soul: f.soul };
     return { players, stats: this.stats.map((st) => ({ ...st })) };
   }
 
-  private questClear() {
+  private questClear(winningTeam = this.questTeam) {
     if (this.over) return;
     const q = this.quest!;
+    this.winningTeam = winningTeam;
+    const factionWin = T().teamWins(T().questSides[winningTeam === 1 ? 'hell' : 'heroes']);
     this.questTreeCast = null;
-    if (q.stage >= QUEST.maps.length - 1) {
-      this.endRound(undefined, T().questComplete, 0xf2c94c);
+    const next = nextQuestStage(q.route ?? [], q.stage);
+    if (next === undefined) {
+      this.endRound(undefined, this.isMixedQuest ? factionWin : this.isHell ? T().hellComplete : T().questComplete, 0xf2c94c);
       return;
     }
     this.over = true;
     this.time.delayedCall(500, () => sfx.win());
     this.time.delayedCall(1300, () => playMusic('victory'));
-    const msg = T().questClear(q.stage + 1);
+    const msg = this.isMixedQuest ? factionWin : T().questClear(questStageNumber(q.route ?? [], q.stage));
     this.showEndBanner(msg, '#f2c94c', () => {
       this.openModal({
         w: 620, h: 300, title: msg, titleColor: C.goldHex, depth: 400, closable: false,
         build: (m) => {
-          m.content.add(txt(this, WIDTH / 2, m.y + 110, T().questStageTitle(q.stage + 2, T().questGoals[q.stage + 1]), 22, C.text, { title: true, bold: true, origin: 0.5 }));
-          m.content.add(txt(this, WIDTH / 2, m.y + 150, T().questCarry, 14, C.dim, { origin: 0.5, wrap: m.w - 80, align: 'center' }));
+          m.content.add(txt(this, WIDTH / 2, m.y + 128, T().questCarry, 16, C.text, { origin: 0.5, wrap: m.w - 80, align: 'center' }));
           const by = m.y + m.h - 50;
           addButton(this, m.content, m.nav, {
             id: 'next', x: WIDTH / 2 - 150, y: by, w: 240, h: 50, label: `${T().questNext}  ▶`, primary: true,
-            onPress: () => this.enterRound({ slots: this.lobbySlots, mode: 'quest', quest: { stage: q.stage + 1, carry: this.questCarry() } }),
+            onPress: () => this.enterRound({ slots: this.lobbySlots, mode: this.mode, quest: { stage: next, route: q.route, campaign: 'quest', side: q.side, rule: q.rule, carry: this.questCarry() } }),
           });
           addButton(this, m.content, m.nav, { id: 'lobby', x: WIDTH / 2 + 150, y: by, w: 200, h: 50, label: T().toLobby, onPress: () => this.scene.start('Lobby') });
         },
@@ -2190,6 +3442,8 @@ export class BattleScene extends UIScene implements Arena {
   }
 
   private questFail() {
+    if (this.over) return;
+    if (this.isMixedQuest) { this.questClear(1); return; }
     const q = this.quest!;
     this.over = true;
     this.time.delayedCall(300, () => sfx.deathGong());
@@ -2198,7 +3452,8 @@ export class BattleScene extends UIScene implements Arena {
       this.openModal({
         w: 900, h: 300, title: T().questFailed, titleColor: '#ff7a7a', depth: 400, closable: false,
         build: (m) => {
-          m.content.add(txt(this, WIDTH / 2, m.y + 110, T().questFailedAt(q.stage + 1), 22, C.text, { title: true, bold: true, origin: 0.5 }));
+          const lanternWhy = this.isHell ? T().hellLost : this.lantern && !this.lantern.alive ? T().lanternDestroyed : this.lantern?.lost ? T().lanternLost : '';
+          m.content.add(txt(this, WIDTH / 2, m.y + 110, `${T().questFailedAt(questStageNumber(q.route ?? [], q.stage))}${lanternWhy ? ` · ${lanternWhy}` : ''}`, 22, C.text, { title: true, bold: true, origin: 0.5 }));
           const by = m.y + m.h - 50;
           addButton(this, m.content, m.nav, {
             id: 'edit', x: WIDTH / 2 - 315, y: by, w: 190, h: 50, label: T().questEdit, primary: true, size: 17,
@@ -2207,7 +3462,7 @@ export class BattleScene extends UIScene implements Arena {
           addButton(this, m.content, m.nav, { id: 'retry', x: WIDTH / 2 - 105, y: by, w: 190, h: 50, label: T().questRetry, size: 17, onPress: () => this.restartRound() });
           addButton(this, m.content, m.nav, {
             id: 'over', x: WIDTH / 2 + 105, y: by, w: 190, h: 50, label: T().questRestart, size: 17,
-            onPress: () => this.enterRound({ slots: this.lobbySlots, mode: 'quest' }),
+            onPress: () => this.enterRound({ slots: this.lobbySlots, mode: this.mode, quest: { ...prepareQuest(), side: this.quest?.side, rule: this.quest?.rule } }),
           });
           addButton(this, m.content, m.nav, { id: 'lobby', x: WIDTH / 2 + 315, y: by, w: 190, h: 50, label: T().toLobby, size: 17, onPress: () => this.scene.start('Lobby') });
         },
@@ -2233,9 +3488,7 @@ export class BattleScene extends UIScene implements Arena {
   private onSummonStart(f: Fighter) {
     const s = f.summoning!;
     sfx.summonCharge(s.kind, SOUL_CAST_TIME);
-    // Dim the battlefield while the call builds.
-    const dim = this.add.rectangle(0, HUD_HEIGHT, WIDTH, HEIGHT - HUD_HEIGHT, s.kind === 'soulReaper' ? 0x14001e : s.kind === 'soulFire' ? 0x1e0e00 : s.kind === 'soulTree' ? 0x021408 : 0x000814, 0).setOrigin(0, 0).setDepth(13);
-    this.tweens.add({ targets: dim, fillAlpha: 0.35, duration: 300, yoyo: true, hold: 500, onComplete: () => dim.destroy() });
+    // The caster's circular lighting is drawn by Fx.summonCircle during the call.
   }
 
   /** A quick full-battlefield colour flash. */
@@ -2254,10 +3507,11 @@ export class BattleScene extends UIScene implements Arena {
 
   private renderTower(g: Phaser.GameObjects.Graphics, over: Phaser.GameObjects.Graphics, tw: Tower, now: number) {
     if (tw.tree) {
-      this.renderTreeTower(g, over, tw, now);
+      if (tw.snare) this.renderSnareTree(g, over, tw, now);
+      else this.renderTreeTower(g, over, tw, now);
       return;
     }
-    const color = TEAM_COLORS[tw.team];
+    const color = this.sideColor(tw.team);
     if (!tw.alive) {
       // Rubble where it stood.
       const k = tw.w / 44;
@@ -2302,9 +3556,15 @@ export class BattleScene extends UIScene implements Arena {
       g.fillStyle(0x695442, 1).fillEllipse(x, y, 34 * S, 26 * S);
       return;
     }
+    const tint = tree.grove === 'respawn' ? 0xc45a4a : tree.grove === 'illusion' ? 0xe2c56a : 0x945bc2;
+    const wood = tree.grove === 'respawn' ? 0x5c3a32 : tree.grove === 'illusion' ? 0x6e6240 : 0x554631;
+    const eye = tree.grove === 'respawn' ? 0xffb0a0 : tree.grove === 'illusion' ? 0xffe7a8 : 0xcf95ff;
+    const bar = tree.grove === 'respawn' ? 0xe07a68 : tree.grove === 'illusion' ? 0xe2c56a : 0xb57bff;
+    const phase = this.grovePhase();
+    const on = !!tree.grove && phase.active && phase.roles.includes(tree.grove);
     const pulse = 0.5 + 0.5 * Math.sin(now * 2);
-    g.fillStyle(0x945bc2, 0.04 + pulse * 0.03).fillCircle(x, y, tree.aura);
-    g.lineStyle(1, 0x9b78af, 0.2).strokeCircle(x, y, tree.aura);
+    g.fillStyle(tint, (on ? 0.08 : 0.04) + pulse * 0.03).fillCircle(x, y, tree.aura);
+    g.lineStyle(on ? 2 : 1, tint, on ? 0.55 : 0.2).strokeCircle(x, y, tree.aura);
     for (let k = 0; k < 11; k++) {
       const a = k * Math.PI * 2 / 11;
       const length = (58 + (k % 3) * 10) * S;
@@ -2314,18 +3574,18 @@ export class BattleScene extends UIScene implements Arena {
         return { x: u * u * x + 2 * u * t * (ex + 15 * S) + t * t * ex,
           y: u * u * y + 2 * u * t * (y + Math.sin(a) * 20 * S) + t * t * ey };
       });
-      g.lineStyle(9 * S, 0x554631, 1).strokePoints(limb as Phaser.Math.Vector2[], false);
-      g.lineStyle(1.5 * S, 0x9b78af, 0.8).strokePoints(limb as Phaser.Math.Vector2[], false);
+      g.lineStyle(9 * S, wood, 1).strokePoints(limb as Phaser.Math.Vector2[], false);
+      g.lineStyle(1.5 * S, tint, 0.8).strokePoints(limb as Phaser.Math.Vector2[], false);
       const fork = limb[5], side = a + (k % 2 ? 0.65 : -0.65);
-      g.lineStyle(4 * S, 0x554631, 1).lineBetween(fork.x, fork.y, fork.x + Math.cos(side) * 28 * S, fork.y + Math.sin(side) * 28 * S);
+      g.lineStyle(4 * S, wood, 1).lineBetween(fork.x, fork.y, fork.x + Math.cos(side) * 28 * S, fork.y + Math.sin(side) * 28 * S);
     }
     over.fillStyle(0x5a4534, 1).fillEllipse(x, y, 58 * S, 76 * S);
-    over.lineStyle(2, 0x9b78af, 1).strokeEllipse(x, y, 58 * S, 76 * S);
+    over.lineStyle(2, tint, 1).strokeEllipse(x, y, 58 * S, 76 * S);
     over.lineStyle(2 * S, 0x382e27, 0.8).lineBetween(x - 8 * S, y + 10 * S, x - 4 * S, y + 30 * S).lineBetween(x + 11 * S, y + 13 * S, x + 8 * S, y + 33 * S);
-    over.fillStyle(0xcf95ff, 0.7 + pulse * 0.3).fillEllipse(x - 11 * S, y - 6 * S, 8 * S, 14 * S).fillEllipse(x + 11 * S, y - 6 * S, 8 * S, 14 * S);
+    over.fillStyle(eye, 0.7 + pulse * 0.3).fillEllipse(x - 11 * S, y - 6 * S, 8 * S, 14 * S).fillEllipse(x + 11 * S, y - 6 * S, 8 * S, 14 * S);
     const bw = tree.w + 20;
     over.fillStyle(0x080b10, 0.9).fillRoundedRect(x - bw / 2, y - tree.h / 2 - 19, bw, 9, 3);
-    over.fillStyle(0xb57bff, 1).fillRoundedRect(x - bw / 2 + 1, y - tree.h / 2 - 18, (bw - 2) * Math.max(0, tree.hp / tree.maxHp), 7, 2);
+    over.fillStyle(bar, 1).fillRoundedRect(x - bw / 2 + 1, y - tree.h / 2 - 18, (bw - 2) * Math.max(0, tree.hp / tree.maxHp), 7, 2);
   }
 
   // ---------- treasure chests ----------
@@ -2335,7 +3595,11 @@ export class BattleScene extends UIScene implements Arena {
     const h = big ? 40 : 28;
     const maxHp = big ? BIG_CHEST_HP : CHEST_HP;
     const body = this.physics.add.staticBody(x - w / 2, y - h / 2, w, h);
-    const collider = this.physics.add.collider(this.fighters.map((f) => f.body), body);
+    // Quest CPUs walk through chests. Players still have to go around or break them.
+    const collider = this.physics.add.collider(this.fighters.map((f) => f.body), body, undefined, (a, b) => {
+      if (!this.quest) return true;
+      return !this.fighters.some((f) => (f.body === a || f.body === b) && f.controller instanceof AIController);
+    });
     this.chests.push({ x, y, w, h, hp: maxHp, maxHp, shakeT: 0, age, body, collider, big, empty: !big && Math.random() < emptyChance, random });
   }
 
@@ -2345,7 +3609,7 @@ export class BattleScene extends UIScene implements Arena {
     this.chestTimer -= dt;
     if (this.chestTimer > 0) return;
     this.chestTimer = randomChestInterval(n);
-    if (this.chests.filter((c) => c.random).length >= maxRandomChests(n)) return;
+    if (this.quest ? this.chests.length >= QUEST_MAX_CHESTS : this.chests.filter((c) => c.random).length >= maxRandomChests(n)) return;
     // Starts just below zero so the landing sound plays as it touches down.
     this.dropRandomChest(-0.01);
   }
@@ -2357,7 +3621,9 @@ export class BattleScene extends UIScene implements Arena {
       const blocked = this.obstacleRects.some((o) => x > o.x - 40 && x < o.right + 40 && y > o.y - 40 && y < o.bottom + 40);
       const crowded = this.fighters.some((f) => f.alive && Math.hypot(f.x - x, f.y - y) < 80);
       const nearChest = this.chests.some((c) => Math.hypot(c.x - x, c.y - y) < 80);
-      if (blocked || crowded || nearChest) continue;
+      const nearSeal = this.seals.some((s) => Math.hypot(s.x - x, s.y - y) < s.radius + 40);
+      const onEscortRoad = this.lantern && distanceToEscortPath({ x, y }, this.lantern.path) < this.lantern.radius + 40;
+      if (blocked || crowded || nearChest || nearSeal || onEscortRoad) continue;
       this.addChest(x, y, age, false, EMPTY_CHEST_CHANCE, true);
       this.fx.sparks(x, y, 0xffd86b, 8);
       return;
@@ -2477,21 +3743,40 @@ export class BattleScene extends UIScene implements Arena {
       backgroundColor: '#141821', padding: { x: 12, y: 4 },
     }).setOrigin(0.5).setDepth(15);
     this.updatePrincessProgress();
-    const banner = this.add
-      .text(WIDTH / 2, SCREEN_ARENA.y + 30, this.quest ? T().questRescueGoal : T().princessGoal, { fontFamily: FONT, resolution: RES, fontSize: '26px', fontStyle: 'bold', color: '#ffd6ea', stroke: '#000000', strokeThickness: 5 })
-      .setOrigin(0.5)
-      .setDepth(15);
-    this.tweens.add({ targets: banner, alpha: 0, delay: 2600, duration: 800, onComplete: () => banner.destroy() });
+    // The quest stage banner already states this goal, so a second copy would sit on the same line.
+    if (!this.quest) {
+      const banner = this.add
+        .text(WIDTH / 2, SCREEN_ARENA.y + 30, T().princessGoal, { fontFamily: FONT, resolution: RES, fontSize: '26px', fontStyle: 'bold', color: '#ffd6ea', stroke: '#000000', strokeThickness: 5 })
+        .setOrigin(0.5)
+        .setDepth(15);
+      this.tweens.add({ targets: banner, alpha: 0, delay: 2600, duration: 800, onComplete: () => banner.destroy() });
+    }
     this.helpTexts = this.walls.map((w) => {
+      const spot = this.helpCalloutSpot(w.o);
       const t = this.add
-        .text(w.o.x, w.o.y - w.o.h / 2 - 34, T().help, {
-          fontFamily: FONT, resolution: RES, fontSize: '14px', fontStyle: 'bold', color: '#ffffff', backgroundColor: toHex(TEAM_COLORS[w.team]), padding: { x: 6, y: 2 },
+        .text(spot.x, spot.y, T().help, {
+          fontFamily: FONT, resolution: RES, fontSize: '14px', fontStyle: 'bold', color: '#ffffff', backgroundColor: toHex(this.sideColor(w.team)), padding: { x: 6, y: 2 },
         })
         .setOrigin(0.5);
       this.lTop.add(t);
       this.tweens.add({ targets: t, y: t.y - 5, yoyo: true, repeat: -1, duration: 600, ease: 'Sine.easeInOut' });
       return t;
     });
+  }
+
+  /**
+   * "Help!" floats above the wall. On the rescue stage the upper cage sits in the
+   * stage-title band, so that callout moves to the inner side of the wall instead.
+   */
+  private helpCalloutSpot(o: Obstacle) {
+    const above = { x: o.x, y: o.y - o.h / 2 - 34 };
+    if (!this.quest) return above;
+    const screenY = HUD_HEIGHT + above.y / S;
+    if (screenY > SCREEN_ARENA.y + 62) return above;
+    const inward = o.x / S < WIDTH / 2 ? 1 : -1;
+    const screenX = o.x / S + inward * (o.w / S / 2 + 46);
+    const beside = Math.max(SCREEN_ARENA.y + 78, HUD_HEIGHT + (o.y - o.h / 2) / S + 22);
+    return { x: screenX * S, y: (beside - HUD_HEIGHT) * S };
   }
 
   private updatePrincessProgress() {
@@ -2528,6 +3813,10 @@ export class BattleScene extends UIScene implements Arena {
   hazardSlow(f: Fighter): number {
     let mult = 1;
     for (const c of this.caltrops) if (f.team !== c.team && Math.hypot(f.x - c.x, f.y - c.y) < c.r) mult = Math.min(mult, c.slow);
+    const phase = this.quest?.stage === QUEST.groveStage ? this.grovePhase() : null;
+    if (phase?.active && phase.roles.includes('illusion') && this.groveIllusion === 'heat' && f.team === 0) mult = Math.min(mult, QUEST.grove.heatSlow);
+    const snareHeat = this.snareTrees.some((t) => t.grove === 'illusion' && t.alive) && this.snareIllusion === 'heat' && f.team === (this.isHell ? 1 : 0);
+    if (snareHeat) mult = Math.min(mult, QUEST.snare.heatSlow);
     return mult;
   }
 
@@ -2635,6 +3924,11 @@ export class BattleScene extends UIScene implements Arena {
   }
 
   terrainAt(wx: number, wy: number): TerrainKind | null {
+    if (this.quest?.stage === QUEST.groveStage) {
+      const phase = this.grovePhase();
+      if (phase.active && phase.roles.includes('illusion') && this.groveIllusion === 'ice') return 'ice';
+    }
+    if (this.quest?.stage === QUEST.snareStage && this.snareIllusion === 'ice' && this.snareTrees.some((t) => t.grove === 'illusion' && t.alive)) return 'ice';
     const z = this.zoneAt(wx, wy);
     if (!z || z.kind === 'floor') return null;
     // Tide flats are plain ground at low tide and slow shallows when flooded.
@@ -2678,14 +3972,19 @@ export class BattleScene extends UIScene implements Arena {
     this.popText(f.x, f.y - 40, T().pillRevived, '#ff9ad0');
   }
 
-  onRevived(target: Fighter) {
+  onRevived(target: Fighter, by?: Fighter) {
     this.respawnTimers.delete(target);
     this.deathTime.delete(target);
+    if (by) {
+      this.fx.lifeline(() => ({ x: by.x, y: by.y }), () => ({ x: target.x, y: target.y }));
+      this.fx.skillCast(() => ({ x: target.x, y: target.y }), { kind: 'revive' }, target.facing);
+    }
   }
 
   /**
-   * While a team still has a tower, its fallen players come back one at a time at its
-   * main tower, and only the main tower: the small towers can't. The wait starts short and grows as the battle goes on.
+   * While a team still has a tower, its fallen players come back at its main tower,
+   * and only the main tower: the small towers can't. The wait starts short and grows
+   * as the battle goes on. The prison tree may return several guards at once, never past four alive.
    */
   private updateTeamRespawns(dt: number) {
     this.elapsed += dt;
@@ -2694,7 +3993,8 @@ export class BattleScene extends UIScene implements Arena {
     for (const team of [0, 1]) {
       // Quest enemy towers and the prison tree are slow to bring their fallen back.
       const questEnemyRespawn = (this.quest?.stage === 1 || this.quest?.stage === QUEST.rescueStage) && team === 1;
-      const wait = questEnemyRespawn ? baseWait * QUEST.towerRespawnFactor : baseWait;
+      const respawnFactor = this.quest?.stage === QUEST.rescueStage ? QUEST.rescue.tree.respawnFactor : QUEST.towerRespawnFactor;
+      const wait = questEnemyRespawn ? baseWait * respawnFactor : baseWait;
       const dead = this.fighters
         .filter((f) => !f.alive && f.team === team)
         .sort((a, b) => (this.deathTime.get(a) ?? 0) - (this.deathTime.get(b) ?? 0));
@@ -2705,35 +4005,49 @@ export class BattleScene extends UIScene implements Arena {
         this.teamRespawnT[team] = -1;
         continue;
       }
+      const room = this.quest?.stage === QUEST.rescueStage
+        ? QUEST.rescue.enemies - this.fighters.filter((f) => f.alive && f.team === team).length
+        : 1;
+      if (room <= 0) {
+        this.teamRespawnT[team] = -1;
+        continue;
+      }
       if (this.teamRespawnT[team] < 0) this.teamRespawnT[team] = wait;
       this.teamRespawnT[team] -= dt;
       // Countdown on the next one in line; the rest are waiting their turn.
       dead.forEach((f, k) => this.respawnTimers.set(f, k === 0 ? Math.max(0, this.teamRespawnT[team]) : Infinity));
       if (this.teamRespawnT[team] > 0) continue;
-      const f = dead[0];
+      // The prison tree can return several fallen guards at once, from one up to a full set of four.
+      const bringing = this.quest?.stage === QUEST.rescueStage
+        ? 1 + Math.floor(Math.random() * Math.min(room, dead.length))
+        : 1;
       const taken = this.fighters.filter((o) => o.alive).map((o) => ({ x: o.x, y: o.y }));
-      const spot = this.freeSpot({ x: home.x + (home.x < WORLD_CENTER.x ? 1 : -1) * (home.w / 2 + 30), y: home.y }, taken);
-      this.respawnTimers.delete(f);
-      this.deathTime.delete(f);
-      f.revive(spot.x, spot.y, f.maxHp * TOWER_RESPAWN_HP);
-      // Coming back through a tower costs you everything you were carrying, and half your soul.
-      f.pocket.length = 0;
-      f.selectedItem = 0;
-      f.soul *= TOWER_RESPAWN_SOUL_KEEP;
-      sfx.respawn();
-      // Bringing someone back costs the tower some of its HP.
-      // Quest guards consume their tower's remaining HP too: repeated defeats can exhaust it.
-      const cost = Math.min(questEnemyRespawn ? home.hp : home.hp - 1, home.maxHp * RESPAWN_TOWER_COST);
-      if (cost > 0) {
-        if (questEnemyRespawn) this.damageTower(home, cost, undefined);
-        else {
-          home.hp -= cost;
-          home.shakeT = 0.15;
-          this.popText(home.x, home.y - home.h / 2 - 12, `-${Math.round(cost)}`, '#9fd8ff');
+      for (let n = 0; n < bringing && home.alive; n++) {
+        const f = dead[n];
+        const spot = this.freeSpot({ x: home.x + (home.x < WORLD_CENTER.x ? 1 : -1) * (home.w / 2 + 30), y: home.y }, taken);
+        taken.push(spot);
+        this.respawnTimers.delete(f);
+        this.deathTime.delete(f);
+        f.revive(spot.x, spot.y, f.maxHp * TOWER_RESPAWN_HP);
+        // Coming back through a tower costs you everything you were carrying, and half your soul.
+        f.pocket.length = 0;
+        f.selectedItem = 0;
+        f.soul *= TOWER_RESPAWN_SOUL_KEEP;
+        sfx.respawn();
+        // Bringing someone back costs the tower some of its HP.
+        // Quest guards consume their tower's remaining HP too: repeated defeats can exhaust it.
+        const cost = Math.min(questEnemyRespawn ? home.hp : home.hp - 1, home.maxHp * RESPAWN_TOWER_COST);
+        if (cost > 0) {
+          if (questEnemyRespawn) this.damageTower(home, cost, undefined);
+          else {
+            home.hp -= cost;
+            home.shakeT = 0.15;
+            this.popText(home.x, home.y - home.h / 2 - 12, `-${Math.round(cost)}`, '#9fd8ff');
+          }
         }
+        this.fx.respawnBeam(home.x, home.y, spot.x, spot.y, this.sideColor(team));
       }
-      this.fx.respawnBeam(home.x, home.y, spot.x, spot.y, TEAM_COLORS[team]);
-      this.teamRespawnT[team] = dead.length > 1 ? wait : -1;
+      this.teamRespawnT[team] = dead.length > bringing ? wait : -1;
     }
   }
 
@@ -2786,12 +4100,51 @@ export class BattleScene extends UIScene implements Arena {
     const teamWalls = this.walls.filter((w) => w.team === wall.team);
     if (teamWalls.every((w) => w.rescued)) {
       if (this.quest?.stage === QUEST.rescueStage) {
-        if (this.questTree && !this.questTree.alive && !this.fighters.some((f) => f.team === 1 && f.alive)) this.questClear();
-        else this.showBanner(T().questRescuedFight, TEAM_COLORS[wall.team]);
+        this.rescueGateOpen = true;
+        if (this.isHell) this.questFail();
+        else if (this.questTree && !this.questTree.alive && !this.fighters.some((f) => f.team === 1 && f.alive)) this.questClear();
+        else this.showBanner(T().questRescuedFight, this.sideColor(wall.team));
       }
-      else this.endRound(wall.lastHitter ?? undefined, T().rescued(T().teamNames[wall.team]), TEAM_COLORS[wall.team]);
+      else this.endRound(wall.lastHitter ?? undefined, T().rescued(T().teamNames[wall.team]), this.sideColor(wall.team));
     } else {
-      this.showBanner(T().princessProgress(T().teamNames[wall.team], teamWalls.filter((w) => w.rescued).length, teamWalls.length), TEAM_COLORS[wall.team]);
+      this.showBanner(T().princessProgress(T().teamNames[wall.team], teamWalls.filter((w) => w.rescued).length, teamWalls.length), this.sideColor(wall.team));
+    }
+  }
+
+  /** True while the prison tree is still shut behind the princess seal. */
+  private rescueTreeSealed() {
+    return this.quest?.stage === QUEST.rescueStage && !this.rescueGateOpen
+      && !(this.walls.length === 2 && this.walls.every((w) => w.rescued));
+  }
+
+  /** Rescuers stop at the seal. Guards on the far side can still cross it to fight. */
+  private updateRescueGate() {
+    if (this.quest?.stage !== QUEST.rescueStage || this.rescueGateOpen) return;
+    const gate = this.rescueGateX;
+    for (const f of this.fighters) {
+      if (f.team !== 0 || !f.alive || f.trapped || f.x <= gate - f.radius) continue;
+      if (f.body.velocity.x > 0) f.body.setVelocity(0, f.body.velocity.y);
+      f.warp(gate - f.radius - 2, f.y);
+    }
+  }
+
+  private renderRescueGate(now: number) {
+    if (this.quest?.stage !== QUEST.rescueStage || this.rescueGateOpen) return;
+    const x = this.rescueGateX;
+    const top = ARENA.y;
+    const h = ARENA.h;
+    const pulse = 0.55 + 0.45 * Math.sin(now * 3);
+    this.g.fillStyle(0x2a1838, 0.55).fillRect(x - 16, top, 32, h);
+    this.g.lineStyle(3, 0xc9a0e8, 0.45 + 0.35 * pulse);
+    this.g.lineBetween(x - 14, top, x - 14, top + h);
+    this.g.lineBetween(x + 14, top, x + 14, top + h);
+    this.gGlow.fillStyle(0xb46bdc, 0.12 + 0.08 * pulse).fillRect(x - 22, top, 44, h);
+    for (let i = 0; i < 8; i++) {
+      const y = top + ((i + 0.5) / 8) * h;
+      const sway = Math.sin(now * 2 + i) * 6;
+      this.g.lineStyle(4, 0x6a4a88, 0.9).lineBetween(x - 10, y - 28, x + sway, y);
+      this.g.lineStyle(2, 0xe4c6ff, 0.8).lineBetween(x + sway, y, x + 10, y + 28);
+      this.g.fillStyle(0xf0d8ff, 0.7).fillCircle(x + sway, y, 4);
     }
   }
 
@@ -2828,7 +4181,7 @@ export class BattleScene extends UIScene implements Arena {
       g.lineBetween(l + th / 2, t, l + th / 2, t + o.h).lineBetween(l + o.w - th / 2, t, l + o.w - th / 2, t + o.h);
       g.lineStyle(2, 0x4f4a42, 1).strokeRect(l, t, o.w, o.h).strokeRect(l + th, t + th, o.w - th * 2, o.h - th * 2);
       // Team-coloured trim so everyone can tell whose princess this is.
-      g.lineStyle(3, TEAM_COLORS[wall.team], 1).strokeRect(l - 2, t - 2, o.w + 4, o.h + 4);
+      g.lineStyle(3, this.sideColor(wall.team), 1).strokeRect(l - 2, t - 2, o.w + 4, o.h + 4);
 
       // Cracks appear as the wall loses HP.
       const shown = Math.floor((1 - wall.hp / wall.maxHp) * (wall.cracks.length + 1));
@@ -2860,7 +4213,7 @@ export class BattleScene extends UIScene implements Arena {
       const bx = o.x - bw / 2;
       const by = o.y - o.h / 2 - 16;
       g.fillStyle(0x000000, 0.65).fillRect(bx - 2, by - 2, bw + 4, 10);
-      g.fillStyle(TEAM_COLORS[wall.team], 1).fillRect(bx, by, bw * (wall.hp / wall.maxHp), 6);
+      g.fillStyle(this.sideColor(wall.team), 1).fillRect(bx, by, bw * (wall.hp / wall.maxHp), 6);
     }
   }
 
@@ -2934,6 +4287,10 @@ export class BattleScene extends UIScene implements Arena {
       case 'fan':
         if (s.kind === 'sector') this.fx.flameFan(f.x, f.y, f.facing, s.radius, s.angle);
         break;
+      case 'thunder-fan':
+        if (s.kind === 'sector') this.fx.thunderFan(f.x, f.y, f.facing, s.radius, s.angle);
+        sfx.thunderFan();
+        break;
       case 'shuriken':
         if (s.kind === 'rect') this.fx.shurikenThrow(f.x, f.y, f.facing, s.offset, s.offset + s.length, f.color);
         break;
@@ -2965,6 +4322,9 @@ export class BattleScene extends UIScene implements Arena {
         break;
       case 'kunai':
         if (s.kind === 'rays') this.fx.kunaiVolley(f.x, f.y, rayAngles(s, f.facing), s.offset, s.offset + s.length, f.color);
+        break;
+      case 'fire-kunai':
+        if (s.kind === 'rays') this.fx.fireKunai(f.x, f.y, rayAngles(s, f.facing), s.offset, s.offset + s.length);
         break;
       case 'bomb':
         if (s.kind === 'circle') this.fx.bombBlast(f.x + Math.cos(f.facing) * s.offset, f.y + Math.sin(f.facing) * s.offset, s.radius);
@@ -2999,6 +4359,7 @@ export class BattleScene extends UIScene implements Arena {
     const now = this.time.now / 1000;
 
     for (const w of this.walls) this.renderWallAndPrincess(g, w);
+    this.renderRescueGate(now);
     for (const c of this.chests) this.renderChest(g, c);
     for (const tw of this.towers) this.renderTower(g, over, tw, now);
     // Healing beams from main towers to the teammates drawing on them.
@@ -3016,6 +4377,7 @@ export class BattleScene extends UIScene implements Arena {
     this.renderPortals(now);
     this.renderStorm(now);
     this.renderVents(now);
+    this.renderFlames(now);
     this.renderRollers(now);
     this.renderTide(now);
     this.renderDoors(now);
@@ -3026,6 +4388,13 @@ export class BattleScene extends UIScene implements Arena {
     this.renderPads(now);
     this.renderAltar(now);
     this.renderQuestTree(now);
+    this.renderGroveCast(now);
+    this.renderSnareCast(now);
+    this.renderNight(now);
+    this.renderDirge();
+    this.renderSeals(now);
+    this.renderLantern(now);
+    this.renderWardenBond(now);
     for (const c of this.caltrops) {
       // Fade in quickly, fade out over the last second.
       const a = Math.min(1, c.t * 6, c.life - c.t);
@@ -3056,6 +4425,12 @@ export class BattleScene extends UIScene implements Arena {
     for (const f of this.fighters) {
       const sprite = this.sprites[f.index];
       const tag = this.nameTags[f.index];
+      if (f.trapped) {
+        sprite.setVisible(false);
+        tag.setPosition(f.x, f.y - 54);
+        tag.setVisible(true);
+        continue;
+      }
       if (this.bossReserves.has(f)) {
         sprite.setVisible(false);
         tag.setVisible(false);
@@ -3089,7 +4464,7 @@ export class BattleScene extends UIScene implements Arena {
 
       // --- under the ninja ---
       g.fillStyle(0x000000, 0.3).fillEllipse(f.x + 4, f.y + 9, f.radius * 2.3, f.radius * 1.2);
-      if (this.mode !== 'ffa') g.lineStyle(3, TEAM_COLORS[f.team], 0.9).strokeCircle(f.x, f.y, f.radius + 5);
+      if (this.mode !== 'ffa') g.lineStyle(3, this.sideColor(f.team), 0.9).strokeCircle(f.x, f.y, f.radius + 5);
       if (f.boss) {
         // A dark, pulsing aura so everyone knows who the boss is.
         const pulse = 0.5 + 0.5 * Math.sin(now * 4);
@@ -3123,8 +4498,8 @@ export class BattleScene extends UIScene implements Arena {
       const summon = f.summoning;
       if (summon) {
         const color = this.summonColor(f);
-        this.fx.summonCircle(g, this.gGlow, f.x, f.y, f.stateProgress, color, now);
-        for (const t of this.summonTargets(f, summon.kind === 'soulTree' ? summon.level * SOUL_TREE.perLevel : summon.level)) this.fx.targetMark(over, t.x, t.y, f.stateProgress, color, now);
+        this.fx.summonCircle(g, this.gGlow, f.x, f.y, f.stateProgress, color, now, summon.kind);
+        for (const t of this.summonTargets(f, summonStrikeCount(summon.kind, summon.level, f.boss))) this.fx.targetMark(over, t.x, t.y, f.stateProgress, color, now, summon.kind);
       }
       const charge = f.sacrificeCharge;
       if (charge) {
@@ -3135,10 +4510,10 @@ export class BattleScene extends UIScene implements Arena {
         this.gGlow.fillStyle(0xff3a2a, 0.25 + 0.3 * pulse * charge.t).fillCircle(f.x, f.y, f.radius + 8 + charge.t * 8);
       }
       if (f.casting) {
-        // Calling a soul skill: a purple glow, rising.
+        // The caster's aura matches the ritual's element.
         const k = 0.5 + 0.5 * Math.sin(now * 20);
-        this.gGlow.fillStyle(0xb57bff, 0.25 + k * 0.2).fillCircle(f.x, f.y, f.radius + 10);
-        this.gGlow.lineStyle(2, 0xe2c8ff, 0.8).strokeCircle(f.x, f.y, f.radius + 12 + k * 4);
+        this.gGlow.fillStyle(this.summonColor(f), 0.14 + k * 0.1).fillCircle(f.x, f.y, f.radius + 10);
+        this.gGlow.lineStyle(2, this.summonColor(f), 0.8).strokeCircle(f.x, f.y, f.radius + 12 + k * 4);
       }
       if (f.paralyzed) {
         // Crackling sparks while paralysed.
@@ -3165,8 +4540,7 @@ export class BattleScene extends UIScene implements Arena {
         drawLog(over, f.x - Math.cos(f.facing) * 26, f.y - Math.sin(f.facing) * 26, f.facing + Math.PI / 2, 0.35);
       }
       if (f.guarded) {
-        over.fillStyle(0xf2c94c, 0.14).fillCircle(f.x, f.y, f.radius + 11);
-        over.lineStyle(2, 0xf2c94c, 0.75 + 0.25 * Math.sin(now * 7)).strokeCircle(f.x, f.y, f.radius + 11);
+        this.fx.guardAura(over, f.x, f.y, f.radius + 12, 0.6 + 0.2 * Math.sin(now * 7), now);
       }
       if (f.state === 'channel') {
         over.lineStyle(3, 0x7dff8a, 0.9);
@@ -3228,7 +4602,39 @@ export class BattleScene extends UIScene implements Arena {
   // HUD: a compact panel per player slot, in two rows of four across the top.
   private static readonly HUD = { cols: 4, pad: 42, barW: 88, skillX: 140, skill: 22, skillGap: 3, pocketX: 226, pocket: 20, pocketGap: 3 };
 
+  /** Three or four skills stay on one row, clear of the item pocket. Larger kits wrap onto two rows. */
+  private skillLayout(count: number) {
+    const L = BattleScene.HUD;
+    if (count <= 3) return { size: L.skill, gap: L.skillGap, cols: Math.max(1, count), originY: 12 };
+    if (count === 4) {
+      const gap = 2;
+      const room = L.pocketX - L.skillX - 8;
+      return { size: Math.floor((room - 3 * gap) / 4), gap, cols: 4, originY: 12 };
+    }
+    const cols = Math.ceil(count / 2);
+    const gap = 1;
+    const room = WIDTH / L.cols - L.skillX - 8;
+    const size = Math.min(13, Math.max(8, Math.floor((room - (cols - 1) * gap) / cols)));
+    return { size, gap, cols, originY: 16 };
+  }
+
+  private skillAt(count: number, k: number) {
+    const lay = this.skillLayout(count);
+    const col = k % lay.cols;
+    const row = Math.floor(k / lay.cols);
+    return {
+      x: BattleScene.HUD.skillX + col * (lay.size + lay.gap),
+      y: lay.originY + row * (lay.size + lay.gap),
+      size: lay.size,
+    };
+  }
+
   private hudPanel(i: number) {
+    if (this.hasHellPlayers) {
+      const slot = i % QUEST.partySlots;
+      const side = questSideOf(this.lobbySlots[slot], this.quest?.side);
+      i = slot + (Math.floor(i / QUEST.partySlots) === (side === 'hell' ? 1 : 0) ? 0 : QUEST.partySlots);
+    }
     const L = BattleScene.HUD;
     const pw = WIDTH / L.cols;
     const ph = HUD_HEIGHT / Math.ceil(MAX_PLAYERS / L.cols);
@@ -3241,25 +4647,35 @@ export class BattleScene extends UIScene implements Arena {
     this.slots.forEach((slot, i) => {
       const { x0, y0 } = this.hudPanel(i);
       const f = this.fighters.find((ff) => ff.index === i);
-      const color = toHex(PLAYER_COLORS[i]);
       if (!f) {
         this.add.text(x0 + L.pad, y0 + 16, `P${i + 1} — ${T().emptySlot}`, { fontFamily: FONT, resolution: RES, fontSize: '11px', color: '#4a5060' });
         return;
       }
-      const who = this.quest && i >= QUEST.partySlots ? (f.boss ? T().bossName : `${T().enemyTag} ${roleGlyph(f)}`) : `P${i + 1} ${roleGlyph(f)}`;
+      const color = toHex(this.quest ? this.sideColor(f.team) : PLAYER_COLORS[i]);
+      const who = this.hasHellPlayers ? `${this.fighterLabel(f)} ${this.isMixedQuest ? T().questSides[f.team === 0 ? 'heroes' : 'hell'] : f.boss ? this.bossTitle(f) : roleGlyph(f)}` : this.quest && i >= QUEST.partySlots ? (f.boss ? this.bossTitle(f) : `${T().enemyTag} ${roleGlyph(f)}`) : `P${i + 1} ${roleGlyph(f)}`;
       const name = this.add.text(x0 + L.pad, y0 + 2, `${who}·${T().weaponName(f.weapon)}`, { fontFamily: FONT, resolution: RES, fontSize: '11px', color, fontStyle: 'bold' });
+      this.hudNames[i] = name;
+      this.hudSkillGlyphs[i] = [];
       if (this.mode !== 'ffa' && !this.quest) {
         this.add.text(name.x + name.width + 5, y0 + 3, T().teamNames[f.team], {
-          fontFamily: FONT, resolution: RES, fontSize: '9px', fontStyle: 'bold', color: '#ffffff', backgroundColor: toHex(TEAM_COLORS[f.team]), padding: { x: 3, y: 0 },
+          fontFamily: FONT, resolution: RES, fontSize: '9px', fontStyle: 'bold', color: '#ffffff', backgroundColor: toHex(this.sideColor(f.team)), padding: { x: 3, y: 0 },
         });
       }
       this.keyLabels[i] = f.skills.map((s, k) => {
-        const cx = x0 + L.skillX + k * (L.skill + L.skillGap) + L.skill / 2;
-        this.add.text(cx, y0 + 12 + L.skill / 2, s ? s.zh[0] : '—', { fontFamily: FONT, resolution: RES, fontSize: '12px', color: '#ffffff' }).setOrigin(0.5).setDepth(2);
-        // Key label tucked into the box's corner.
-        return this.add.text(cx + L.skill / 2 - 1, y0 + 12 + L.skill - 1, f.controller.labels[k + 1], { fontFamily: FONT, resolution: RES, fontSize: '7px', color: '#c9ced8' }).setOrigin(1, 1);
+        const box = this.skillAt(f.skills.length, k);
+        const cx = x0 + box.x + box.size / 2;
+        const cy = y0 + box.y + box.size / 2;
+        this.hudSkillGlyphs[i][k] = this.add.text(cx, cy, s ? s.zh[0] : '—', { fontFamily: FONT, resolution: RES, fontSize: box.size >= 20 ? '12px' : box.size >= 14 ? '11px' : '8px', color: '#ffffff' }).setOrigin(0.5).setDepth(2);
+        // Key label tucked into the box's corner. CPU enemies have no key for a fourth skill.
+        return this.add.text(cx + box.size / 2 - 1, y0 + box.y + box.size - 1, f.controller.labels[k + 1] ?? '', { fontFamily: FONT, resolution: RES, fontSize: '7px', color: '#c9ced8' }).setOrigin(1, 1);
       });
     });
+  }
+
+  private refreshHudLoadout(f: Fighter) {
+    const who = this.hasHellPlayers ? this.fighterLabel(f) : f.boss ? this.bossTitle(f) : `${T().enemyTag} ${T().roleName(f.role)[0]}`;
+    this.hudNames[f.index]?.setText(`${who}·${T().weaponName(f.weapon)}`);
+    f.skills.forEach((s, k) => this.hudSkillGlyphs[f.index]?.[k]?.setText(s ? s.zh[0] : '—'));
   }
 
   private renderHud() {
@@ -3277,7 +4693,7 @@ export class BattleScene extends UIScene implements Arena {
       const alpha = f.alive ? 1 : 0.35;
       h.fillStyle(f.color, alpha * 0.65).fillRoundedRect(x0 + 3, y0 + 9, 2, ph - 18, 1);
       // Team tint behind the panel in team modes.
-      if (this.mode !== 'ffa') h.fillStyle(TEAM_COLORS[f.team], 0.035).fillRoundedRect(x0 + 4, y0 + 3, pw - 8, ph - 6, 4);
+      if (this.mode !== 'ffa') h.fillStyle(this.sideColor(f.team), 0.035).fillRoundedRect(x0 + 4, y0 + 3, pw - 8, ph - 6, 4);
       // Use the same weapon artwork as the loadout screen, with room beside the bars.
       h.fillStyle(0x1b2030, 1).fillRoundedRect(x0 + 6, y0 + 6, 30, 34, 5);
       h.lineStyle(1, f.color, alpha).strokeRoundedRect(x0 + 6, y0 + 6, 30, 34, 5);
@@ -3288,11 +4704,12 @@ export class BattleScene extends UIScene implements Arena {
       h.fillStyle(0x2a2614, 1).fillRect(x0 + L.pad, y0 + 30, L.barW, 5);
       const peColor = f.peDeniedT > 0 ? 0xffffff : f.resting && f.pe < f.maxPe ? 0xfff0a0 : 0xf2c94c;
       h.fillStyle(peColor, alpha).fillRect(x0 + L.pad, y0 + 30, L.barW * (f.pe / f.maxPe), 5);
-      // Skill boxes with cooldown sweep.
+      // Skill boxes with cooldown sweep. Large kits wrap so they stay clear of the bars.
       f.skills.forEach((s, k) => {
-        const bx = x0 + L.skillX + k * (L.skill + L.skillGap);
-        const by = y0 + 12;
-        const sz = L.skill;
+        const box = this.skillAt(f.skills.length, k);
+        const bx = x0 + box.x;
+        const by = y0 + box.y;
+        const sz = box.size;
         if (!s) {
           h.fillStyle(0x14171f, alpha).fillRect(bx, by, sz, sz);
           h.lineStyle(1, 0x2a2f3c, alpha).strokeRect(bx, by, sz, sz);
@@ -3307,15 +4724,21 @@ export class BattleScene extends UIScene implements Arena {
         }
         h.lineStyle(1, ready ? f.color : 0x3a4152, alpha).strokeRect(bx, by, sz, sz);
       });
-      // Pocket: item slots, the selected one outlined in gold.
+      // Pocket: item slots, the selected one outlined in gold. A full kit claims that row, so the pocket moves up.
+      const many = f.skills.length > 4;
+      const pocketSize = many ? 14 : L.pocket;
+      const pocketGap = many ? 2 : L.pocketGap;
+      const soulW = many && f.usesSoul ? 52 : 0;
+      const pocketX0 = many ? x0 + pw - 4 - soulW - POCKET_SIZE * (pocketSize + pocketGap) + pocketGap : x0 + L.pocketX;
+      const pocketY = many ? y0 + 1 : y0 + 13;
       for (let k = 0; k < POCKET_SIZE; k++) {
         const item: Item | undefined = f.pocket[k];
-        const px = x0 + L.pocketX + k * (L.pocket + L.pocketGap);
-        const py = y0 + 13;
-        h.fillStyle(item ? 0x2a2f3c : 0x14171f, 1).fillRoundedRect(px, py, L.pocket, L.pocket, 4);
+        const px = pocketX0 + k * (pocketSize + pocketGap);
+        const py = pocketY;
+        h.fillStyle(item ? 0x2a2f3c : 0x14171f, 1).fillRoundedRect(px, py, pocketSize, pocketSize, 4);
         const selected = item && k === f.selectedItem;
-        h.lineStyle(selected ? 2 : 1, selected ? 0xf2c94c : 0x2a2f3c, 1).strokeRoundedRect(px, py, L.pocket, L.pocket, 4);
-        if (item) drawItemIcon(this.hudIcons, item.id, px + L.pocket / 2, py + L.pocket / 2, 16);
+        h.lineStyle(selected ? 2 : 1, selected ? 0xf2c94c : 0x2a2f3c, 1).strokeRoundedRect(px, py, pocketSize, pocketSize, 4);
+        if (item) drawItemIcon(this.hudIcons, item.id, px + pocketSize / 2, py + pocketSize / 2, many ? 11 : 16);
       }
       // 魂 Soul (only for Thunder users): four diamonds; full levels lit, the one filling shows its progress.
       for (let k = 0; k < (f.usesSoul ? SOUL_LEVELS : 0); k++) {
@@ -3334,7 +4757,7 @@ export class BattleScene extends UIScene implements Arena {
 
   private endRound(winner: Fighter | undefined, message?: string, messageColor?: number) {
     this.over = true;
-    this.winningTeam = winner?.team ?? (this.quest ? 0 : null);
+    this.winningTeam = winner?.team ?? this.winningTeam ?? (this.quest ? this.questTeam : null);
     // Let the final hit / wall crash ring out before the fanfare.
     this.time.delayedCall(message ? 700 : 350, () => sfx.win());
     // Someone always wins a versus round; only a draw gets the sad music.
@@ -3348,7 +4771,7 @@ export class BattleScene extends UIScene implements Arena {
     }
     else if (winner && this.mode === 'team') {
       msg = T().teamWins(T().teamNames[winner.team]);
-      color = toHex(TEAM_COLORS[winner.team]);
+      color = toHex(this.sideColor(winner.team));
     }
     this.showEndBanner(msg, color, () => this.openResults(msg, color));
   }

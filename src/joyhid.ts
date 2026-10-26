@@ -1,4 +1,4 @@
-import { sidewaysMove, type PadSide, type PadState } from './gamepads';
+import { padLabels, sidewaysMove, type PadSide, type PadState } from './gamepads';
 
 /**
  * Direct Joy-Con input over WebHID. A Joy-Con that the system has joined into a pair
@@ -11,6 +11,11 @@ import { sidewaysMove, type PadSide, type PadState } from './gamepads';
  * send the "0x30" full reports (subcommand 0x03, argument 0x30); those carry the buttons in
  * bytes 2–4 (right, shared, left), the left stick in bytes 5–7 and the right stick in 8–10.
  * WebHID hands those bytes over without the leading report id.
+ *
+ * The same connection also reads a controller that calls itself a Pro Controller
+ * (vendor 0x057e, product 0x2009), including the B01. macOS and Chrome leave that
+ * clone's buttons unread: it keeps sending the simple 0x3f report, whose sticks
+ * are Rx/Ry rather than the Z/Rz a genuine pad uses. See `proStateFromReport`.
  */
 
 // Minimal WebHID typings (the DOM lib in use doesn't include them).
@@ -32,6 +37,8 @@ interface HidApi {
 const NINTENDO = 0x057e;
 const JOYCON_L = 0x2006;
 const JOYCON_R = 0x2007;
+/** Switch Pro Controller, and clones (such as the B01) that use the same id. */
+const PRO_CONTROLLER = 0x2009;
 
 const api = (): HidApi | undefined => (navigator as unknown as { hid?: HidApi }).hid;
 
@@ -149,13 +156,164 @@ export class HidJoyCon {
   }
 }
 
-/** Directly connected Joy-Cons, in the order they were connected. */
-const pads: HidJoyCon[] = [];
+/**
+ * Simple report 0x3f (WebHID has already dropped the report id), which is what a
+ * Pro Controller sends until it is switched to full reports — and what the B01
+ * keeps sending. Buttons are a little-endian 16-bit field:
+ * bit 0 B (bottom), 1 A (right), 2 Y (left), 3 X (top), 4 L, 5 R, 6 ZL, 7 ZR,
+ * 8 −, 9 +, 10 left stick, 11 right stick, 12 Home, 13 Capture.
+ * Byte 2 is a hat: 0 up, then clockwise; 8 or 15 means centered.
+ * Bytes 3–10 are left X, left Y, right X, right Y as uint16 around 32768.
+ * Vertical grows downward, the same way the game's movement does.
+ */
+const PRO_CENTER = 32768;
+const PRO_SPAN = 24000;
+
+function proAxis(raw: number): number {
+  const v = Math.max(-1, Math.min(1, (raw - PRO_CENTER) / PRO_SPAN));
+  return Math.abs(v) < 0.2 ? 0 : v;
+}
+
+function stick12(d: DataView, offset: number, center: [number, number] | null): { v: [number, number]; center: [number, number] } {
+  const rawX = d.getUint8(offset) | ((d.getUint8(offset + 1) & 0x0f) << 8);
+  const rawY = (d.getUint8(offset + 1) >> 4) | (d.getUint8(offset + 2) << 4);
+  const c = center ?? [rawX, rawY];
+  const norm = (value: number, origin: number) => Math.max(-1, Math.min(1, (value - origin) / 1400));
+  const x = norm(rawX, c[0]);
+  const y = -norm(rawY, c[1]);
+  return { v: [Math.abs(x) < 0.2 ? 0 : x, Math.abs(y) < 0.2 ? 0 : y], center: c };
+}
+
+const HAT: [number, number][] = [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]];
+
+function faceState(bits: { b: boolean; a: boolean; y: boolean; x: boolean; l: boolean; r: boolean; zl: boolean; zr: boolean; minus: boolean; plus: boolean }, move: [number, number], aim: [number, number]): PadState {
+  return {
+    mx: move[0], my: move[1], ax: aim[0], ay: aim[1],
+    actions: [bits.b || bits.r, bits.x, bits.a, bits.y || bits.l, bits.zr, bits.zl],
+    confirm: bits.a, back: bits.b, start: bits.plus || bits.minus,
+  };
+}
+
+export function proStateFromReport(
+  reportId: number,
+  bytes: Uint8Array,
+  centers: { l: [number, number] | null; r: [number, number] | null } = { l: null, r: null },
+): { state: PadState; centers: { l: [number, number] | null; r: [number, number] | null } } | null {
+  const raw = Uint8Array.from(bytes);
+  const view = new DataView(raw.buffer);
+  if (reportId === 0x3f) {
+    if (raw.length < 11) return null;
+    const buttons = raw[0] | (raw[1] << 8);
+    const hat = raw[2] & 0x0f;
+    let move: [number, number] = [proAxis(view.getUint16(3, true)), proAxis(view.getUint16(5, true))];
+    if (hat <= 7) move = HAT[hat];
+    const aim: [number, number] = [proAxis(view.getUint16(7, true)), proAxis(view.getUint16(9, true))];
+    return {
+      centers,
+      state: faceState({
+        b: !!(buttons & 0x0001), a: !!(buttons & 0x0002), y: !!(buttons & 0x0004), x: !!(buttons & 0x0008),
+        l: !!(buttons & 0x0010), r: !!(buttons & 0x0020), zl: !!(buttons & 0x0040), zr: !!(buttons & 0x0080),
+        minus: !!(buttons & 0x0100), plus: !!(buttons & 0x0200),
+      }, move, aim),
+    };
+  }
+  if ((reportId === 0x30 || reportId === 0x21) && raw.length >= 11) {
+    const right = raw[2];
+    const shared = raw[3];
+    const left = raw[4];
+    const l = stick12(view, 5, centers.l);
+    const r = stick12(view, 8, centers.r);
+    let move = l.v;
+    const down = !!(left & 0x01);
+    const up = !!(left & 0x02);
+    const rightB = !!(left & 0x04);
+    const leftB = !!(left & 0x08);
+    if (down || up || rightB || leftB) move = [(rightB ? 1 : 0) - (leftB ? 1 : 0), (down ? 1 : 0) - (up ? 1 : 0)];
+    return {
+      centers: { l: l.center, r: r.center },
+      state: faceState({
+        y: !!(right & 0x01), x: !!(right & 0x02), b: !!(right & 0x04), a: !!(right & 0x08),
+        r: !!(right & 0x40), zr: !!(right & 0x80),
+        minus: !!(shared & 0x01), plus: !!(shared & 0x02),
+        l: !!(left & 0x40), zl: !!(left & 0x80),
+      }, move, r.v),
+    };
+  }
+  return null;
+}
+
+/** A Pro Controller (or a clone that uses its id) read directly, both sticks and every face button. */
+export class HidPro {
+  readonly kind = 'pro' as const;
+  connected = true;
+  ready = false;
+  /** Unused for this pad; kept so a slow-link warning is never shown for event-only reports. */
+  slow = false;
+  rate = 0;
+  battery = -1;
+  charging = false;
+  private st: PadState = { mx: 0, my: 0, ax: 0, ay: 0, actions: [false, false, false, false, false, false], confirm: false, back: false, start: false };
+  private heldActs = [false, false, false, false, false, false];
+  private edges = [false, false, false, false, false, false];
+  private centers: { l: [number, number] | null; r: [number, number] | null } = { l: null, r: null };
+  private samples: number[] = [];
+
+  constructor(readonly device: HidDevice) {}
+
+  /** Ask for full 0x30 reports. A clone that ignores this keeps sending 0x3f, which we still read. */
+  async init() {
+    const out = new Uint8Array(49);
+    out[0] = 0x03;
+    out[10] = 0x03;
+    out[11] = 0x30;
+    try {
+      await this.device.sendReport(0x01, out);
+    } catch {
+      // Simple reports still arrive.
+    }
+  }
+
+  parse(reportId: number, data: DataView) {
+    const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    const parsed = proStateFromReport(reportId, bytes, this.centers);
+    if (!parsed) return;
+    this.centers = parsed.centers;
+    const next = parsed.state.actions;
+    for (let i = 0; i < next.length; i++) if (next[i] && !this.heldActs[i]) this.edges[i] = true;
+    this.heldActs = [...next];
+    this.st = parsed.state;
+    this.ready = true;
+    const now = performance.now();
+    this.samples.push(now);
+    this.samples = this.samples.filter((t) => now - t < 1000);
+    this.rate = this.samples.length;
+  }
+
+  /** Held buttons plus any tap that has not been read yet. `take` uses those taps up. */
+  state(take = false): PadState {
+    const actions = this.st.actions.map((v, i) => v || this.edges[i]) as PadState['actions'];
+    if (take) this.edges = [false, false, false, false, false, false];
+    return { ...this.st, actions };
+  }
+
+  held(): string[] {
+    const names = ['B', 'X', 'A', 'Y', 'ZR', 'ZL'];
+    const down = names.filter((_, i) => this.st.actions[i]);
+    if (this.st.start) down.push('+');
+    return down;
+  }
+}
+
+export type DirectPad = HidJoyCon | HidPro;
+export const isProPad = (p: DirectPad | { kind?: string }): p is HidPro => (p as { kind?: string }).kind === 'pro';
+
+/** Directly connected Joy-Cons and Pro Controllers, in the order they were connected. */
+const pads: DirectPad[] = [];
 const listeners = new Set<() => void>();
 export let lastError = '';
 
 export const hidPads = () => pads;
-export const hidPad = (n: number): HidJoyCon | null => pads.filter((p) => p.connected)[n - 1] ?? null;
+export const hidPad = (n: number): DirectPad | null => pads.filter((p) => p.connected)[n - 1] ?? null;
 export const onHidChange = (fn: () => void) => {
   listeners.add(fn);
   return () => listeners.delete(fn);
@@ -164,14 +322,15 @@ const changed = () => listeners.forEach((fn) => fn());
 
 const sideOf = (d: HidDevice): PadSide | null => (d.productId === JOYCON_L ? 'L' : d.productId === JOYCON_R ? 'R' : null);
 
-/** Open one Joy-Con and start reading it. */
+/** Open one Joy-Con or Pro Controller and start reading it. */
 async function attach(device: HidDevice) {
   const side = sideOf(device);
-  if (!side) return;
+  const pro = device.productId === PRO_CONTROLLER;
+  if (!side && !pro) return;
   let pad = pads.find((p) => p.device === device);
   if (pad?.connected && device.opened) return;
   if (!pad) {
-    pad = new HidJoyCon(device, side);
+    pad = side ? new HidJoyCon(device, side) : new HidPro(device);
     pads.push(pad);
     device.addEventListener('inputreport', (e) => pad!.parse(e.reportId, e.data));
   }
@@ -188,7 +347,7 @@ async function attach(device: HidDevice) {
   changed();
 }
 
-/** Ask the player to pick Joy-Cons (needs a click or key press), then start reading them. */
+/** Ask the player to pick Joy-Cons or a Pro Controller (needs a click or key press), then start reading them. */
 export async function connectJoyCons(): Promise<number> {
   const hid = api();
   if (!hid) return 0;
@@ -270,7 +429,8 @@ export function hidKeys(side: PadSide): (keyof JoyButtons)[] {
  * What a directly-connected Joy-Con is doing, as the same state a gamepad gives (held sideways, one per
  * player). With `take`, taps shorter than a frame also count (and are used up).
  */
-export function hidState(p: HidJoyCon, take = false): PadState {
+export function hidState(p: DirectPad, take = false): PadState {
+  if (isProPad(p)) return p.state(take);
   const d = p.down;
   const [mx, my] = sidewaysMove(p.side, p.stick[0], p.stick[1]);
   const left = p.side === 'L';
@@ -287,3 +447,8 @@ export function hidState(p: HidJoyCon, take = false): PadState {
 /** Button names for attack, skills 1–3, use item, next item. */
 export const hidLabels = (side: PadSide): [string, string, string, string, string, string] =>
   hidKeys(side).map((k) => joyLabel(side, k)) as [string, string, string, string, string, string];
+
+/** Button names for a directly connected pad: Switch face buttons on a Pro Controller, the Joy-Con's own otherwise. */
+export function directLabels(p: DirectPad | null): [string, string, string, string, string, string] {
+  return p && isProPad(p) ? padLabels('nintendo') : hidLabels(p && !isProPad(p) ? p.side : 'R');
+}

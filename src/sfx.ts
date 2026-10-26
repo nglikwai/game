@@ -118,6 +118,12 @@ function noise(dur: number, o: NoiseOpts = {}) {
 }
 
 export const sfx = {
+  /** A low gate thump and rising chime when the loading bar finishes. */
+  battleTransition() {
+    tone(88, 0.65, { type: 'sine', to: 44, vol: 0.24 });
+    noise(0.55, { filter: 'bandpass', freq: 400, to: 2200, vol: 0.16, attack: 0.12 });
+    [392, 587, 784].forEach((f, i) => tone(f, 0.24, { type: 'triangle', vol: 0.1, delay: 0.2 + i * 0.13 }));
+  },
   /** Weapon swing. weight 0 (daggers) … 1 (hammer): heavier = lower and longer. */
   swing(weight: number) {
     const dur = 0.12 + weight * 0.16;
@@ -206,6 +212,12 @@ export const sfx = {
   thunder() {
     noise(0.35, { filter: 'highpass', freq: 1500, to: 400, vol: 0.35 });
     tone(90, 0.4, { type: 'sawtooth', to: 40, vol: 0.15 });
+  },
+
+  /** 雷扇: a short crack, light enough to repeat with a fast swing. */
+  thunderFan() {
+    noise(0.12, { filter: 'highpass', freq: 2200, to: 700, vol: 0.2 });
+    tone(180, 0.1, { type: 'square', to: 70, vol: 0.05 });
   },
 
   /** Vanish / substitution: a soft ninja poof. */

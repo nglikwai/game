@@ -1,7 +1,7 @@
 import * as Phaser from 'phaser';
 import { halfLabels, padKind, padLabels, type PadSide } from './gamepads';
 import { readController, resolvePad } from './padconfig';
-import { hidLabels, hidPad, hidState } from './joyhid';
+import { directLabels, hidPad, hidState, isProPad } from './joyhid';
 import type { Difficulty } from './config';
 import type { Fighter } from './Fighter';
 import type { Projectile } from './scenes/BattleScene';
@@ -16,7 +16,8 @@ export interface Intent {
   ay: number;
   /** Edge-triggered: true only on the frame the button is pressed. */
   attack: boolean;
-  skills: [boolean, boolean, boolean];
+  /** One flag per equipped skill. Players have three; bosses can have many more. */
+  skills: boolean[];
   /** Use the selected pocket item / move the selection to the next item (edge-triggered). */
   useItem: boolean;
   nextItem: boolean;
@@ -24,7 +25,7 @@ export interface Intent {
   useItemAt?: number;
 }
 
-export const emptyIntent = (): Intent => ({ mx: 0, my: 0, ax: 0, ay: 0, attack: false, skills: [false, false, false], useItem: false, nextItem: false });
+export const emptyIntent = (): Intent => ({ mx: 0, my: 0, ax: 0, ay: 0, attack: false, skills: [false, false, false, false], useItem: false, nextItem: false });
 
 export interface WorldView {
   fighters: Fighter[];
@@ -33,18 +34,28 @@ export interface WorldView {
   objectives: { team: number; x: number; y: number; w: number; h: number }[];
   /** Treasure chests on the field (centre + size). */
   chests: { x: number; y: number; w: number; h: number }[];
+  /** Quest: nobody paths to a chest. An enemy may still break one while fighting. */
+  lootChests?: boolean;
   /** Watchtowers (team modes). */
   towers?: { team: number; x: number; y: number; w: number; h: number; alive: boolean }[];
   /** Siege: towers are the main objective. */
   siege?: boolean;
   /** This team's CPU allies fight enemies and defend teammates before attacking objectives. */
   defendTeam?: number;
+  /** Floor objectives that charge by standing inside, never by attacking them. */
+  capturePoints?: { team: number; x: number; y: number; radius: number; sealed: boolean }[];
+  /** Invading CPU heroes agree on one altar so objectives needing two allies remain achievable. */
+  coordinateCaptures?: boolean;
+  /** Moving Quest objective: allies guide it and guards can attack it. */
+  escort?: { team: number; x: number; y: number; w: number; h: number; radius: number; alive: boolean; arrived: boolean; lost?: boolean };
   /** The map's routing hint for CPU fighters (e.g. which bridge to take), if any. */
   route?: (fx: number, fy: number, tx: number, ty: number) => { x: number; y: number } | null;
   /** Shrinking barrier: the safe circle right now, if the map has one. */
   safe?: () => { x: number; y: number; r: number } | null;
   /** Healing herbs that are grown and ready to pick. */
   herbs?: () => { x: number; y: number }[];
+  /** Fire on the ground, including spots that are about to burst. */
+  fires?: () => { x: number; y: number; r: number }[];
 }
 
 export interface Controller {
@@ -154,7 +165,7 @@ class KeyboardController implements Controller {
       my: (k.down.isDown ? 1 : 0) - (k.up.isDown ? 1 : 0),
       ax: 0, ay: 0,
       attack: jd(k.attack),
-      skills: [jd(k.s1), jd(k.s2), jd(k.s3)],
+      skills: [jd(k.s1), jd(k.s2), jd(k.s3), false],
       useItem: jd(k.use),
       nextItem: jd(k.next),
     };
@@ -191,7 +202,7 @@ class GamepadController implements Controller {
       mx: st.mx, my: st.my,
       ax: st.ax, ay: st.ay,
       attack: edge[0],
-      skills: [edge[1], edge[2], edge[3]],
+      skills: [edge[1], edge[2], edge[3], false],
       useItem: edge[4],
       nextItem: edge[5],
     };
@@ -209,7 +220,8 @@ class HidController implements Controller {
   }
 
   get labels(): Labels {
-    return hidLabels(hidPad(this.n)?.side ?? 'R');
+    const pad = hidPad(this.n);
+    return directLabels(pad);
   }
 
   read(): Intent {
@@ -218,7 +230,9 @@ class HidController implements Controller {
     const st = hidState(pad, true);
     const edge = st.actions.map((v, i) => v && !this.prev[i]);
     this.prev = [...st.actions];
-    return { mx: st.mx, my: st.my, ax: 0, ay: 0, attack: edge[0], skills: [edge[1], edge[2], edge[3]], useItem: edge[4], nextItem: edge[5] };
+    // A Joy-Con has no second stick. A Pro Controller aims with its right stick.
+    const aim = isProPad(pad);
+    return { mx: st.mx, my: st.my, ax: aim ? st.ax : 0, ay: aim ? st.ay : 0, attack: edge[0], skills: [edge[1], edge[2], edge[3], false], useItem: edge[4], nextItem: edge[5] };
   }
 }
 
@@ -275,7 +289,7 @@ export class AIController implements Controller {
     this.thinkT -= dt;
     if (this.thinkT > 0) {
       // Keep moving between decisions, but don't re-press buttons.
-      return { ...this.held, attack: false, skills: [false, false, false], useItemAt: undefined };
+      return { ...this.held, attack: false, skills: [false, false, false, false], useItemAt: undefined };
     }
     this.thinkT = this.hard ? HARD.thinkMin + Math.random() * HARD.thinkSpread : 0.09 + Math.random() * 0.08;
     this.held = this.decide(self, world);
@@ -330,18 +344,25 @@ export class AIController implements Controller {
     const ownWalls = world.objectives.filter((o) => o.team === self.team);
     const obj = ownWalls.length ? ownWalls.reduce((a, b) =>
       Math.hypot(a.x - self.x, a.y - self.y) < Math.hypot(b.x - self.x, b.y - self.y) ? a : b) : null;
-    const chest = world.chests.length > 0
-      ? world.chests.reduce((a, b) => (Math.hypot(a.x - self.x, a.y - self.y) < Math.hypot(b.x - self.x, b.y - self.y) ? a : b))
-      : null;
+    const chest = world.lootChests === false || world.chests.length === 0 ? null
+      : world.chests.reduce((a, b) => (Math.hypot(a.x - self.x, a.y - self.y) < Math.hypot(b.x - self.x, b.y - self.y) ? a : b));
     const enemyTowers = (world.towers ?? []).filter((t) => t.alive && t.team !== self.team);
     const tower = enemyTowers.length > 0
       ? enemyTowers.reduce((a, b) => (Math.hypot(a.x - self.x, a.y - self.y) < Math.hypot(b.x - self.x, b.y - self.y) ? a : b))
       : null;
-    const fallbackGoal = obj ?? tower ?? chest;
+    const unfinished = (world.capturePoints ?? []).filter((p) => p.team === self.team && !p.sealed);
+    const capture = world.coordinateCaptures ? unfinished[0] ?? null : unfinished.length ? unfinished.reduce((a, b) =>
+      Math.hypot(a.x - self.x, a.y - self.y) < Math.hypot(b.x - self.x, b.y - self.y) ? a : b) : null;
+    const escort = world.escort?.alive && !world.escort.arrived && !world.escort.lost ? world.escort : null;
+    const guiding = escort?.team === self.team ? escort : null;
+    const raiding = escort && escort.team !== self.team ? escort : null;
+    const fallbackGoal = guiding ?? raiding ?? capture ?? obj ?? tower ?? chest;
     if (enemies.length === 0 && !fallbackGoal) return out;
 
     const defendParty = world.defendTeam === self.team;
-    const allyThreat = defendParty ? this.pickThreatToAlly(self, world, enemies) : null;
+    const lanternThreat = guiding ? enemies.filter((e) => Math.hypot(e.x - guiding.x, e.y - guiding.y) < guiding.radius + 100)
+      .sort((a, b) => Math.hypot(a.x - guiding.x, a.y - guiding.y) - Math.hypot(b.x - guiding.x, b.y - guiding.y))[0] : null;
+    const allyThreat = (defendParty ? this.pickThreatToAlly(self, world, enemies) : null) ?? lanternThreat;
     // With no enemy around (Save the Princess, everyone else respawning), aim at the wall / a chest.
     const target = allyThreat ?? (enemies.length > 0 ? (this.hard && HARD.smartTargets ? this.pickTarget(self, enemies) : enemies.reduce((a, b) => (self.distTo(a) < self.distTo(b) ? a : b))) : null);
     const tx = target ? target.x : fallbackGoal!.x;
@@ -360,26 +381,28 @@ export class AIController implements Controller {
     const tired = self.pe < w.peCost + 8;
 
     // Thunder (spends soul): worth it at level 2+, or to finish off a weak enemy.
+    // The Quest boss's 1 soul already strikes two players, so he casts as soon as he has a level.
+    const bossSoul = self.boss;
     const reaper = slotWith(self, 'soulReaper');
     // Reaper: a gamble per target, so wait for more soul (more rolls).
-    if (reaper >= 0 && self.canUseSkill(reaper) && self.soulLevel >= 3) {
+    if (reaper >= 0 && self.canUseSkill(reaper) && (bossSoul || self.soulLevel >= 3)) {
       out.skills[reaper] = true;
       return out;
     }
     // Holy Fire: reliable chip damage, so cast as soon as there's any soul.
     const fire = slotWith(self, 'soulFire');
-    if (fire >= 0 && self.canUseSkill(fire) && (self.soulLevel >= 2 || enemies.some((e) => e.hp < 12))) {
+    if (fire >= 0 && self.canUseSkill(fire) && (bossSoul || self.soulLevel >= 2 || enemies.some((e) => e.hp < 12))) {
       out.skills[fire] = true;
       return out;
     }
     // Sacred Tree: pins a crowd; worth it as soon as several enemies are about.
     const tree = slotWith(self, 'soulTree');
-    if (tree >= 0 && self.canUseSkill(tree) && enemies.length >= 2) {
+    if (tree >= 0 && self.canUseSkill(tree) && (bossSoul || enemies.length >= 2)) {
       out.skills[tree] = true;
       return out;
     }
     const thunder = slotWith(self, 'soulThunder');
-    if (thunder >= 0 && self.canUseSkill(thunder) && (self.soulLevel >= 2 || enemies.some((e) => e.hp < 20))) {
+    if (thunder >= 0 && self.canUseSkill(thunder) && (bossSoul || self.soulLevel >= 2 || enemies.some((e) => e.hp < 20))) {
       out.skills[thunder] = true;
       return out;
     }
@@ -516,7 +539,8 @@ export class AIController implements Controller {
     const towerGoal = tower && (world.siege ? !target || dist > 160 : towerDist < 260 && (!target || dist > 200)) ? tower : null;
     // Quest support allies must not abandon a fight or a threatened teammate for an objective/chest.
     // Towers remain the fallback while the guards are defeated or respawning.
-    const goal = defendParty && target ? null : obj ?? towerGoal ?? (chest && chestDist < 450 && (!target || dist > 220) ? chest : null);
+    const raidGoal = raiding && (!target || dist > 180) ? raiding : null;
+    const goal = raidGoal ?? (defendParty && target ? null : obj ?? towerGoal ?? (chest && chestDist < 450 && (!target || dist > 220) ? chest : null));
 
     let mx = 0;
     let my = 0;
@@ -544,6 +568,20 @@ export class AIController implements Controller {
       if (dist < 220) {
         mx = -Math.cos(ang) + perpX * 0.6;
         my = -Math.sin(ang) + perpY * 0.6;
+      }
+    } else if (guiding && !allyThreat && (!target || Math.hypot(target.x - guiding.x, target.y - guiding.y) > guiding.radius + 100)) {
+      // Return to the moving lantern instead of chasing a distant guard across the arena.
+      const d = Math.hypot(guiding.x - self.x, guiding.y - self.y);
+      if (d > guiding.radius * 0.4) {
+        heading = guiding; mx = (guiding.x - self.x) / d; my = (guiding.y - self.y) / d;
+      }
+    } else if (capture && !allyThreat && (!target || dist > 260)) {
+      // Hold inside the circle, but leave it to defend a teammate or fight a nearby guard.
+      const d = Math.hypot(capture.x - self.x, capture.y - self.y);
+      if (d > capture.radius * 0.4) {
+        heading = capture;
+        mx = (capture.x - self.x) / d;
+        my = (capture.y - self.y) / d;
       }
     } else if (goal && (!target || dist > 130 || Math.random() < 0.3)) {
       const obj = goal;
@@ -622,6 +660,23 @@ export class AIController implements Controller {
         mx = (safe.x - self.x) / (d || 1);
         my = (safe.y - self.y) / (d || 1);
       }
+    }
+
+    // Standing in fire, or in a spot about to burst: step off before chasing anyone.
+    let firePush: { x: number; y: number } | null = null;
+    let fireNear = Infinity;
+    for (const fire of world.fires?.() ?? []) {
+      const dx = self.x - fire.x;
+      const dy = self.y - fire.y;
+      const d = Math.hypot(dx, dy);
+      if (d < fire.r + self.radius + 22 && d < fireNear) {
+        fireNear = d;
+        firePush = { x: dx / (d || 1), y: dy / (d || 1) };
+      }
+    }
+    if (firePush) {
+      mx = firePush.x;
+      my = firePush.y;
     }
 
     // Obstacle escape: if we're making no headway where we want to go (stopped, or just

@@ -2,6 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
 const { AIController } = load('src/controls.ts');
+const { BattleScene } = load('src/scenes/BattleScene.ts');
 const { Fighter } = load('src/Fighter.ts');
 const { WEAPONS } = load('src/weapons.ts');
 const { roleById } = load('src/roles.ts');
@@ -92,6 +93,7 @@ for (const difficulty of ['standard', 'hard']) {
   test(`${difficulty}: healing teammates still comes before attacking enemies or towers`, () => {
     const { self, world } = encounter();
     self.skills.push(skillById('healing-circle'));
+    self.cooldowns.push(0);
     const ally = fighter(1, 0, 500, 950); ally.hp = 30;
     world.fighters.push(ally);
     const intent = decide(difficulty, self, world);
@@ -120,6 +122,38 @@ for (const difficulty of ['standard', 'hard']) {
     assert.ok(tree.ax > 0.99);
   });
 }
+
+test('Quest CPUs leave a chest alone once the enemies are down', () => {
+  const { self, enemy, world } = encounter();
+  enemy.state = 'dead';
+  world.lootChests = false;
+  world.towers = [];
+  world.siege = false;
+  const intent = decide('standard', self, world);
+  assert.equal(intent.attack, false);
+  assert.ok(Math.abs(intent.mx) < 0.2);
+  assert.ok(Math.abs(intent.my) < 0.2);
+});
+
+test('a Quest ally leaves a chest alone, while an enemy swing can break it', () => {
+  const scene = new BattleScene();
+  scene.quest = { stage: 0 };
+  const chest = { x: 100, y: 100, w: 40, h: 40, hp: 30, shakeT: 0 };
+  scene.chests = [chest];
+  const swing = (team) => scene.onSwingActive({
+    controller: new AIController('standard'),
+    team,
+    damageMult: 1,
+    swingHits: new Set(),
+    weapon: WEAPONS.find((w) => w.id === 'shuriken'),
+    x: 100, y: 100, facing: 0,
+  });
+  swing(0);
+  assert.equal(chest.hp, 30);
+  swing(1);
+  assert.ok(chest.hp < 30);
+  assert.equal(scene.chests.length, 1);
+});
 
 test('defending allies ignore hidden or invulnerable enemies when choosing a tower fallback', () => {
   for (const state of ['hidden', 'invulnerable']) {

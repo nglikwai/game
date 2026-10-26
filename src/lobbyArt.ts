@@ -105,9 +105,9 @@ export function drawControllerIcon(g: Graphics, x: number, y: number, size: numb
   g.fillStyle(0xc1ccda, 0.7).fillCircle(x - 4 * s, y + 7 * s, 3 * s).fillCircle(x + 5 * s, y + 7 * s, 3 * s);
 }
 
-/** Stage previews give the locked Quest row a purpose rather than four identical placeholders. */
+/** Stage previews give the locked Quest row a purpose rather than identical placeholders. */
 export function drawQuestEmblem(g: Graphics, x: number, y: number, stage: number) {
-  const color = [0xae665f, 0xb69a71, 0x9b86bb, 0xc96965][stage];
+  const color = [0xae665f, 0xb69a71, 0x9b86bb, 0x6a9a62, 0xd9b572, 0x90d9be, 0xc96965, 0x99c9b7][stage];
   g.fillStyle(color, 0.07).fillCircle(x, y, 41);
   g.lineStyle(1, color, 0.35).strokeCircle(x, y, 37);
   if (stage === 0) {
@@ -125,5 +125,26 @@ export function drawQuestEmblem(g: Graphics, x: number, y: number, stage: number
       g.lineStyle(3 - k * 0.5, color, 0.8).lineBetween(x, y + 6 - k * 10, x + side * (24 - k * 5), y - 12 - k * 8);
     }
     g.lineStyle(2, color, 0.5).lineBetween(x, y + 18, x - 18, y + 28).lineBetween(x, y + 18, x + 18, y + 28);
+  } else if (stage === 3) {
+    for (const [dx, dy] of [[0, -16], [-16, 14], [16, 14]]) {
+      g.lineStyle(3, color, 0.85).lineBetween(x + dx, y + dy + 12, x + dx, y + dy - 8);
+      g.lineStyle(2, color, 0.75).lineBetween(x + dx, y + dy - 2, x + dx - 9, y + dy - 10).lineBetween(x + dx, y + dy - 2, x + dx + 9, y + dy - 10);
+    }
+  } else if (stage === 4) {
+    for (const [dx, dy] of [[0, -17], [-19, 16], [19, 16]]) {
+      g.lineStyle(2, color, 0.85).strokeCircle(x + dx, y + dy, 11);
+      g.lineStyle(2, color, 0.6).strokeCircle(x + dx, y + dy, 6);
+      g.fillStyle(color, 0.8).fillCircle(x + dx, y + dy, 2);
+    }
+  } else if (stage === 5) {
+    g.fillStyle(color, 0.12).fillCircle(x, y, 27);
+    g.lineStyle(2, color, 0.9).strokeRoundedRect(x - 15, y - 18, 30, 36, 5);
+    g.lineBetween(x - 20, y - 22, x + 20, y - 22).lineBetween(x - 20, y + 22, x + 20, y + 22);
+    g.lineBetween(x, y - 29, x, y - 22).lineBetween(x, y + 22, x, y + 30);
+    g.fillStyle(0xffdf9a, 0.9).fillEllipse(x, y, 10, 22);
+  } else if (stage === 7) {
+    g.lineStyle(2, 0xd6bd89, 0.8).lineBetween(x - 20, y - 10, x + 20, y + 10);
+    drawLobbyPortrait(g, x - 17, y - 9, 22, 0xc85957, 'samurai');
+    drawLobbyPortrait(g, x + 17, y + 9, 22, 0x70bcad, 'mystic');
   } else drawLobbyPortrait(g, x, y, 32, color, 'samurai');
 }

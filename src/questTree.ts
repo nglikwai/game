@@ -24,3 +24,8 @@ export const TREE_SUMMONS: readonly TreeSummon[] = ([
 export function pickTreeSummon(random: () => number = Math.random): TreeSummon {
   return TREE_SUMMONS[Math.floor(random() * TREE_SUMMONS.length)];
 }
+
+/** Grove summons use the same spells, with a better chance to land. */
+export function groveSummonHitChance(spell: TreeSummon): number {
+  return Math.min(1, spell.hitChance + QUEST.grove.summonHitBonus);
+}

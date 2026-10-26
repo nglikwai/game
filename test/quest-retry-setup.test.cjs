@@ -11,7 +11,7 @@ const { T, setLang } = load('src/i18n.ts');
 const baseSlots = structuredClone(getSettings().slots);
 
 function defeat(stage) {
-  const checkpoint = { stage, carry: { players: { 0: { pocket: [{ id: 'rice-ball' }], soul: 50 } }, stats: [createMatchStats({ dealt: 125, wall: 300 })] } };
+  const checkpoint = { stage, campaign: 'quest', carry: { players: { 0: { pocket: [{ id: 'rice-ball' }], soul: 50 } }, stats: [createMatchStats({ dealt: 125, wall: 300 })] } };
   const scene = new BattleScene();
   scene.init({ mode: 'quest', slots: structuredClone(baseSlots), quest: checkpoint });
   scene.stats[0].dealt = 9999; // the failed attempt must not replace the starting checkpoint
@@ -35,14 +35,16 @@ test('each failed Quest stage can edit setup and retry that exact stage with its
     d.buttons.find((b) => b.id === 'edit').onEnter();
     const { key, data } = d.started();
     assert.equal(key, 'Lobby');
-    assert.equal(JSON.stringify(data.retryQuest), JSON.stringify(d.checkpoint));
+    assert.equal(data.retryQuest.stage, stage);
+    assert.equal(JSON.stringify(data.retryQuest.carry), JSON.stringify(d.checkpoint.carry));
+    assert.ok(data.retryQuest.route.includes(stage));
     assert.notEqual(data.retryQuest, d.checkpoint);
     assert.equal(data.retryQuest.carry.stats[0].dealt, 125);
     const lobby = new LobbyScene();
     getSettings().mode = 'ffa';
     lobby.init(data);
     const settings = getSettings();
-    assert.equal(settings.mode, 'quest');
+    assert.equal(settings.mode, d.checkpoint.campaign);
     const player = settings.slots[0];
     player.role = 'mystic'; player.weapon = 11; player.skills = ['arrow', 'fireball', 'blink'];
     player.binds[0] = 123;
@@ -93,15 +95,17 @@ test('entering the normal lobby clears retry state, so a fresh Quest starts at s
   let data;
   lobby.scene = { start: (_key, next) => { data = next; } };
   lobby.startBattle();
-  assert.equal(data.quest, undefined);
+  assert.equal(data.quest.route.length, 5);
+  assert.equal(data.quest.stage, data.quest.route[0]);
   const fresh = new BattleScene(); fresh.init(data);
-  assert.equal(fresh.quest.stage, 0);
+  assert.equal(fresh.quest.stage, data.quest.route[0]);
+  assert.deepEqual(Array.from(fresh.quest.route), Array.from(data.quest.route));
 });
 
 test('the defeat screen routes direct retry and start over through loading in both languages', () => {
-  for (const lang of ['en', 'zh']) {
+  for (const lang of ['en', 'zh']) for (const stage of [QUEST.rescueStage, QUEST.wardenStage]) {
     setLang(lang);
-    const d = defeat(QUEST.rescueStage);
+    const d = defeat(stage);
     assert.deepEqual(d.buttons.map((b) => b.id), ['edit', 'retry', 'over', 'lobby']);
     for (const button of d.buttons) {
       assert.ok(button.x >= 0 && button.x + button.w <= 1280);
@@ -109,10 +113,15 @@ test('the defeat screen routes direct retry and start over through loading in bo
     }
     d.buttons.find((b) => b.id === 'retry').onEnter();
     assert.equal(d.started().key, 'Loading');
-    assert.equal(d.started().data.quest.stage, QUEST.rescueStage);
+    assert.equal(d.started().data.quest.stage, stage);
+    assert.deepEqual(Array.from(d.started().data.quest.route), Array.from(d.scene.quest.route));
     d.buttons.find((b) => b.id === 'over').onEnter();
     assert.equal(d.started().key, 'Loading');
-    assert.equal(d.started().data.quest, undefined);
+    assert.equal(d.started().data.quest.carry, undefined);
+    assert.equal(d.started().data.mode, 'quest');
+    assert.equal(d.started().data.quest.stage, d.started().data.quest.route[0]);
+    const fresh = new BattleScene(); fresh.init(d.started().data);
+    assert.deepEqual(Array.from(fresh.quest.route), Array.from(d.started().data.quest.route));
     assert.ok(T().questEdit && T().questRetrySetup(3));
   }
 });

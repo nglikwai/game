@@ -41,6 +41,7 @@ let enabled = (() => {
 
 let current: Track | null = null;
 let bus: GainNode | null = null;
+const fadingBuses = new Set<GainNode>();
 let timer: number | null = null;
 let nextTime = 0;
 let step = 0;
@@ -78,14 +79,19 @@ export function playMusic(track: Track) {
   tick();
 }
 
-export function stopMusic() {
+export function stopMusic(immediate = false) {
   if (timer !== null) window.clearInterval(timer);
   timer = null;
+  if (immediate) {
+    for (const old of fadingBuses) old.disconnect();
+    fadingBuses.clear();
+  }
   const out = audioOut();
-  if (bus && out) {
+  if (bus && out && !immediate) {
     const old = bus;
+    fadingBuses.add(old);
     old.gain.setTargetAtTime(0.0001, out.ac.currentTime, 0.25);
-    window.setTimeout(() => old.disconnect(), 1500);
+    window.setTimeout(() => { if (fadingBuses.delete(old)) old.disconnect(); }, 1500);
   } else bus?.disconnect();
   bus = null;
 }
