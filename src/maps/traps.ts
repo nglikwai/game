@@ -1,8 +1,8 @@
-import { HEIGHT, HUD_HEIGHT, WIDTH } from '../config';
+import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, paintShadow, paintVignette,
   type ChestSpot, type Ctx, type GameMap, type Obstacle, type TerrainZone,
-} from './common';
+} from '@/maps/common';
 
 /**
  * 機關城 Trap Castle: the hall floor is full of spike traps in two sets that take

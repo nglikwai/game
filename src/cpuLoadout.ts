@@ -1,8 +1,8 @@
-import { isQuestMode, QUEST, type GameMode } from './config';
-import type { SlotConfig } from './settings';
-import { ROLES, type RoleId } from './roles';
-import { SKILLS } from './skills';
-import { WEAPONS, type WeaponId } from './weapons';
+import { isQuestMode, QUEST, type GameMode } from '@/config';
+import type { SlotConfig } from '@/settings';
+import { ROLES, type RoleId } from '@/roles';
+import { SKILLS } from '@/skills';
+import { WEAPONS, type WeaponId } from '@/weapons';
 
 /**
  * CPU fighters roll a fresh loadout every round: a random role, a weapon that suits

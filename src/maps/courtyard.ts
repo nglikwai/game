@@ -1,8 +1,8 @@
-import { HEIGHT, HUD_HEIGHT, WIDTH } from '../config';
+import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, cornerPile, paintLantern, paintLanternGlow, paintShadow, paintVignette, stoneBlock,
   type ChestSpot, type Ctx, type GameMap, type Obstacle,
-} from './common';
+} from '@/maps/common';
 
 /** 古寺庭院 Temple Courtyard: flagstones, a bagua ring around a bronze cauldron, red pillars. */
 

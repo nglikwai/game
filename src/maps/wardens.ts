@@ -1,5 +1,5 @@
-import { paintVignette, type GameMap } from './common';
-import { paintRim, paintRune, paintSlab, paintTiles } from './newMapArt';
+import { paintVignette, type GameMap } from '@/maps/common';
+import { paintRim, paintRune, paintSlab, paintTiles } from '@/maps/newMapArt';
 
 export const WARDENS: GameMap = {
   id: 'wardens', name: 'Twin Warden Gate', zh: '雙煞鬼門',

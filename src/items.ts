@@ -1,4 +1,4 @@
-import type { SkillEffect } from './skills';
+import type { SkillEffect } from '@/skills';
 
 /**
  * Items come out of treasure chests. Each one is the instant effect of a skill

@@ -1,5 +1,5 @@
-import { ARENA_MID_Y as MID, cornerPile, paintVignette, type GameMap, type Obstacle, type TerrainZone } from './common';
-import { paintRim, paintSlab, paintTiles } from './newMapArt';
+import { ARENA_MID_Y as MID, cornerPile, paintVignette, type GameMap, type Obstacle, type TerrainZone } from '@/maps/common';
+import { paintRim, paintSlab, paintTiles } from '@/maps/newMapArt';
 
 const ICE: TerrainZone[] = [
   { kind: 'ice', x: 640, y: MID, w: 430, h: 340 },

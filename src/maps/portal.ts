@@ -1,8 +1,8 @@
-import { HEIGHT, HUD_HEIGHT, WIDTH } from '../config';
+import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, paintLantern, paintLanternGlow, paintShadow, paintVignette,
   type ChestSpot, type Ctx, type GameMap, type Obstacle,
-} from './common';
+} from '@/maps/common';
 
 /**
  * 傳送神社 Portal Shrine: three pairs of glowing portals link far corners of the

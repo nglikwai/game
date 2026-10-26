@@ -1,6 +1,6 @@
-import { QUEST, WIDTH } from '../config';
-import { ARENA_MID_Y as MID, blob, cornerPile, paintShadow, paintVignette, type GameMap, type Obstacle } from './common';
-import { paintRim, paintRune, paintSlab, paintTiles } from './newMapArt';
+import { QUEST, WIDTH } from '@/config';
+import { ARENA_MID_Y as MID, blob, cornerPile, paintShadow, paintVignette, type GameMap, type Obstacle } from '@/maps/common';
+import { paintRim, paintRune, paintSlab, paintTiles } from '@/maps/newMapArt';
 
 const TREE = QUEST.rescue.tree;
 const WALLS: Obstacle[] = [-145, 145].map((dy) => ({ kind: 'cage', team: 0, x: 910, y: MID + dy, w: 140, h: 140 }));

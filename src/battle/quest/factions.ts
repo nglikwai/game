@@ -1,5 +1,5 @@
-import { QUEST, QUEST_RULES, type QuestRule, type QuestSide } from './config';
-import type { SlotConfig } from './settings';
+import { QUEST, QUEST_RULES, type QuestRule, type QuestSide } from '@/config';
+import type { SlotConfig } from '@/settings';
 
 /** Per-player choices override the legacy whole-party setting. */
 export function questSideOf(slot: SlotConfig, fallback: QuestSide = 'heroes'): QuestSide {

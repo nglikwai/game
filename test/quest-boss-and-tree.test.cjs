@@ -1,7 +1,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
-const { BattleScene, bossRole } = load('src/scenes/BattleScene.ts');
+const { BattleScene } = load('src/scenes/BattleScene.ts');
+const { bossRole } = load('@/battle/quest/roster.ts');
 const { Fighter } = load('src/Fighter.ts');
 const { AIController, emptyIntent } = load('src/controls.ts');
 const { summonStrikeCount } = load('src/skills.ts');
@@ -9,7 +10,7 @@ const { WEAPONS } = load('src/weapons.ts');
 const { ROLES, roleById } = load('src/roles.ts');
 const { skillById, skillCooldownFor } = load('src/skills.ts');
 const { QUEST, SOUL_PER_LEVEL, SOUL_FIRE, SOUL_THUNDER, SOUL_REAPER, SOUL_TREE } = load('src/config.ts');
-const { TREE_SUMMONS } = load('src/questTree.ts');
+const { TREE_SUMMONS } = load('src/battle/quest/treeRules.ts');
 
 function battle(stage = QUEST.bossStage) {
   const scene = new BattleScene();
@@ -273,7 +274,7 @@ test('every guard return rerolls equipment, refreshes its HUD, and preserves rol
 });
 
 test('all four boss summons gain ten percentage points without changing ordinary player hit rates', () => {
-  const { summonHitChance } = load('src/scenes/BattleScene.ts');
+  const { summonHitChance } = load('@/battle/combat/summonRules.ts');
   assert.equal(summonHitChance(0.95, true), 1);
   for (const [method, threshold] of [['thunderStrike', 0.6], ['holyFireStrike', 0.9], ['treeStrike', 0.8], ['reaperStrike', 0.15]]) {
     const { scene, boss, party } = battle();

@@ -1,8 +1,8 @@
-import { HEIGHT, HUD_HEIGHT, WIDTH } from '../config';
+import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, paintVignette,
   type ChestSpot, type Ctx, type GameMap, type Obstacle,
-} from './common';
+} from '@/maps/common';
 
 /**
  * 水晶洞窟 Crystal Cave: glowing crystal clusters bounce shots off them instead of

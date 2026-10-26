@@ -1,8 +1,8 @@
-import { HEIGHT, HUD_HEIGHT, WIDTH } from '../config';
+import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, mirrored, paintLantern, paintLanternGlow, paintShadow, paintVignette,
   type ChestSpot, type Ctx, type GameMap, type Obstacle,
-} from './common';
+} from '@/maps/common';
 
 /**
  * 櫻花錦鯉池 Koi Pond Garden: a koi pond in the middle crossed by a red arched

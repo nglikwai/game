@@ -1,4 +1,4 @@
-import { padLabels, sidewaysMove, type PadSide, type PadState } from './gamepads';
+import { padLabels, sidewaysMove, type PadSide, type PadState } from '@/gamepads';
 
 /**
  * Direct Joy-Con input over WebHID. A Joy-Con that the system has joined into a pair

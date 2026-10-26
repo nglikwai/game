@@ -1,6 +1,6 @@
-import { HEIGHT, HUD_HEIGHT, WIDTH } from '../config';
-import { ARENA, ARENA_MID_Y as MID, blob, cornerPile, paintShadow, paintVignette, type GameMap, type Obstacle, type TerrainZone } from './common';
-import { paintRim } from './newMapArt';
+import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
+import { ARENA, ARENA_MID_Y as MID, blob, cornerPile, paintShadow, paintVignette, type GameMap, type Obstacle, type TerrainZone } from '@/maps/common';
+import { paintRim } from '@/maps/newMapArt';
 
 const TREES: Obstacle[] = [370, 910].flatMap((x) => [
   { kind: 'sakura' as const, x, y: MID - 125, w: 52, h: 52 },

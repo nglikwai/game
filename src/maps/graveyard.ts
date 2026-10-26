@@ -1,8 +1,8 @@
-import { HEIGHT, HUD_HEIGHT, WIDTH } from '../config';
+import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, mirrored, paintShadow, paintVignette,
   type ChestSpot, type Ctx, type GameMap, type Obstacle,
-} from './common';
+} from '@/maps/common';
 
 /**
  * 古墓夜 Haunted Graveyard: a misty night among rows of tombstones, a stone

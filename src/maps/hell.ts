@@ -1,16 +1,16 @@
-import { HEIGHT, HUD_HEIGHT, WIDTH } from '../config';
-import { GROVE } from './grove';
-import { SEALS } from './seals';
-import { LANTERN } from './lantern';
-import { WARDENS } from './wardens';
-import { PRISON } from './prison';
-import { SNARE } from './snare';
-import { NIGHT } from './night';
-import { DIRGE } from './dirge';
+import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
+import { GROVE } from '@/maps/grove';
+import { SEALS } from '@/maps/seals';
+import { LANTERN } from '@/maps/lantern';
+import { WARDENS } from '@/maps/wardens';
+import { PRISON } from '@/maps/prison';
+import { SNARE } from '@/maps/snare';
+import { NIGHT } from '@/maps/night';
+import { DIRGE } from '@/maps/dirge';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, mirrored, paintShadow, paintVignette,
   type ChestSpot, type Ctx, type GameMap, type Obstacle,
-} from './common';
+} from '@/maps/common';
 
 /**
  * 地獄 The Underworld: the eight stages shared by 闖關 and 闖關2. They aren't offered in map

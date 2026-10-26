@@ -1,6 +1,6 @@
-import { WIDTH } from '../config';
-import { ARENA_MID_Y as MID, cornerPile, paintLantern, paintLanternGlow, paintVignette, type GameMap, type Obstacle, type TerrainZone } from './common';
-import { paintPool, paintRim, paintSlab, paintTiles } from './newMapArt';
+import { WIDTH } from '@/config';
+import { ARENA_MID_Y as MID, cornerPile, paintLantern, paintLanternGlow, paintVignette, type GameMap, type Obstacle, type TerrainZone } from '@/maps/common';
+import { paintPool, paintRim, paintSlab, paintTiles } from '@/maps/newMapArt';
 
 const POOLS: TerrainZone[] = [360, WIDTH - 360].map((x) => ({ kind: 'spring', x, y: MID, w: 136, h: 110 }));
 const OBSTACLES: Obstacle[] = [360, WIDTH - 360].flatMap((x) => [

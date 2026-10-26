@@ -1,12 +1,12 @@
 import * as Phaser from 'phaser';
-import { halfLabels, padKind, padLabels, type PadSide } from './gamepads';
-import { readController, resolvePad } from './padconfig';
-import { directLabels, hidPad, hidState, isProPad } from './joyhid';
-import type { Difficulty } from './config';
-import type { Fighter } from './Fighter';
-import type { Projectile } from './scenes/BattleScene';
-import type { SkillEffect } from './skills';
-import { shapeHits, shapeHitsRect, shapeReach } from './weapons';
+import { halfLabels, padKind, padLabels, type PadSide } from '@/gamepads';
+import { readController, resolvePad } from '@/padconfig';
+import { directLabels, hidPad, hidState, isProPad } from '@/joyhid';
+import type { Difficulty } from '@/config';
+import type { Fighter } from '@/Fighter';
+import type { Projectile } from '@/battle/types';
+import type { SkillEffect } from '@/skills';
+import { shapeHits, shapeHitsRect, shapeReach } from '@/weapons';
 
 export interface Intent {
   mx: number;

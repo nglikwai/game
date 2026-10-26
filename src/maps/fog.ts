@@ -1,8 +1,8 @@
-import { HEIGHT, HUD_HEIGHT, WIDTH } from '../config';
+import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, paintShadow, paintVignette,
   type ChestSpot, type Ctx, type GameMap, type Obstacle, type TerrainZone,
-} from './common';
+} from '@/maps/common';
 
 /**
  * 濃霧森林 Fog Forest: thick fog banks drift between the trees. Anyone inside one is

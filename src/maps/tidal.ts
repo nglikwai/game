@@ -1,8 +1,8 @@
-import { HEIGHT, HUD_HEIGHT, WIDTH } from '../config';
+import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, paintVignette,
   type ChestSpot, type Ctx, type GameMap, type Obstacle, type TerrainZone,
-} from './common';
+} from '@/maps/common';
 
 /**
  * 潮汐海岸 Tidal Flats: the tide comes in and goes out. When it rises, the flats along

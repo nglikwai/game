@@ -1,5 +1,5 @@
-import { ARENA_MID_Y as MID, cornerPile, paintVignette, type GameMap, type Obstacle, type TerrainZone } from './common';
-import { paintPool, paintRim, paintSlab, paintTiles } from './newMapArt';
+import { ARENA_MID_Y as MID, cornerPile, paintVignette, type GameMap, type Obstacle, type TerrainZone } from '@/maps/common';
+import { paintPool, paintRim, paintSlab, paintTiles } from '@/maps/newMapArt';
 
 const FLOODS: TerrainZone[] = [
   { kind: 'tide', x: 640, y: MID - 140, w: 420, h: 110 },

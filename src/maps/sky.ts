@@ -1,8 +1,8 @@
-import { HEIGHT, HUD_HEIGHT, WIDTH } from '../config';
+import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, paintShadow, paintVignette,
   type ChestSpot, type Ctx, type GameMap, type Obstacle, type TerrainZone,
-} from './common';
+} from '@/maps/common';
 
 /**
  * 雲上跳台 Sky Pads: a marble temple floating above the clouds. Glowing launch pads

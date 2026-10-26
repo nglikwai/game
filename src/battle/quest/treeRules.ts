@@ -1,5 +1,5 @@
-import { QUEST, SOUL_FIRE, SOUL_REAPER, SOUL_THUNDER, SOUL_TREE } from './config';
-import type { SummonKind } from './skills';
+import { QUEST, SOUL_FIRE, SOUL_REAPER, SOUL_THUNDER, SOUL_TREE } from '@/config';
+import type { SummonKind } from '@/skills';
 
 export interface TreeSummon {
   kind: SummonKind;

@@ -1,7 +1,7 @@
 import {
   BODY_RADIUS, DAMAGE_PER_SEC, HITSTUN_PER_CYCLE, KNOCKBACK_PER_SEC,
   PE_COST_PER_SEC, WEAPON_AREA,
-} from './config';
+} from '@/config';
 
 /** Hit shapes, all relative to the attacker's centre and facing angle. */
 export type Shape =

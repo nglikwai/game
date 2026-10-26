@@ -1,8 +1,8 @@
 import * as Phaser from 'phaser';
-import { drawLog, drawShurikenStar, kunai } from './art';
-import { SUMMON_LIGHT_RADIUS } from './config';
-import type { SkillEffect, SummonKind } from './skills';
-import type { WeaponId } from './weapons';
+import { drawLog, drawShurikenStar, kunai } from '@/art';
+import { SUMMON_LIGHT_RADIUS } from '@/config';
+import type { SkillEffect, SummonKind } from '@/skills';
+import type { WeaponId } from '@/weapons';
 
 /**
  * Short-lived visual effects: particles plus scripted effects (weapon strikes,

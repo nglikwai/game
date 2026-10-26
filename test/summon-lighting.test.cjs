@@ -4,7 +4,7 @@ const load = require('./load-source.cjs')();
 const { Fx } = load('src/fx.ts');
 const { BattleScene } = load('src/scenes/BattleScene.ts');
 const { SUMMON_LIGHT_RADIUS } = load('src/config.ts');
-const { TREE_SUMMONS } = load('src/questTree.ts');
+const { TREE_SUMMONS } = load('src/battle/quest/treeRules.ts');
 
 function graphics() {
   const circles = [];

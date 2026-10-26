@@ -1,8 +1,8 @@
-import { HEIGHT, HUD_HEIGHT, WIDTH } from '../config';
+import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, paintShadow, paintVignette,
   type ChestSpot, type Ctx, type GameMap, type Obstacle, type TerrainZone,
-} from './common';
+} from '@/maps/common';
 
 /**
  * 沙漠遺跡 Desert Ruins: loose sand slows you a little everywhere except on the old

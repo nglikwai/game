@@ -1,11 +1,11 @@
 import * as Phaser from 'phaser';
-import { HEIGHT, RES, WIDTH } from './config';
-import { addArenaTexture, type AmbientKind } from './maps';
-import { sfx } from './sfx';
-import { playMusic, type Track } from './music';
-import { menuPadSources, type MenuPadKey } from './menuPads';
-import type { Skill, SkillEffect } from './skills';
-import { drawLobbyBackdrop, drawLobbyCrest } from './lobbyArt';
+import { HEIGHT, RES, WIDTH } from '@/config';
+import { addArenaTexture, type AmbientKind } from '@/maps';
+import { sfx } from '@/sfx';
+import { playMusic, type Track } from '@/music';
+import { menuPadSources, type MenuPadKey } from '@/menuPads';
+import type { Skill, SkillEffect } from '@/skills';
+import { drawLobbyBackdrop, drawLobbyCrest } from '@/lobbyArt';
 
 // ---------- theme ----------
 

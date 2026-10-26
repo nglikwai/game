@@ -7,7 +7,7 @@ const { WEAPONS } = load('src/weapons.ts');
 const { roleById } = load('src/roles.ts');
 const { QUEST, PRINCESS_WALL_HP, SOUL_REAPER } = load('src/config.ts');
 const { QUEST_MAPS, MAPS, getMap, mulberry32 } = load('src/maps/index.ts');
-const { TREE_SUMMONS, pickTreeSummon } = load('src/questTree.ts');
+const { TREE_SUMMONS, pickTreeSummon } = load('src/battle/quest/treeRules.ts');
 
 function rescue() {
   const scene = new BattleScene();

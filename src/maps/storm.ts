@@ -1,5 +1,5 @@
-import { ARENA_MID_Y as MID, cornerPile, paintVignette, type GameMap, type Obstacle, type TerrainZone } from './common';
-import { paintRim, paintRune, paintSlab, paintTiles } from './newMapArt';
+import { ARENA_MID_Y as MID, cornerPile, paintVignette, type GameMap, type Obstacle, type TerrainZone } from '@/maps/common';
+import { paintRim, paintRune, paintSlab, paintTiles } from '@/maps/newMapArt';
 
 const OBSTACLES: Obstacle[] = [400, 880].flatMap((x) => [
   { kind: 'pillar' as const, x, y: MID - 125, w: 44, h: 44 },

@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
-const { createLantern, advanceLantern, distanceToEscortPath } = load('src/questEscort.ts');
+const { createLantern, advanceLantern, distanceToEscortPath } = load('src/battle/quest/escortRules.ts');
 const { BattleScene } = load('src/scenes/BattleScene.ts');
 const { AIController } = load('src/controls.ts');
 const { Fighter } = load('src/Fighter.ts');

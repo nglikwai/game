@@ -1,6 +1,6 @@
-import { QUEST } from '../config';
-import { ARENA_MID_Y as MID, blob, cornerPile, paintShadow, paintVignette, type GameMap, type Obstacle } from './common';
-import { paintRim, paintRune, paintSlab, paintTiles } from './newMapArt';
+import { QUEST } from '@/config';
+import { ARENA_MID_Y as MID, blob, cornerPile, paintShadow, paintVignette, type GameMap, type Obstacle } from '@/maps/common';
+import { paintRim, paintRune, paintSlab, paintTiles } from '@/maps/newMapArt';
 
 const [TOP, LEFT, RIGHT] = QUEST.grove.spots;
 const TREES: Obstacle[] = [TOP, LEFT, RIGHT].map((spot) => ({ kind: 'deadtree' as const, x: spot.x, y: spot.y, w: 88, h: 100 }));

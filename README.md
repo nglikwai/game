@@ -25,7 +25,7 @@ dialogs, battle HUD panels and MVP/SVP medals follow the same visual language.
 
 ## Modes
 
-In **闖關**, each active player card has its own **勇者陣營 / Heroes** or **地獄陣營 / Hell** selector. P1 can play a hero while P2 (or any other players) controls a Hell enemy in the same run. Mixed factions compete over the existing stage objectives: heroes advance by completing them, Hell wins by defeating the heroes or pushing the lantern home. Each stage announces its winning faction, and both sides can continue along the six-stage route. CPU fighters fill the remaining seats when Hell is playable. All-hero cooperative runs and all-Hell defensive runs remain available. In the finale, the first human Hell player controls the Oni King, or the first two human Hell players become Crimson/Jade (CPU fills a missing boss). Human bosses use three skills on the usual buttons; CPU bosses retain four. Player numbers, controls, items and stats stay with their selected faction across stages. Factions stay fixed during retry setup; weapons, skills and controls can still be edited.
+In **闖關**, choose **自由 / Free** under the faction rules to give each active player card its own **勇者陣營 / Heroes** or **地獄陣營 / Hell** selector. P1 can play a hero while P2 (or any other players) controls a Hell enemy in the same run. Mixed factions compete over the existing stage objectives: heroes advance by completing them, Hell wins by defeating the heroes or pushing the lantern home. Each stage announces its winning faction, and both sides can continue along the randomized route. CPU fighters fill the remaining seats when Hell is playable. All-hero cooperative runs and all-Hell defensive runs remain available. In the finale, the first human Hell player controls the Oni King, or the first two human Hell players become Crimson/Jade (CPU fills a missing boss). Human bosses use three skills on the usual buttons; CPU bosses retain four. Player numbers, controls, items and stats stay with their selected faction across stages. Factions stay fixed during retry setup; weapons, skills and controls can still be edited.
 
 - **混戰 Free-for-all**: last fighter standing wins.
 - **團隊戰 Team Battle**: each player picks 紅隊 / 藍隊. No friendly fire. Last team standing wins.
@@ -242,3 +242,11 @@ The lobby's control selector lists only what is actually connected (keyboards, C
 - `src/settings.ts`: saved lobby setup (mode, slots, loadouts) and validation
 - `src/ui.ts`: UI kit (theme, frames, buttons, modals, arrow-key focus navigation)
 - `src/scenes/`: Title, Mode, Lobby (+ loadout window) and Battle scenes
+
+## Code structure
+
+Internal TypeScript imports use `@/`, which resolves to `src/` in TypeScript, Vite and the Node test loader.
+Battle systems are grouped under `src/battle/`; `BattleScene.ts` owns the Phaser lifecycle and wires them together.
+See [the architecture guide](docs/architecture.md) for module ownership, state flow and how to add stages.
+
+Run `npm test` for gameplay checks and `npm run build` for type checking and the production bundle.

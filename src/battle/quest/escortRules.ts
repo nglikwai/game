@@ -1,4 +1,4 @@
-import { QUEST } from './config';
+import { QUEST } from '@/config';
 
 export interface SpiritLantern {
   x: number;

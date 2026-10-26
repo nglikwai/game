@@ -1,6 +1,6 @@
-import { QUEST } from '../config';
-import { paintVignette, type GameMap } from './common';
-import { paintRim, paintRune, paintSlab, paintTiles } from './newMapArt';
+import { QUEST } from '@/config';
+import { paintVignette, type GameMap } from '@/maps/common';
+import { paintRim, paintRune, paintSlab, paintTiles } from '@/maps/newMapArt';
 
 export const LANTERN: GameMap = {
   id: 'lantern', name: 'Spirit Lantern Road', zh: '引魂燈道',

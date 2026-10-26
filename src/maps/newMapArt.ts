@@ -1,5 +1,5 @@
-import { HEIGHT, HUD_HEIGHT, WIDTH } from '../config';
-import { ARENA, WALL, blob, paintShadow, stoneBlock, type Ctx, type Obstacle, type TerrainZone } from './common';
+import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
+import { ARENA, WALL, blob, paintShadow, stoneBlock, type Ctx, type Obstacle, type TerrainZone } from '@/maps/common';
 
 /** Shared materials; each arena supplies its own layout and landmarks. */
 export function paintTiles(ctx: Ctx, rand: () => number, base: string, grout: string, tile = 48) {

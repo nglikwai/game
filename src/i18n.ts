@@ -1,10 +1,10 @@
-import type { GameMode, GroveIllusion, GroveRole } from './config';
-import type { Role } from './roles';
-import type { GameMap } from './maps';
-import type { ControlId, KeySetId } from './controls';
-import type { Item } from './items';
-import type { Skill, SkillCategory } from './skills';
-import type { Weapon } from './weapons';
+import type { GameMode, GroveIllusion, GroveRole } from '@/config';
+import type { Role } from '@/roles';
+import type { GameMap } from '@/maps';
+import type { ControlId, KeySetId } from '@/controls';
+import type { Item } from '@/items';
+import type { Skill, SkillCategory } from '@/skills';
+import type { Weapon } from '@/weapons';
 
 export type Lang = 'zh' | 'en';
 

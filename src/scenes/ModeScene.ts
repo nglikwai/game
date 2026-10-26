@@ -1,9 +1,9 @@
 import * as Phaser from 'phaser';
-import { GAME_MODES, HEIGHT, TEAM_COLORS, WIDTH, type GameMode } from '../config';
-import { T } from '../i18n';
-import { getSettings, saveSettings } from '../settings';
-import { C, FocusNav, Petals, UIScene, addBackdrop, addButton, addMenuHeader, toHex, txt } from '../ui';
-import { drawRosterFrame } from '../lobbyArt';
+import { GAME_MODES, HEIGHT, TEAM_COLORS, WIDTH, type GameMode } from '@/config';
+import { T } from '@/i18n';
+import { getSettings, saveSettings } from '@/settings';
+import { C, FocusNav, Petals, UIScene, addBackdrop, addButton, addMenuHeader, toHex, txt } from '@/ui';
+import { drawRosterFrame } from '@/lobbyArt';
 
 const CARD_GAP = 24;
 const CARD_W = Math.floor((WIDTH - 80 - (GAME_MODES.length - 1) * CARD_GAP) / GAME_MODES.length);

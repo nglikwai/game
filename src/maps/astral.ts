@@ -1,5 +1,5 @@
-import { ARENA, ARENA_MID_Y as MID, cornerPile, paintVignette, type GameMap, type Obstacle } from './common';
-import { paintRim, paintRune, paintSlab, paintTiles } from './newMapArt';
+import { ARENA, ARENA_MID_Y as MID, cornerPile, paintVignette, type GameMap, type Obstacle } from '@/maps/common';
+import { paintRim, paintRune, paintSlab, paintTiles } from '@/maps/newMapArt';
 
 const CRYSTALS: Obstacle[] = [480, 800].flatMap((x) => [
   { kind: 'crystal' as const, x, y: MID - 105, w: 36, h: 58 },

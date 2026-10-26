@@ -1,6 +1,6 @@
-import { connectedPads, isJoyConPair, padKind, readPadHalf, type PadSide, type PadState } from './gamepads';
-import { hidPads, hidState, isProPad, type DirectPad, type HidJoyCon } from './joyhid';
-import { isSplit, readController } from './padconfig';
+import { connectedPads, isJoyConPair, padKind, readPadHalf, type PadSide, type PadState } from '@/gamepads';
+import { hidPads, hidState, isProPad, type DirectPad, type HidJoyCon } from '@/joyhid';
+import { isSplit, readController } from '@/padconfig';
 
 export type MenuPadKey = string | DirectPad;
 

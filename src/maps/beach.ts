@@ -1,9 +1,9 @@
-import { HEIGHT, HUD_HEIGHT, WIDTH } from '../config';
+import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, paintShadow, paintVignette,
   type ChestSpot, type Ctx, type GameMap, type Obstacle, type TerrainZone,
-} from './common';
-import { paintPalm } from './desert';
+} from '@/maps/common';
+import { paintPalm } from '@/maps/desert';
 
 /**
  * 沉船海灘 Shipwreck Beach: the sea laps along the top and bottom (the surf slows you),

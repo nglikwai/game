@@ -1,14 +1,14 @@
 import * as Phaser from 'phaser';
-import { HEIGHT, WIDTH } from '../config';
-import { T, getLang } from '../i18n';
-import { MAX_PAD_SLOTS } from '../controls';
-import { configurable, connectJoyCons, hidKeys, hidPad, hidPads, hidState, hidSupported, isProPad, joyLabel, lastError, setHidMap, type HidMap, type JoyButtons } from '../joyhid';
-import { padKind, padName, type PadSide } from '../gamepads';
+import { HEIGHT, WIDTH } from '@/config';
+import { T, getLang } from '@/i18n';
+import { MAX_PAD_SLOTS } from '@/controls';
+import { configurable, connectJoyCons, hidKeys, hidPad, hidPads, hidState, hidSupported, isProPad, joyLabel, lastError, setHidMap, type HidMap, type JoyButtons } from '@/joyhid';
+import { padKind, padName, type PadSide } from '@/gamepads';
 import {
   PAD_GRIPS, PAD_MODES, getPadGrip, getPadMode, isSplit, readController, resetPadMaps, setPadGrip, setPadMap, setPadMode, type PadMap,
-} from '../padconfig';
-import { C, FocusNav, Petals, UIScene, addBackdrop, addButton, addMenuHeader, addSelector, drawFrame, toast, txt, type Modal } from '../ui';
-import { drawControllerIcon } from '../lobbyArt';
+} from '@/padconfig';
+import { C, FocusNav, Petals, UIScene, addBackdrop, addButton, addMenuHeader, addSelector, drawFrame, toast, txt, type Modal } from '@/ui';
+import { drawControllerIcon } from '@/lobbyArt';
 
 /** Rows shown at once; more controllers than that go on further pages. */
 const ROWS = 4;

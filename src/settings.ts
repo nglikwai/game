@@ -1,10 +1,10 @@
-import { isQuestMode, GAME_MODES, MAX_HUMANS, MAX_PLAYERS, QUEST, type GameMode, type QuestRule, type QuestSide } from './config';
-import { KEY_SETS, isKeySet, keyLabel, parsePad, type Binds, type ControlId } from './controls';
-import { DIFFICULTIES, type Difficulty } from './config';
-import { T } from './i18n';
-import { MAPS, type MapId } from './maps';
-import type { RoleId } from './roles';
-import { SKILLS, SKILL_SLOTS } from './skills';
+import { isQuestMode, GAME_MODES, MAX_HUMANS, MAX_PLAYERS, QUEST, type GameMode, type QuestRule, type QuestSide } from '@/config';
+import { KEY_SETS, isKeySet, keyLabel, parsePad, type Binds, type ControlId } from '@/controls';
+import { DIFFICULTIES, type Difficulty } from '@/config';
+import { T } from '@/i18n';
+import { MAPS, type MapId } from '@/maps';
+import type { RoleId } from '@/roles';
+import { SKILLS, SKILL_SLOTS } from '@/skills';
 
 /** One player slot's setup, as chosen in the lobby. */
 export interface SlotConfig {

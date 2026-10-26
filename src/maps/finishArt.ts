@@ -1,5 +1,5 @@
-import { HEIGHT, HUD_HEIGHT, QUEST, WIDTH } from '../config';
-import { ARENA, mulberry32, type Ctx, type GameMap, type MapId, type Obstacle } from './common';
+import { HEIGHT, HUD_HEIGHT, QUEST, WIDTH } from '@/config';
+import { ARENA, mulberry32, type Ctx, type GameMap, type MapId, type Obstacle } from '@/maps/common';
 
 type Material = 'stone' | 'grass' | 'snow' | 'sand' | 'timber' | 'weave' | 'ash' | 'stars';
 type Motif = 'temple' | 'garden' | 'wave' | 'frost' | 'forge' | 'spirit';

@@ -221,7 +221,7 @@ test('the summon tree marks a player only while it is on duty, and all three tre
 });
 
 test('the summon tree covers a wider circle and lands more often than the prison tree', () => {
-  const { TREE_SUMMONS, groveSummonHitChance } = load('src/questTree.ts');
+  const { TREE_SUMMONS, groveSummonHitChance } = load('src/battle/quest/treeRules.ts');
   assert.ok(QUEST.grove.radius > QUEST.rescue.tree.radius);
   assert.equal(QUEST.grove.summonInterval, 2);
   for (const spell of TREE_SUMMONS) {

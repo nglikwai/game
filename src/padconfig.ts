@@ -1,4 +1,4 @@
-import { isJoyConPair, readPad, readPadHalf, sidewaysMove, type PadSide, type PadState } from './gamepads';
+import { isJoyConPair, readPad, readPadHalf, sidewaysMove, type PadSide, type PadState } from '@/gamepads';
 
 /**
  * Per-controller settings from the Controller Setup page, remembered by the controller's

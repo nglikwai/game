@@ -1,4 +1,4 @@
-import { HEIGHT, HUD_HEIGHT, WIDTH, type GameMode } from '../config';
+import { HEIGHT, HUD_HEIGHT, WIDTH, type GameMode } from '@/config';
 
 /**
  * Shared map pieces: the playfield rectangle, map/obstacle types, spawn points and

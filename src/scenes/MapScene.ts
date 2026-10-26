@@ -1,11 +1,11 @@
 import * as Phaser from 'phaser';
-import { HEIGHT, WIDTH } from '../config';
-import { T } from '../i18n';
-import { MAPS, addArenaTexture } from '../maps';
-import { getSettings, saveSettings } from '../settings';
-import { sfx } from '../sfx';
-import { C, FocusNav, Petals, UIScene, addBackdrop, addButton, addMenuHeader, txt } from '../ui';
-import { drawRosterFrame } from '../lobbyArt';
+import { HEIGHT, WIDTH } from '@/config';
+import { T } from '@/i18n';
+import { MAPS, addArenaTexture } from '@/maps';
+import { getSettings, saveSettings } from '@/settings';
+import { sfx } from '@/sfx';
+import { C, FocusNav, Petals, UIScene, addBackdrop, addButton, addMenuHeader, txt } from '@/ui';
+import { drawRosterFrame } from '@/lobbyArt';
 
 // Six maps per page (3 × 2); ◀ ▶ buttons (or the mouse wheel) flip pages.
 const COLS = 3;

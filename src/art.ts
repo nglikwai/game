@@ -1,6 +1,6 @@
 import * as Phaser from 'phaser';
-import { RES } from './config';
-import type { WeaponId } from './weapons';
+import { RES } from '@/config';
+import type { WeaponId } from '@/weapons';
 
 /**
  * Ninja-style character and weapon art, all drawn in code.

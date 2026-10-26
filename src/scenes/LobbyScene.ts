@@ -1,23 +1,23 @@
 import * as Phaser from 'phaser';
-import { connectedPads, halfLabels, halfName, padKind, padLabels, padName } from '../gamepads';
-import { isSplit, resolvePad } from '../padconfig';
-import { directLabels, hidPad, hidPads, isProPad } from '../joyhid';
-import { isQuestMode, isStoredQuestRoute, prepareQuest, questStageNumber, rollQuestRoute, DIFFICULTIES, HEIGHT, MAX_PLAYERS, PLAYER_COLORS, QUEST, QUEST_BOSSES, QUEST_FIGHTS, QUEST_RULES, TEAM_COLORS, WEAPON_AREA, WIDTH } from '../config';
-import { KEY_SETS, MAX_PAD_SLOTS, isKeySet, keyLabel, parsePad, type ControlId } from '../controls';
-import { applyQuestRule, questFactions, questRuleOf, questSideOf } from '../questHell';
-import { T } from '../i18n';
-import { getSettings, keysOf, randomizeTeams, saveSettings, setControl, toggleSkill, usesTeams, validate, type SlotConfig } from '../settings';
-import { sfx } from '../sfx';
-import { SKILLS, SKILL_CATEGORIES, SKILL_SLOTS, skillById, skillCooldownFor, type Skill } from '../skills';
+import { connectedPads, halfLabels, halfName, padKind, padLabels, padName } from '@/gamepads';
+import { isSplit, resolvePad } from '@/padconfig';
+import { directLabels, hidPad, hidPads, isProPad } from '@/joyhid';
+import { isQuestMode, isStoredQuestRoute, prepareQuest, questStageNumber, rollQuestRoute, DIFFICULTIES, HEIGHT, MAX_PLAYERS, PLAYER_COLORS, QUEST, QUEST_BOSSES, QUEST_FIGHTS, QUEST_RULES, TEAM_COLORS, WEAPON_AREA, WIDTH } from '@/config';
+import { KEY_SETS, MAX_PAD_SLOTS, isKeySet, keyLabel, parsePad, type ControlId } from '@/controls';
+import { applyQuestRule, questFactions, questRuleOf, questSideOf } from '@/battle/quest/factions';
+import { T } from '@/i18n';
+import { getSettings, keysOf, randomizeTeams, saveSettings, setControl, toggleSkill, usesTeams, validate, type SlotConfig } from '@/settings';
+import { sfx } from '@/sfx';
+import { SKILLS, SKILL_CATEGORIES, SKILL_SLOTS, skillById, skillCooldownFor, type Skill } from '@/skills';
 import {
   C, FocusNav, Petals, UIScene, addBackdrop, addButton, addSelector, drawFrame, drawSkillIcon, toHex, toast, txt, type Modal,
-} from '../ui';
-import { drawWeaponIcon } from '../art';
-import { drawLobbyCrest, drawLobbyDie, drawLobbyPortrait, drawRosterFrame } from '../lobbyArt';
-import { addArenaTexture, getMap } from '../maps';
-import { ROLES, roleById } from '../roles';
-import { WEAPONS, drawShape, shapeArea, type Weapon } from '../weapons';
-import type { QuestState } from './BattleScene';
+} from '@/ui';
+import { drawWeaponIcon } from '@/art';
+import { drawLobbyCrest, drawLobbyDie, drawLobbyPortrait, drawRosterFrame } from '@/lobbyArt';
+import { addArenaTexture, getMap } from '@/maps';
+import { ROLES, roleById } from '@/roles';
+import { WEAPONS, drawShape, shapeArea, type Weapon } from '@/weapons';
+import type { QuestState } from '@/battle/types';
 
 export interface LobbySceneData {
   /** The failed stage's starting checkpoint, preserved while editing the party. */

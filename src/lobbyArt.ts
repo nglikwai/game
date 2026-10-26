@@ -1,5 +1,5 @@
 import type * as Phaser from 'phaser';
-import { HEIGHT, WIDTH } from './config';
+import { HEIGHT, WIDTH } from '@/config';
 
 type Graphics = Phaser.GameObjects.Graphics;
 

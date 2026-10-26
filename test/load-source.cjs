@@ -27,7 +27,7 @@ module.exports = function sourceLoader({ navigator = {}, music = {}, sfx = {} } 
   const noop = () => {};
   function load(filename) {
     if (filename === 'phaser') return phaser;
-    const absolute = path.resolve(__dirname, '..', filename);
+    const absolute = path.resolve(__dirname, '..', filename.startsWith('@/') ? `src/${filename.slice(2)}` : filename);
     if (cache.has(absolute)) return cache.get(absolute).exports;
     const module = { exports: {} };
     cache.set(absolute, module);
@@ -39,7 +39,9 @@ module.exports = function sourceLoader({ navigator = {}, music = {}, sfx = {} } 
       if (id === 'phaser') return phaser;
       if (/\/sfx$/.test(id)) return { sfx: new Proxy(sfx, { get: (o, k) => o[k] ?? noop }) };
       if (/\/music$/.test(id)) return { playMusic: noop, stopMusic: noop, ...music };
-      const target = path.resolve(path.dirname(absolute), id);
+      const target = id.startsWith('@/')
+        ? path.resolve(__dirname, '../src', id.slice(2))
+        : path.resolve(path.dirname(absolute), id);
       return load(fs.existsSync(`${target}.ts`) ? `${target}.ts` : `${target}/index.ts`);
     };
     vm.runInContext(`(function(require, module, exports) { ${source}\n})`, context, { filename: absolute })(requireSource, module, module.exports);

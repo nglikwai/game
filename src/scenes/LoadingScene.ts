@@ -1,13 +1,13 @@
 import * as Phaser from 'phaser';
-import { isQuestMode, prepareQuest, questStageNumber, QUEST, BATTLE_LOADING_HOLD_MS, BATTLE_LOADING_MS, HEIGHT, WIDTH } from '../config';
-import { questFactions } from '../questHell';
-import { T } from '../i18n';
-import { getMap } from '../maps';
-import { drawLobbyBackdrop, drawLobbyCrest } from '../lobbyArt';
-import { C, setupCamera, txt } from '../ui';
-import { stopMusic } from '../music';
-import { sfx } from '../sfx';
-import type { BattleStartData } from './BattleScene';
+import { isQuestMode, prepareQuest, questStageNumber, QUEST, BATTLE_LOADING_HOLD_MS, BATTLE_LOADING_MS, HEIGHT, WIDTH } from '@/config';
+import { questFactions } from '@/battle/quest/factions';
+import { T } from '@/i18n';
+import { getMap } from '@/maps';
+import { drawLobbyBackdrop, drawLobbyCrest } from '@/lobbyArt';
+import { C, setupCamera, txt } from '@/ui';
+import { stopMusic } from '@/music';
+import { sfx } from '@/sfx';
+import type { BattleStartData } from '@/battle/types';
 
 /** An input-free transition into a battle or the next Quest stage. */
 export class LoadingScene extends Phaser.Scene {

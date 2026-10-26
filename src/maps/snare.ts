@@ -1,6 +1,6 @@
-import { QUEST } from '../config';
-import { ARENA_MID_Y as MID, cornerPile, paintVignette, type GameMap } from './common';
-import { paintRim, paintRune, paintSlab, paintTiles } from './newMapArt';
+import { QUEST } from '@/config';
+import { ARENA_MID_Y as MID, cornerPile, paintVignette, type GameMap } from '@/maps/common';
+import { paintRim, paintRune, paintSlab, paintTiles } from '@/maps/newMapArt';
 
 const [LEFT, RIGHT] = QUEST.snare.spots;
 

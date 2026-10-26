@@ -7,7 +7,7 @@ const { WEAPONS } = load('src/weapons.ts');
 const { roleById } = load('src/roles.ts');
 const { QUEST, QUEST_BOSSES, MAP_SCALE, HUD_HEIGHT, WIDTH, HEIGHT } = load('src/config.ts');
 const { getMap } = load('src/maps/index.ts');
-const { hellBossSlots } = load('src/questHell.ts');
+const { hellBossSlots } = load('src/battle/quest/factions.ts');
 
 function fighter(index, team, x, y) {
   const body = {

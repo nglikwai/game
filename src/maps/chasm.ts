@@ -1,9 +1,9 @@
-import { HEIGHT, HUD_HEIGHT, WIDTH } from '../config';
+import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, paintShadow, paintVignette,
   type ChestSpot, type Ctx, type GameMap, type Obstacle,
-} from './common';
-import { crossing } from './hell';
+} from '@/maps/common';
+import { crossing } from '@/maps/hell';
 
 /**
  * 斷崖吊橋 Chasm Bridges: two deep chasms split the highlands into three strips,

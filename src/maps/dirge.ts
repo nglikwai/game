@@ -1,6 +1,6 @@
-import { HEIGHT, HUD_HEIGHT, QUEST, WIDTH } from '../config';
-import { ARENA_MID_Y as MID, cornerPile, paintVignette, type GameMap } from './common';
-import { paintRim, paintSlab, paintTiles } from './newMapArt';
+import { HEIGHT, HUD_HEIGHT, QUEST, WIDTH } from '@/config';
+import { ARENA_MID_Y as MID, cornerPile, paintVignette, type GameMap } from '@/maps/common';
+import { paintRim, paintSlab, paintTiles } from '@/maps/newMapArt';
 
 const BELL = QUEST.dirge.bell;
 

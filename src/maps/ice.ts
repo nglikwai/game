@@ -1,9 +1,9 @@
-import { HEIGHT, HUD_HEIGHT, WIDTH } from '../config';
+import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, mirrored,
   type ChestSpot, type Ctx, type GameMap, type Obstacle, type TerrainZone,
-} from './common';
-import { paintPine, paintSnowGround } from './snow';
+} from '@/maps/common';
+import { paintPine, paintSnowGround } from '@/maps/snow';
 
 /**
  * 冰湖 Frozen Lake: a slippery frozen lake fills the middle (you slide and can't stop

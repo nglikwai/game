@@ -1,4 +1,4 @@
-import type { MatchStats } from './matchStats';
+import type { MatchStats } from '@/matchStats';
 
 interface AwardPlayer {
   index: number;

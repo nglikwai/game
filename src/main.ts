@@ -1,14 +1,14 @@
 import * as Phaser from 'phaser';
-import { musicState } from './music';
-import { initJoyConHid } from './joyhid';
-import { HEIGHT, RES, WIDTH } from './config';
-import { BattleScene } from './scenes/BattleScene';
-import { LobbyScene } from './scenes/LobbyScene';
-import { LoadingScene } from './scenes/LoadingScene';
-import { MapScene } from './scenes/MapScene';
-import { PadScene } from './scenes/PadScene';
-import { ModeScene } from './scenes/ModeScene';
-import { TitleScene } from './scenes/TitleScene';
+import { musicState } from '@/music';
+import { initJoyConHid } from '@/joyhid';
+import { HEIGHT, RES, WIDTH } from '@/config';
+import { BattleScene } from '@/scenes/BattleScene';
+import { LobbyScene } from '@/scenes/LobbyScene';
+import { LoadingScene } from '@/scenes/LoadingScene';
+import { MapScene } from '@/scenes/MapScene';
+import { PadScene } from '@/scenes/PadScene';
+import { ModeScene } from '@/scenes/ModeScene';
+import { TitleScene } from '@/scenes/TitleScene';
 
 const game = new Phaser.Game({
   type: Phaser.WEBGL,

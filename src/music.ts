@@ -1,4 +1,4 @@
-import { audioOut } from './sfx';
+import { audioOut } from '@/sfx';
 
 /**
  * Procedural background music (Web Audio, no files): a calm koto-and-flute piece

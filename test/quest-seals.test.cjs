@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
-const { chargeSeal } = load('src/questSeals.ts');
+const { chargeSeal } = load('src/battle/quest/sealRules.ts');
 const { BattleScene } = load('src/scenes/BattleScene.ts');
 const { AIController } = load('src/controls.ts');
 const { Fighter } = load('src/Fighter.ts');

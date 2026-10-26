@@ -1,4 +1,4 @@
-import type { Role } from './roles';
+import type { Role } from '@/roles';
 
 /**
  * One shared skill pool. Each fighter equips up to 3 different skills, in any

@@ -1,13 +1,13 @@
 import * as Phaser from 'phaser';
-import { QUEST, PARALYZED_DAMAGE_TAKEN, BODY_RADIUS, ICE_GRIP, MOVE_SPEED, SPRING, SAND_SPEED, SHALLOWS_SPEED, BOOST_SPEED, POISON, STEALTH_SPEED, SOUL_CAST_TIME, SOUL_LEVELS, SOUL_PER_LEVEL, SOUL_REAPER, TOWER_AURA_DAMAGE_TAKEN, TOWER_AURA_PE_REGEN, MUD_SPEED, PE_REGEN_DELAY, PE_REGEN_MOVING, PE_REGEN_PER_SEC, PE_REGEN_STILL } from './config';
-import type { Controller, Intent } from './controls';
-import { sfx } from './sfx';
-import { POCKET_SIZE, type Item, type ItemEffect } from './items';
-import type { Role } from './roles';
-import { isSummon, skillCooldownFor, type Skill, type SkillEffect, type SummonKind } from './skills';
-import type { Weapon } from './weapons';
-import type { TerrainKind } from './maps/common';
-import { createMatchStats } from './matchStats';
+import { QUEST, PARALYZED_DAMAGE_TAKEN, BODY_RADIUS, ICE_GRIP, MOVE_SPEED, SPRING, SAND_SPEED, SHALLOWS_SPEED, BOOST_SPEED, POISON, STEALTH_SPEED, SOUL_CAST_TIME, SOUL_LEVELS, SOUL_PER_LEVEL, SOUL_REAPER, TOWER_AURA_DAMAGE_TAKEN, TOWER_AURA_PE_REGEN, MUD_SPEED, PE_REGEN_DELAY, PE_REGEN_MOVING, PE_REGEN_PER_SEC, PE_REGEN_STILL } from '@/config';
+import type { Controller, Intent } from '@/controls';
+import { sfx } from '@/sfx';
+import { POCKET_SIZE, type Item, type ItemEffect } from '@/items';
+import type { Role } from '@/roles';
+import { isSummon, skillCooldownFor, type Skill, type SkillEffect, type SummonKind } from '@/skills';
+import type { Weapon } from '@/weapons';
+import type { TerrainKind } from '@/maps/common';
+import { createMatchStats } from '@/matchStats';
 
 export type FighterState = 'idle' | 'windup' | 'active' | 'recovery' | 'stun' | 'channel' | 'dash' | 'paralyzed' | 'casting' | 'charging' | 'dead';
 

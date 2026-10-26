@@ -1,7 +1,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
-const { BattleScene, nightBossRole, bossRole } = load('src/scenes/BattleScene.ts');
+const { BattleScene } = load('src/scenes/BattleScene.ts');
+const { nightBossRole, bossRole } = load('@/battle/quest/roster.ts');
 const { Fighter } = load('src/Fighter.ts');
 const { WEAPONS } = load('src/weapons.ts');
 const { roleById } = load('src/roles.ts');

@@ -1,9 +1,9 @@
-import { HEIGHT, HUD_HEIGHT, WIDTH } from '../config';
+import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, paintShadow, paintVignette,
   type ChestSpot, type Ctx, type GameMap, type Obstacle,
-} from './common';
-import { paintLavaPool } from './hell';
+} from '@/maps/common';
+import { paintLavaPool } from '@/maps/hell';
 
 /**
  * 火山口 Volcano Crater: a lava lake in the middle and fire vents all around it.
