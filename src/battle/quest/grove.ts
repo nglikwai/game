@@ -1,10 +1,11 @@
+import { layoutPoint } from '@/maps/layout';
 import * as Phaser from 'phaser';
 import { RESPAWN_TOWER_COST, TOWER_RESPAWN_HP, TOWER_RESPAWN_SOUL_KEEP, SOUL_MISS_PARALYZE, QUEST, HEIGHT, HUD_HEIGHT, RES, WIDTH, type GroveIllusion, type GroveRole } from '@/config';
-import { skillById } from '@/skills';
-import { T } from '@/i18n';
-import { sfx } from '@/sfx';
+import { skillById } from '@/gameplay/skills';
+import { T } from '@/localization';
+import { sfx } from '@/audio/sfx';
 import { groveSummonHitChance, pickTreeSummon } from '@/battle/quest/treeRules';
-import { REAPER_SWING } from '@/fx';
+import { REAPER_SWING } from '@/rendering/effects';
 import { FONT, toHex } from '@/ui';
 import { type Tower, type QuestTreeCast } from '@/battle/types';
 import { S, toWorld } from '@/battle/coordinates';
@@ -13,6 +14,7 @@ import type { BattleScene } from '@/scenes/BattleScene';
 
 /** The state and operations this system needs from the scene. No runtime scene dependency. */
 type QuestGroveContext = Phaser.Scene & Pick<BattleScene,
+  'map' |
   'add' | 'applyGroveHit' | 'countdown' | 'damageTower' | 'dealDamage'
   | 'fighters' | 'freeSpot' | 'fx' | 'g' | 'gGlow'
   | 'gOver' | 'groveAnnounced' | 'groveCast' | 'groveIllusion' | 'groveLabels'
@@ -36,7 +38,7 @@ export function placeGroveTrees(this: QuestGroveContext, partySize: number): voi
   const baseHp = QUEST.grove.hpBase + QUEST.grove.hpPerPlayer * partySize;
   QUEST.grove.spots.forEach((spot, i) => {
     const hp = baseHp * (roles[i] === 'summon' ? QUEST.grove.summonHp : 1);
-    const p = toWorld(spot);
+    const p = toWorld(layoutPoint(this.map, spot));
     const w = 88 * S, h = 100 * S;
     const body = this.physics.add.staticBody(p.x - w / 2, p.y - h / 2, w, h);
     const collider = this.physics.add.collider(this.fighters.map((f) => f.body), body);

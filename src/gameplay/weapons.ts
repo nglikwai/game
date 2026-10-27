@@ -1,0 +1,381 @@
+import {
+  BODY_RADIUS, DAMAGE_PER_SEC, HITSTUN_PER_CYCLE, KNOCKBACK_PER_SEC,
+  PE_COST_PER_SEC, WEAPON_AREA,
+} from '@/config';
+
+/** Hit shapes, all relative to the attacker's centre and facing angle. */
+export type Shape =
+  | { kind: 'sector'; radius: number; angle: number }
+  | { kind: 'rect'; offset: number; length: number; width: number }
+  | { kind: 'circle'; offset: number; radius: number }
+  | { kind: 'ring'; inner: number; outer: number }
+  /** A curved band: the part of a sector between two radii. */
+  | { kind: 'arc'; inner: number; outer: number; angle: number }
+  /** A plus sign centred on the fighter: arms of length `arm` (from the centre) and width `width`. */
+  | { kind: 'cross'; arm: number; width: number }
+  /** A bar straight through the fighter: `length` out in front and the same behind. */
+  | { kind: 'twin'; length: number; width: number }
+  /** `count` thin rays fanning out `spread` apart, from `offset` out to `offset + length`. */
+  | { kind: 'rays'; offset: number; length: number; width: number; spread: number; count: number }
+  /** Two sectors of `angle` radians, one straight out to each side: nothing in front or behind. */
+  | { kind: 'wings'; radius: number; angle: number }
+  /**
+   * An S-shaped band `width` wide whose centre line runs from `offset` to `offset + length` in front, swaying
+   * `amplitude` to each side over `waves` full waves. The bends leave pockets it doesn't reach.
+   */
+  | { kind: 'wave'; offset: number; length: number; amplitude: number; waves: number; width: number };
+
+export type WeaponId = 'fan' | 'shuriken' | 'hammer' | 'daggers' | 'flail' | 'kusarigama' | 'bomb' | 'ninjato' | 'talisman' | 'staff' | 'kunai' | 'yari' | 'nunchaku' | 'whip' | 'thunder-fan' | 'fire-kunai';
+
+export interface Weapon {
+  id: WeaponId;
+  name: string;
+  zh: string;
+  shape: Shape;
+  /** Seconds per full attack (windup + active + recovery). Lower = faster. */
+  cycle: number;
+  windup: number;
+  active: number;
+  damage: number;
+  knockback: number;
+  /** Speed of a forward lunge during the active frames, if the weapon has one (px/s). */
+  lunge?: number;
+  peCost: number;
+  hitstun: number;
+}
+
+const A = WEAPON_AREA;
+
+// Shapes use WEAPON_AREA as their baseline; individual weapons can have an area bonus.
+const sector = (angleDeg: number, areaScale = 1): Shape => {
+  const angle = (angleDeg * Math.PI) / 180;
+  return { kind: 'sector', angle, radius: Math.sqrt((2 * A * areaScale) / angle) };
+};
+const rect = (width: number, offset: number, areaScale = 1): Shape => ({ kind: 'rect', width, offset, length: A * areaScale / width });
+const circle = (gap: number): Shape => {
+  const radius = Math.sqrt(A / Math.PI);
+  return { kind: 'circle', radius, offset: BODY_RADIUS + gap + radius };
+};
+const ring = (inner: number, areaScale = 1): Shape => ({ kind: 'ring', inner, outer: Math.sqrt(A * areaScale / Math.PI + inner * inner) });
+const cross = (width: number): Shape => ({ kind: 'cross', width, arm: (A + width * width) / (4 * width) });
+const arc = (inner: number, angleDeg: number): Shape => {
+  const angle = (angleDeg * Math.PI) / 180;
+  return { kind: 'arc', inner, angle, outer: Math.sqrt((2 * A) / angle + inner * inner) };
+};
+
+const twin = (width: number): Shape => ({ kind: 'twin', width, length: A / (2 * width) });
+const rays = (width: number, spreadDeg: number, count = 3, areaScale = 1): Shape => {
+  const blade = width * Math.sqrt(areaScale);
+  return {
+    kind: 'rays', width: blade, count, offset: BODY_RADIUS, spread: (spreadDeg * Math.PI) / 180,
+    length: (A * areaScale) / (count * blade),
+  };
+};
+
+const wings = (angleDeg: number): Shape => {
+  const angle = (angleDeg * Math.PI) / 180;
+  return { kind: 'wings', angle, radius: Math.sqrt(A / angle) };
+};
+
+/** Points along a wave's centre line, in its local frame (x forward, y to the side). */
+export function waveLine(s: Extract<Shape, { kind: 'wave' }>, n = 32): { x: number; y: number }[] {
+  return Array.from({ length: n + 1 }, (_, k) => {
+    const u = k / n;
+    return { x: s.offset + s.length * u, y: s.amplitude * Math.sin(u * s.waves * Math.PI * 2) };
+  });
+}
+
+const pathLength = (pts: readonly { x: number; y: number }[]) =>
+  pts.slice(1).reduce((sum, p, k) => sum + Math.hypot(p.x - pts[k]!.x, p.y - pts[k]!.y), 0);
+
+/** A wave whose forward length is chosen so its band covers WEAPON_AREA. */
+const wave = (width: number, amplitude: number, waves: number, offset: number): Shape => {
+  const shape = { kind: 'wave' as const, width, amplitude, waves, offset, length: 0 };
+  let lo = 0;
+  let hi = A / width;
+  for (let k = 0; k < 40; k++) {
+    shape.length = (lo + hi) / 2;
+    if (pathLength(waveLine(shape, 64)) * width < A) lo = shape.length;
+    else hi = shape.length;
+  }
+  return shape;
+};
+
+function make(id: WeaponId, name: string, zh: string, shape: Shape, cycle: number): Weapon {
+  return {
+    id, name, zh, shape, cycle,
+    windup: cycle * 0.45,
+    active: 0.08,
+    damage: DAMAGE_PER_SEC * cycle,
+    knockback: KNOCKBACK_PER_SEC * cycle,
+    peCost: PE_COST_PER_SEC * cycle,
+    hitstun: HITSTUN_PER_CYCLE * cycle,
+  };
+}
+
+export const WEAPONS: Weapon[] = [
+  // Fan-shaped flame sweep.
+  make('fan', 'Fire Fan', '火扇', sector(110), 0.5),
+  // Larger stars cover a wider lane while keeping their existing throwing distance.
+  make('shuriken', 'Shuriken', '手裡劍', rect(40, BODY_RADIUS, 1.25), 0.5),
+  make('hammer', 'Hammer', '大錘', circle(-10), 1.1),
+  make('daggers', 'Daggers', '雙匕', rect(110, 6), 0.32),
+  make('flail', 'Flail', '流星錘', ring(36, 1.15), 0.85),
+  // Sickle on a chain: a curved band at mid range, with a blind spot up close.
+  make('kusarigama', 'Kusarigama', '鎖鐮', arc(60, 130), 0.7),
+  // Thrown bomb: the same circle as the hammer, but landing far away. Slowest, hardest-hitting.
+  make('bomb', 'Fire Bomb', '焙烙玉', circle(104), 1.2),
+  // A lunging slash: you dash forward through a long, narrow strip.
+  { ...make('ninjato', 'Ninjato', '忍刀', rect(56, 10), 0.6), lunge: 850 },
+  // Lightning strikes in a cross around you, all four directions at once.
+  make('talisman', 'Thunder Talisman', '雷符', cross(34), 0.9),
+  // An icy staff swung through both ends at once: hits in front and behind, leaving frost.
+  make('staff', 'Ice Staff', '冰棍', twin(40), 0.65),
+  // Three kunai thrown in a fan: long reach, but with gaps between them.
+  make('kunai', 'Kunai Volley', '苦無', rays(21, 20), 0.75),
+  // A precise polearm thrust: longer and narrower than the shuriken, without a lunge.
+  make('yari', 'Yari Spear', '長槍', rect(28, BODY_RADIUS - 4), 0.9),
+  // Twin sticks whirled out to both sides at once: fast, short, and blind straight ahead and behind.
+  make('nunchaku', 'Nunchaku', '雙節棍', wings(80), 0.45),
+  // A nine-section chain whip lashed in an S across the front, leaving pockets in its bends.
+  make('whip', 'Chain Whip', '九節鞭', wave(36, 50, 1, BODY_RADIUS - 6), 0.8),
+];
+
+/**
+ * The Oni King's fan. Same sweep as the fire fan, enlarged, and it hits harder than its speed would imply.
+ * Kept out of WEAPONS so lobby loadouts and CPU rolls cannot pick it.
+ */
+const thunderFan = make('thunder-fan', 'Thunder Fan', '雷扇', sector(110, 2.25), 0.38);
+export const THUNDER_FAN: Weapon = { ...thunderFan, damage: 15, knockback: 420, hitstun: 0.22 };
+
+/** Enlarged kunai volley. Same three rays as 苦無, with thicker burning blades. */
+const fireKunai = make('fire-kunai', 'Fire Kunai', '火苦無', rays(21, 20, 3, 2.25), 0.5);
+export const FIRE_KUNAI: Weapon = { ...fireKunai, damage: 18, knockback: 480, hitstun: 0.26 };
+
+/** The Oni King draws one of these at the start of the finale. */
+export const ONI_WEAPONS: readonly Weapon[] = [THUNDER_FAN, FIRE_KUNAI];
+
+export function rollOniWeapon(random: () => number = Math.random): Weapon {
+  return ONI_WEAPONS[Math.floor(random() * ONI_WEAPONS.length)]!;
+}
+
+export function shapeArea(s: Shape): number {
+  switch (s.kind) {
+    case 'sector': return 0.5 * s.radius * s.radius * s.angle;
+    case 'rect': return s.length * s.width;
+    case 'circle': return Math.PI * s.radius * s.radius;
+    case 'ring': return Math.PI * (s.outer * s.outer - s.inner * s.inner);
+    case 'arc': return 0.5 * s.angle * (s.outer * s.outer - s.inner * s.inner);
+    case 'cross': return 4 * s.arm * s.width - s.width * s.width;
+    case 'twin': return 2 * s.length * s.width;
+    case 'rays': return s.count * s.length * s.width;
+    case 'wings': return s.radius * s.radius * s.angle;
+    case 'wave': return pathLength(waveLine(s, 64)) * s.width;
+  }
+}
+
+/** Furthest distance from the attacker's centre the shape reaches. */
+export function shapeReach(s: Shape): number {
+  switch (s.kind) {
+    case 'sector': return s.radius;
+    case 'rect': return s.offset + s.length;
+    case 'circle': return s.offset + s.radius;
+    case 'ring': return s.outer;
+    case 'arc': return s.outer;
+    case 'cross': return s.arm;
+    case 'twin': return s.length;
+    case 'rays': return s.offset + s.length;
+    case 'wings': return s.radius;
+    case 'wave': return Math.max(...waveLine(s).map((p) => Math.hypot(p.x, p.y))) + s.width / 2;
+  }
+}
+
+function wrapAngle(a: number): number {
+  return Math.atan2(Math.sin(a), Math.cos(a));
+}
+
+/** Does a circular body (tx, ty, tr) overlap shape s cast from (ox, oy) facing `facing`? */
+export function shapeHits(
+  s: Shape, ox: number, oy: number, facing: number, tx: number, ty: number, tr: number,
+): boolean {
+  const dx = tx - ox;
+  const dy = ty - oy;
+  const d = Math.hypot(dx, dy);
+  const fx = Math.cos(facing);
+  const fy = Math.sin(facing);
+  switch (s.kind) {
+    case 'sector': {
+      if (d > s.radius + tr) return false;
+      if (d <= tr) return true;
+      const diff = Math.abs(wrapAngle(Math.atan2(dy, dx) - facing));
+      return diff <= s.angle / 2 + Math.asin(Math.min(1, tr / d));
+    }
+    case 'rect': {
+      const lx = dx * fx + dy * fy;
+      const ly = -dx * fy + dy * fx;
+      const cx = Math.max(s.offset, Math.min(s.offset + s.length, lx));
+      const cy = Math.max(-s.width / 2, Math.min(s.width / 2, ly));
+      return Math.hypot(lx - cx, ly - cy) <= tr;
+    }
+    case 'circle': {
+      const cx = ox + fx * s.offset;
+      const cy = oy + fy * s.offset;
+      return Math.hypot(tx - cx, ty - cy) <= s.radius + tr;
+    }
+    case 'ring':
+      return d <= s.outer + tr && d >= s.inner - tr;
+    case 'cross': {
+      // Two rectangles through the centre, along and across the facing.
+      const lx = dx * fx + dy * fy;
+      const ly = -dx * fy + dy * fx;
+      const inBar = (a: number, b: number) => Math.hypot(a - Math.max(-s.arm, Math.min(s.arm, a)), b - Math.max(-s.width / 2, Math.min(s.width / 2, b))) <= tr;
+      return inBar(lx, ly) || inBar(ly, lx);
+    }
+    case 'arc': {
+      if (d > s.outer + tr || d < s.inner - tr) return false;
+      const diff = Math.abs(wrapAngle(Math.atan2(dy, dx) - facing));
+      return diff <= s.angle / 2 + Math.asin(Math.min(1, tr / Math.max(d, tr)));
+    }
+    case 'twin': {
+      const lx = dx * fx + dy * fy;
+      const ly = -dx * fy + dy * fx;
+      const cx = Math.max(-s.length, Math.min(s.length, lx));
+      const cy = Math.max(-s.width / 2, Math.min(s.width / 2, ly));
+      return Math.hypot(lx - cx, ly - cy) <= tr;
+    }
+    case 'rays':
+      return rayAngles(s, facing).some((a) =>
+        shapeHits({ kind: 'rect', offset: s.offset, length: s.length, width: s.width }, ox, oy, a, tx, ty, tr));
+    case 'wings':
+      return d <= tr || [-1, 1].some((side) => shapeHits({ kind: 'sector', radius: s.radius, angle: s.angle }, ox, oy, facing + side * Math.PI / 2, tx, ty, tr));
+    case 'wave': {
+      const lx = dx * fx + dy * fy;
+      const ly = -dx * fy + dy * fx;
+      const line = waveLine(s);
+      return line.slice(1).some((b, k) => segmentDistance(lx, ly, line[k]!, b) <= s.width / 2 + tr);
+    }
+  }
+}
+
+/** Distance from (px, py) to the segment a–b. */
+function segmentDistance(px: number, py: number, a: { x: number; y: number }, b: { x: number; y: number }): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / len2));
+  return Math.hypot(px - (a.x + dx * t), py - (a.y + dy * t));
+}
+
+/** How far to turn from the target to strike it: the nunchaku hits to the sides, everything else straight ahead. */
+export function aimTurn(s: Shape): number {
+  return s.kind === 'wings' ? Math.PI / 2 : 0;
+}
+
+/** The facing of each ray in a 'rays' shape. */
+export function rayAngles(s: Extract<Shape, { kind: 'rays' }>, facing: number): number[] {
+  return Array.from({ length: s.count }, (_, k) => facing + (k - (s.count - 1) / 2) * s.spread);
+}
+
+export function drawShape(
+  g: Phaser.GameObjects.Graphics, s: Shape, ox: number, oy: number, facing: number,
+  color: number, alpha: number,
+): void {
+  const fx = Math.cos(facing);
+  const fy = Math.sin(facing);
+  g.fillStyle(color, alpha);
+  switch (s.kind) {
+    case 'sector':
+      g.beginPath();
+      g.slice(ox, oy, s.radius, facing - s.angle / 2, facing + s.angle / 2, false);
+      g.fillPath();
+      break;
+    case 'rect': {
+      const px = -fy * (s.width / 2);
+      const py = fx * (s.width / 2);
+      const nx = ox + fx * s.offset;
+      const ny = oy + fy * s.offset;
+      const far = s.offset + s.length;
+      const ex = ox + fx * far;
+      const ey = oy + fy * far;
+      g.fillPoints([
+        { x: nx + px, y: ny + py }, { x: ex + px, y: ey + py },
+        { x: ex - px, y: ey - py }, { x: nx - px, y: ny - py },
+      ] as Phaser.Math.Vector2[], true);
+      break;
+    }
+    case 'circle':
+      g.fillCircle(ox + fx * s.offset, oy + fy * s.offset, s.radius);
+      break;
+    case 'ring':
+      g.lineStyle(s.outer - s.inner, color, alpha);
+      g.strokeCircle(ox, oy, (s.outer + s.inner) / 2);
+      break;
+    case 'cross':
+      for (const rot of [0, Math.PI / 2]) {
+        const c = Math.cos(facing + rot);
+        const sn = Math.sin(facing + rot);
+        const px = -sn * (s.width / 2);
+        const py = c * (s.width / 2);
+        g.fillPoints([
+          { x: ox - c * s.arm + px, y: oy - sn * s.arm + py }, { x: ox + c * s.arm + px, y: oy + sn * s.arm + py },
+          { x: ox + c * s.arm - px, y: oy + sn * s.arm - py }, { x: ox - c * s.arm - px, y: oy - sn * s.arm - py },
+        ] as Phaser.Math.Vector2[], true);
+      }
+      break;
+    case 'arc':
+      g.lineStyle(s.outer - s.inner, color, alpha);
+      g.beginPath();
+      g.arc(ox, oy, (s.outer + s.inner) / 2, facing - s.angle / 2, facing + s.angle / 2, false);
+      g.strokePath();
+      break;
+    case 'twin': {
+      const px = -fy * (s.width / 2);
+      const py = fx * (s.width / 2);
+      g.fillPoints([
+        { x: ox - fx * s.length + px, y: oy - fy * s.length + py }, { x: ox + fx * s.length + px, y: oy + fy * s.length + py },
+        { x: ox + fx * s.length - px, y: oy + fy * s.length - py }, { x: ox - fx * s.length - px, y: oy - fy * s.length - py },
+      ] as Phaser.Math.Vector2[], true);
+      break;
+    }
+    case 'rays':
+      for (const a of rayAngles(s, facing)) drawShape(g, { kind: 'rect', offset: s.offset, length: s.length, width: s.width }, ox, oy, a, color, alpha);
+      break;
+    case 'wings':
+      for (const side of [-1, 1]) drawShape(g, { kind: 'sector', radius: s.radius, angle: s.angle }, ox, oy, facing + side * Math.PI / 2, color, alpha);
+      break;
+    case 'wave': {
+      // The band: the centre line pushed out half the width to each side.
+      const line = waveLine(s);
+      const edge = (side: number) => line.map((p, k) => {
+        const a = line[Math.max(0, k - 1)]!;
+        const b = line[Math.min(line.length - 1, k + 1)]!;
+        const tl = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+        const lx = p.x - ((b.y - a.y) / tl) * side * s.width / 2;
+        const ly = p.y + ((b.x - a.x) / tl) * side * s.width / 2;
+        return { x: ox + fx * lx - fy * ly, y: oy + fy * lx + fx * ly };
+      });
+      g.fillPoints([...edge(1), ...edge(-1).reverse()] as Phaser.Math.Vector2[], true);
+      break;
+    }
+  }
+}
+
+/**
+ * Does shape s overlap the axis-aligned rectangle (centre cx, cy; size w, h)?
+ * Approximated by testing the rectangle's closest point to the attacker plus
+ * points around its edge, which is plenty for chunky obstacles.
+ */
+export function shapeHitsRect(
+  s: Shape, ox: number, oy: number, facing: number, cx: number, cy: number, w: number, h: number,
+): boolean {
+  const l = cx - w / 2;
+  const t = cy - h / 2;
+  const pts: [number, number][] = [[Math.max(l, Math.min(l + w, ox)), Math.max(t, Math.min(t + h, oy))]];
+  const n = 6;
+  for (let i = 0; i <= n; i++) {
+    const fx = l + (w * i) / n;
+    const fy = t + (h * i) / n;
+    pts.push([fx, t], [fx, t + h], [l, fy], [l + w, fy]);
+  }
+  return pts.some(([px, py]) => shapeHits(s, ox, oy, facing, px, py, 2));
+}

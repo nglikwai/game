@@ -8,10 +8,10 @@ const load = require('./load-source.cjs')({
 const { LoadingScene } = load('src/scenes/LoadingScene.ts');
 const { LobbyScene } = load('src/scenes/LobbyScene.ts');
 const { BattleScene } = load('src/scenes/BattleScene.ts');
-const { QUEST, questStageNumber } = load('src/config.ts');
+const { QUEST, questStageNumber } = load('src/config/index.ts');
 const { getMap } = load('src/maps/index.ts');
-const { getSettings } = load('src/settings.ts');
-const { setLang, T } = load('src/i18n.ts');
+const { getSettings } = load('src/state/gameSettings.ts');
+const { setLang, T } = load('src/localization/index.ts');
 
 function loading(data) {
   const scene = new LoadingScene();

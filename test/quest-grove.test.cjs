@@ -1,11 +1,12 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
+const { layoutPoint } = load('@/maps/layout.ts');
 const { BattleScene } = load('src/scenes/BattleScene.ts');
-const { Fighter } = load('src/Fighter.ts');
-const { WEAPONS } = load('src/weapons.ts');
-const { roleById } = load('src/roles.ts');
-const { QUEST, MAP_SCALE, HUD_HEIGHT, RESPAWN_TOWER_COST, TOWER_RESPAWN_HP, TOWER_RESPAWN_SOUL_KEEP } = load('src/config.ts');
+const { Fighter } = load('src/gameplay/Fighter.ts');
+const { WEAPONS } = load('src/gameplay/weapons.ts');
+const { roleById } = load('src/gameplay/roles.ts');
+const { QUEST, MAP_SCALE, HUD_HEIGHT, RESPAWN_TOWER_COST, TOWER_RESPAWN_HP, TOWER_RESPAWN_SOUL_KEEP } = load('src/config/index.ts');
 const { getMap, mulberry32 } = load('src/maps/index.ts');
 
 function fighter(index, team) {
@@ -91,8 +92,8 @@ test('the grove always starts with four enemies and deals the three jobs onto th
   }
   const S = MAP_SCALE;
   QUEST.grove.spots.forEach((spot, i) => {
-    assert.equal(scene.groveTrees[i].x, spot.x * S);
-    assert.equal(scene.groveTrees[i].y, (spot.y - HUD_HEIGHT) * S);
+    assert.equal(scene.groveTrees[i].x, layoutPoint(scene.map, spot).x * S);
+    assert.equal(scene.groveTrees[i].y, (layoutPoint(scene.map, spot).y - HUD_HEIGHT) * S);
   });
   assert.equal(bodies.length, 6);
 });
@@ -223,7 +224,7 @@ test('the summon tree marks a player only while it is on duty, and all three tre
 test('the summon tree covers a wider circle and lands more often than the prison tree', () => {
   const { TREE_SUMMONS, groveSummonHitChance } = load('src/battle/quest/treeRules.ts');
   assert.ok(QUEST.grove.radius > QUEST.rescue.tree.radius);
-  assert.equal(QUEST.grove.summonInterval, 2);
+  assert.equal(QUEST.grove.summonInterval, 5);
   for (const spell of TREE_SUMMONS) {
     const chance = groveSummonHitChance(spell);
     assert.ok(chance >= spell.hitChance && chance <= 1);

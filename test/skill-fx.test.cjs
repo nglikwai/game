@@ -1,13 +1,13 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
-const { Fx } = load('src/fx.ts');
-const { SKILLS, skillById, isSummon } = load('src/skills.ts');
+const { Fx } = load('src/rendering/effects.ts');
+const { SKILLS, skillById, isSummon } = load('src/gameplay/skills.ts');
 const { BattleScene } = load('src/scenes/BattleScene.ts');
-const { Fighter } = load('src/Fighter.ts');
-const { WEAPONS } = load('src/weapons.ts');
-const { roleById } = load('src/roles.ts');
-const { SUMMON_LIGHT_RADIUS } = load('src/config.ts');
+const { Fighter } = load('src/gameplay/Fighter.ts');
+const { WEAPONS } = load('src/gameplay/weapons.ts');
+const { roleById } = load('src/gameplay/roles.ts');
+const { SUMMON_LIGHT_RADIUS } = load('src/config/index.ts');
 
 function graphics() {
   const calls = [];

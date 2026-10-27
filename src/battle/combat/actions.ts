@@ -1,18 +1,18 @@
 import * as Phaser from 'phaser';
 import { SOUL_FROM_HURT, QUEST } from '@/config';
-import { AIController } from '@/controls';
-import { Fighter } from '@/Fighter';
-import { type ItemEffect } from '@/items';
-import { type SkillEffect } from '@/skills';
-import { shapeHits, shapeHitsRect } from '@/weapons';
-import { T } from '@/i18n';
-import { sfx } from '@/sfx';
+import { AIController } from '@/ai/AIController';
+import { Fighter } from '@/gameplay/Fighter';
+import { type ItemEffect } from '@/gameplay/items';
+import { type SkillEffect } from '@/gameplay/skills';
+import { shapeHits, shapeHitsRect } from '@/gameplay/weapons';
+import { T } from '@/localization';
+import { sfx } from '@/audio/sfx';
 import { S, ARENA } from '@/battle/coordinates';
 import type { BattleScene } from '@/scenes/BattleScene';
 
 /** The state and operations this system needs from the scene. No runtime scene dependency. */
 type CombatActionsContext = Phaser.Scene & Pick<BattleScene,
-  'breakWall' | 'chests' | 'damageLantern' | 'damageTower' | 'dealDamage'
+  'breakWall' | 'chests' | 'damageTower' | 'dealDamage'
   | 'deathTime' | 'explodeKeg' | 'fighters' | 'fx' | 'kegs'
   | 'lantern' | 'nightCandles' | 'obstacleRects' | 'openChest' | 'over'
   | 'popText' | 'projectiles' | 'quest' | 'questTeam' | 'respawnTimers'
@@ -74,13 +74,6 @@ export function onSwingActive(this: CombatActionsContext, f: Fighter): void {
       f.swingHits.add(candle);
       this.snuffCandle(candle);
     }
-  }
-
-  const lantern = this.lantern;
-  if (lantern?.alive && f.team !== lantern.team && !f.swingHits.has(lantern) &&
-    shapeHitsRect(w.shape, f.x, f.y, f.facing, lantern.x, lantern.y, lantern.w, lantern.h)) {
-    f.swingHits.add(lantern);
-    this.damageLantern(w.damage * f.damageMult, f);
   }
 
   // You can only break your own team's princess out.

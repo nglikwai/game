@@ -1,23 +1,29 @@
+import { DISPLAY_ACTIONS, SKILL_ACTIONS, skillAction } from '@/input/actions';
 import * as Phaser from 'phaser';
-import { connectedPads, halfLabels, halfName, padKind, padLabels, padName } from '@/gamepads';
-import { isSplit, resolvePad } from '@/padconfig';
-import { directLabels, hidPad, hidPads, isProPad } from '@/joyhid';
-import { isQuestMode, isStoredQuestRoute, prepareQuest, questStageNumber, rollQuestRoute, DIFFICULTIES, HEIGHT, MAX_PLAYERS, PLAYER_COLORS, QUEST, QUEST_BOSSES, QUEST_FIGHTS, QUEST_RULES, TEAM_COLORS, WEAPON_AREA, WIDTH } from '@/config';
-import { KEY_SETS, MAX_PAD_SLOTS, isKeySet, keyLabel, parsePad, type ControlId } from '@/controls';
+import { connectedPads, halfLabels, halfName, labelsForPad, padKind, padLabels, padName } from '@/input/gamepads';
+import { isSplit, resolvePad } from '@/input/padSettings';
+import { directLabels, hidPad, hidPads, isProPad } from '@/input/nintendoHid';
+import { isQuestMode, isStoredQuestRoute, prepareQuest, questStageNumber, rollQuestRoute, DIFFICULTIES, HEIGHT, MAX_PLAYERS, PLAYER_COLORS, QUEST, QUEST_BOSSES, QUEST_FIGHTS, QUEST_SEMIFINALS, QUEST_RULES, QUEST_TACTICS, TEAM_COLORS, WEAPON_AREA, WIDTH } from '@/config';
+import { KEY_SETS, isKeySet, keyLabel } from '@/input/keyboard';
+import { MAX_PAD_SLOTS, parsePad } from '@/input/controllerIds';
+import { type ControlId } from '@/input/contracts';
 import { applyQuestRule, questFactions, questRuleOf, questSideOf } from '@/battle/quest/factions';
-import { T } from '@/i18n';
-import { getSettings, keysOf, randomizeTeams, saveSettings, setControl, toggleSkill, usesTeams, validate, type SlotConfig } from '@/settings';
-import { sfx } from '@/sfx';
-import { SKILLS, SKILL_CATEGORIES, SKILL_SLOTS, skillById, skillCooldownFor, type Skill } from '@/skills';
+import { T } from '@/localization';
+import { getSettings, assignSkill, keysOf, randomizeTeams, saveSettings, setControl, toggleSkill, usesTeams, validate, type SlotConfig } from '@/state/gameSettings';
+import { sfx } from '@/audio/sfx';
+import { SKILLS, SKILL_CATEGORIES, SKILL_SLOTS, skillById, skillCooldownFor, type Skill } from '@/gameplay/skills';
 import {
   C, FocusNav, Petals, UIScene, addBackdrop, addButton, addSelector, drawFrame, drawSkillIcon, toHex, toast, txt, type Modal,
 } from '@/ui';
-import { drawWeaponIcon } from '@/art';
-import { drawLobbyCrest, drawLobbyDie, drawLobbyPortrait, drawRosterFrame } from '@/lobbyArt';
+import { drawWeaponIcon } from '@/rendering/fighterArt';
+import { drawLobbyCrest, drawLobbyDie, drawLobbyPortrait, drawRosterFrame } from '@/rendering/menuArt';
 import { addArenaTexture, getMap } from '@/maps';
-import { ROLES, roleById } from '@/roles';
-import { WEAPONS, drawShape, shapeArea, type Weapon } from '@/weapons';
+import { ROLES, roleById } from '@/gameplay/roles';
+import { WEAPONS, drawShape, shapeArea, type Weapon } from '@/gameplay/weapons';
 import type { QuestState } from '@/battle/types';
+
+/** Free rule: the stage the run starts on (null = a normal run from the first stage). Kept while the game is open. */
+let freeStage: number | null = null;
 
 export interface LobbySceneData {
   /** The failed stage's starting checkpoint, preserved while editing the party. */
@@ -51,6 +57,13 @@ function drawPhaseIcon(g: Phaser.GameObjects.Graphics, phase: number, x: number,
     g.lineBetween(x - 16, y, x - 8, y);
     g.lineBetween(x, y - 16, x, y - 8);
     g.lineBetween(x + 8, y, x + 16, y);
+  } else if (phase === 2) {
+    // Three heads on three necks.
+    g.lineStyle(4, color, 0.75);
+    for (const dx of [-14, 0, 14]) g.lineBetween(x, y + 16, x + dx, y - 6 - (dx === 0 ? 6 : 0));
+    g.fillStyle(color, 0.95);
+    for (const dx of [-14, 0, 14]) g.fillCircle(x + dx, y - 8 - (dx === 0 ? 6 : 0), 6);
+    g.fillCircle(x, y + 16, 8);
   } else {
     g.fillStyle(color, 0.9).fillCircle(x, y + 4, 12);
     g.fillTriangle(x - 14, y + 2, x - 8, y - 16, x - 2, y + 2);
@@ -91,6 +104,7 @@ export class LobbyScene extends UIScene {
   private petals!: Petals;
   /** Loadout window: which key box (0 = attack, 1–3 = skills, 4–5 = items) is waiting for a key press. */
   private bindingIdx: number | null = null;
+  private loadout: { index: number; modal: Modal } | null = null;
   private retryQuest: QuestState | null = null;
   /** Stage ids for the quest run this lobby is preparing. */
   private questRoute: number[] = [];
@@ -100,6 +114,7 @@ export class LobbyScene extends UIScene {
   }
 
   init(data: LobbySceneData = {}) {
+    this.loadout = null;
     this.retryQuest = data.retryQuest ? structuredClone(data.retryQuest) : null;
     if (this.retryQuest) {
       const settings = getSettings();
@@ -118,6 +133,16 @@ export class LobbyScene extends UIScene {
     } else {
       this.questRoute = [];
     }
+    // Phaser reuses the last scene payload when the next start passes none. Drop it, or returning
+    // home and opening the lobby again would reload this stage's old slots over the saved config.
+    if (this.sys?.settings) this.sys.settings.data = {};
+  }
+
+  /** Player setup is global. Leaving this screen keeps whatever was changed. */
+  private leaveLobby() {
+    saveSettings();
+    if (this.sys?.settings) this.sys.settings.data = {};
+    this.scene.start('Mode');
   }
 
   create() {
@@ -127,7 +152,7 @@ export class LobbyScene extends UIScene {
     this.petals = new Petals(this, { x: 0, y: 0, w: WIDTH, h: HEIGHT }, 12);
     this.layer = this.add.container(0, 0);
     this.nav = new FocusNav(this);
-    this.nav.onBack = () => this.scene.start('Mode');
+    this.nav.onBack = () => this.leaveLobby();
     this.pushNav(this.nav);
     this.build();
     // Plugging in (or waking up) a controller updates the cards straight away.
@@ -212,9 +237,11 @@ export class LobbyScene extends UIScene {
     }
     const mapX = usesTeams(s.mode) || isQuestMode(s.mode) ? 710 : 496;
     const mapW = WIDTH - 30 - mapX;
-    const questMap = this.retryQuest ? getMap(QUEST.maps[this.retryQuest.stage]) : null;
-    const mapLabel = isQuestMode(s.mode) ? questMap ? T().mapName(questMap) : T().questMaps : s.mapId === 'random' ? T().randomShort : T().mapName(getMap(s.mapId));
-    chip('map', mapX, mapW, T().map, mapLabel, isQuestMode(s.mode) ? undefined : () => this.scene.start('Map'));
+    const freePick = this.picksStage();
+    const questMap = this.retryQuest ? getMap(QUEST.maps[this.retryQuest.stage]) : freePick && freeStage !== null ? getMap(QUEST.maps[freeStage]) : null;
+    const mapLabel = isQuestMode(s.mode) ? questMap ? T().mapName(questMap) : freePick ? T().questStageAll : T().questMaps : s.mapId === 'random' ? T().randomShort : T().mapName(getMap(s.mapId));
+    const mapAction = !isQuestMode(s.mode) ? () => this.scene.start('Map') : freePick ? () => this.openStagePicker() : undefined;
+    chip('map', mapX, mapW, freePick ? T().questStagePickLabel : T().map, mapLabel, mapAction);
     const preview = isQuestMode(s.mode) ? questMap : getMap(s.mapId === 'random' ? undefined : s.mapId);
     if (preview) {
       this.layer.add(this.add.image(WIDTH - 105, 114, addArenaTexture(this, preview)).setDisplaySize(98, 42));
@@ -242,7 +269,7 @@ export class LobbyScene extends UIScene {
     this.layer.add(launchLabel);
     this.nav.add({ id: 'fight', x: 1016, y: 645, w: 224, h: 47, onEnter: () => this.startBattle(), radius: 7 });
     addButton(this, this.layer, this.nav, { id: 'pads', x: 323, y: 668, w: 230, h: 36, label: T().padOpen, size: 15, onPress: () => this.scene.start('Pads', { from: 'Lobby', fromData: { ...(this.retryQuest ? { retryQuest: this.retryQuest } : {}), ...(this.questRoute.length ? { questRoute: this.questRoute } : {}) } }) });
-    addButton(this, this.layer, this.nav, { id: 'back', x: 116, y: 668, w: 140, h: 36, label: `‹  ${T().back}`, size: 16, onPress: () => this.scene.start('Mode') });
+    addButton(this, this.layer, this.nav, { id: 'back', x: 116, y: 668, w: 140, h: 36, label: `‹  ${T().back}`, size: 16, onPress: () => this.leaveLobby() });
     const connected = connectedPads().length + hidPads().filter((p) => p.connected).length;
     this.layer.add(txt(this, 482, 658, connected ? T().lobbyControllers(connected) : T().noPads, 12, C.dim, { origin: [0, 0.5] }));
     this.layer.add(txt(this, 482, 681, T().lobbyControllerHint, 11, C.faint, { origin: [0, 0.5] }));
@@ -250,7 +277,7 @@ export class LobbyScene extends UIScene {
     this.nav.done('c0-control');
   }
 
-  /** Three steps. The rolled maps stay hidden until each stage begins. */
+  /** Four steps: one fight, two tactics, a dragon semi-final, the finale. The rolled maps stay hidden until each stage begins. */
   private drawQuestStages() {
     const phases = T().questPhases();
     const gap = 16;
@@ -258,12 +285,13 @@ export class LobbyScene extends UIScene {
     const y = cardY(QUEST.partySlots);
     const w = Math.floor((WIDTH - 60 - (n - 1) * gap) / n);
     const here = this.retryQuest ? this.questRoute.indexOf(this.retryQuest.stage) : -1;
-    const stage = here < 0 ? undefined : this.retryQuest?.stage;
+    const stage = here >= 0 ? this.retryQuest?.stage : this.picksStage() ? freeStage ?? undefined : undefined;
     const current = stage === undefined ? -1
       : (QUEST_FIGHTS as readonly number[]).includes(stage) ? 0
-      : (QUEST_BOSSES as readonly number[]).includes(stage) ? 2
+      : QUEST_SEMIFINALS.includes(stage) ? 2
+      : (QUEST_BOSSES as readonly number[]).includes(stage) ? 3
       : 1;
-    const tones = [0xc45b52, 0xc4a36a, 0xd2b15a];
+    const tones = [0xc45b52, 0xc4a36a, 0xe07a4a, 0xd2b15a];
     phases.forEach((phase, index) => {
       const x = 30 + index * (w + gap);
       const color = tones[index] ?? 0xb69d7b;
@@ -271,7 +299,7 @@ export class LobbyScene extends UIScene {
       const eg = this.add.graphics();
       drawRosterFrame(eg, x, y, w, CARD_H, color, !active && current >= 0);
       drawPhaseIcon(eg, index, x + w / 2, y + 78, color);
-      const dots = [2, 2, 1][index] ?? 1;
+      const dots = [1, 2, 1, 1][index] ?? 1;
       for (let k = 0; k < dots; k++) {
         const cx = x + w / 2 + (k - (dots - 1) / 2) * 16;
         eg.fillStyle(color, 0.85).fillCircle(cx, y + 198, 3.5);
@@ -283,7 +311,7 @@ export class LobbyScene extends UIScene {
       this.layer.add(name);
       const detail = txt(this, x + w / 2, y + 150, phase.detail, 13, C.dim, { wrap: w - 48, align: 'center', origin: [0.5, 0] });
       this.layer.add(detail);
-      if (active) this.layer.add(txt(this, x + w - 16, y + 20, T().questPhaseMark, 12, '#e2c48b', { bold: true, origin: [1, 0.5] }));
+      if (active) this.layer.add(txt(this, x + w - 16, y + 20, this.retryQuest ? T().questPhaseMark : T().questPhaseStart, 12, '#e2c48b', { bold: true, origin: [1, 0.5] }));
     });
   }
 
@@ -401,7 +429,7 @@ export class LobbyScene extends UIScene {
       g.fillStyle(tint, 0.65).fillRoundedRect(bx, y + 152, 78 * Math.min(1, value / 160), 3, 1);
     }
 
-    // Three inset skill badges, rather than loose icons floating on the card.
+    // Equipped skill badges, rather than loose icons floating on the card.
     const step = inner / SKILL_SLOTS;
     for (let k = 0; k < SKILL_SLOTS; k++) {
       const sk = skillById(slot.skills[k]);
@@ -423,9 +451,44 @@ export class LobbyScene extends UIScene {
     const sel = parsePad(slot.control);
     if (sel) {
       if (sel.side) return halfLabels(sel.side)[n];
-      return padLabels(padKind(resolvePad(sel.index)?.id ?? ''))[n];
+      return labelsForPad(resolvePad(sel.index))[n];
     }
     return '';
+  }
+
+  /** Free rule (not a retry): the players may start the run on any stage. */
+  private picksStage() {
+    const s = getSettings();
+    return isQuestMode(s.mode) && s.questRule === 'free' && !this.retryQuest;
+  }
+
+  /** Every stage, grouped by its step; the run starts on the chosen one and carries on from there. */
+  private openStagePicker() {
+    this.openModal({
+      w: 1120,
+      h: 520,
+      title: T().questStagePick,
+      onClose: () => this.build(),
+      build: (m) => {
+        const choose = (stage: number | null) => {
+          freeStage = stage;
+          sfx.menuChange();
+          m.close();
+        };
+        addButton(this, m.content, m.nav, { id: 'stage-all', x: WIDTH / 2, y: m.y + 96, w: 320, h: 44, label: T().questStageAll, size: 17, primary: freeStage === null, onPress: () => choose(null) });
+        const bands = [QUEST_FIGHTS, QUEST_TACTICS, QUEST_SEMIFINALS, QUEST_BOSSES];
+        const phases = T().questPhases();
+        const colW = (m.w - 80) / bands.length;
+        bands.forEach((band, b) => {
+          const cx = m.x + 40 + colW * b + colW / 2;
+          m.content.add(txt(this, cx, m.y + 160, phases[b]?.name ?? '', 18, C.goldHex, { bold: true, origin: 0.5 }));
+          band.forEach((stage, k) => addButton(this, m.content, m.nav, {
+            id: `stage-${stage}`, x: cx, y: m.y + 210 + k * 54, w: colW - 24, h: 44, size: 16,
+            label: T().mapName(getMap(QUEST.maps[stage])), primary: freeStage === stage, onPress: () => choose(stage),
+          }));
+        });
+      },
+    });
   }
 
   private startBattle() {
@@ -449,6 +512,7 @@ export class LobbyScene extends UIScene {
       sfx.start();
       const base = this.retryQuest
         ? structuredClone(this.retryQuest)
+        : this.picksStage() && freeStage !== null ? { stage: freeStage }
         : (isStoredQuestRoute(this.questRoute) ? { stage: this.questRoute[0], route: [...this.questRoute], campaign: 'quest' as const } : undefined);
       this.scene.start('Loading', { slots: structuredClone(s.slots), mode: s.mode, mapId: s.mapId,
         quest: { ...base, ...prepareQuest(base), side, rule },
@@ -464,18 +528,51 @@ export class LobbyScene extends UIScene {
 
   private openLoadout(i: number) {
     this.bindingIdx = null;
-    this.openModal({
+    const modal = this.openModal({
       w: 1220,
       h: 664,
       title: T().loadoutTitle(i + 1),
       titleColor: toHex(PLAYER_COLORS[i]),
       build: (m) => this.buildLoadout(m, i),
       onClose: () => {
+        this.loadout = null;
         this.keyCapture = null;
         saveSettings();
         this.build();
       },
     });
+    this.loadout = { index: i, modal };
+  }
+
+  /** Focus a skill and use the same button that will cast it during battle. */
+  private assignFocusedSkill(slotIndex: number): boolean {
+    if (!this.loadout || this.bindingIdx !== null) return false;
+    const { index, modal } = this.loadout;
+    const focus = modal.nav.current;
+    if (!focus?.startsWith('s-')) return false;
+    const slot = getSettings().slots[index];
+    if (assignSkill(slot, focus.slice(2), slotIndex)) {
+      saveSettings();
+      sfx.menuChange();
+      modal.rebuild();
+    }
+    return true;
+  }
+
+  protected onMenuPadAction(control: string, edges: readonly boolean[]): boolean {
+    if (!this.loadout || getSettings().slots[this.loadout.index].control !== control) return false;
+    const index = SKILL_ACTIONS.findIndex((action) => edges[action]);
+    return index >= 0 && this.assignFocusedSkill(index);
+  }
+
+  protected onMenuKey(event: KeyboardEvent): boolean {
+    if (!this.loadout || this.bindingIdx !== null) return false;
+    const slot = getSettings().slots[this.loadout.index];
+    if (!isKeySet(slot.control)) return false;
+    const index = SKILL_ACTIONS.findIndex((action) => slot.binds[action] === event.keyCode);
+    if (index < 0) return false;
+    if (event.repeat) return !!this.loadout.modal.nav.current?.startsWith('s-');
+    return this.assignFocusedSkill(index);
   }
 
   private buildLoadout(m: Modal, i: number) {
@@ -563,7 +660,7 @@ export class LobbyScene extends UIScene {
     c.add(txt(this, SX + SW, top + 4, T().equipped(equippedCount), 15, C.dim, { origin: [1, 0] }));
 
     // Equipped slots.
-    const slotW = (SW - 24) / 3;
+    const slotW = (SW - 12 * (SKILL_SLOTS - 1)) / SKILL_SLOTS;
     for (let k = 0; k < SKILL_SLOTS; k++) {
       const sk = skillById(slot.skills[k]);
       const ex = SX + k * (slotW + 12);
@@ -572,9 +669,9 @@ export class LobbyScene extends UIScene {
       drawFrame(g, ex, ey, slotW, 62, { fill: sk ? 0x2a2412 : C.well, border: sk ? C.gold : C.border, radius: 8 });
       c.add(g);
       drawSkillIcon(this, c, ex + 34, ey + 31, 21, sk);
-      c.add(txt(this, ex + 66, ey + 22, sk ? T().skillName(sk) : T().emptySkill, 17, sk ? C.text : C.faint, { bold: true, origin: [0, 0.5] }));
-      const key = this.bindLabel(slot, k + 1);
-      if (key) c.add(txt(this, ex + 66, ey + 44, `${T().bindNames[k + 1]}：${key}`, 12, C.dim, { origin: [0, 0.5] }));
+      c.add(txt(this, ex + 66, ey + 22, sk ? T().skillName(sk) : T().emptySkill, 13, sk ? C.text : C.faint, { bold: true, origin: [0, 0.5] }));
+      const key = this.bindLabel(slot, skillAction(k));
+      if (key) c.add(txt(this, ex + 66, ey + 44, `${T().bindNames[skillAction(k)]}：${key}`, 12, C.dim, { origin: [0, 0.5] }));
       m.nav.add({
         id: `e${k}`, x: ex, y: ey, w: slotW, h: 62,
         onEnter: () => {
@@ -643,9 +740,9 @@ export class LobbyScene extends UIScene {
       const set = slot.control;
       // Movement keys under the heading, then one box per rebindable action.
       c.add(txt(this, SX, keysY + 34, `${T().moveLabel(set)}`, 11, C.dim, { origin: [0, 0.5] }));
-      for (let n = 0; n < slot.binds.length; n++) {
+      for (const [position, n] of DISPLAY_ACTIONS.entries()) {
         const bw = (SW - 70 - (slot.binds.length - 1) * 6) / slot.binds.length;
-        const bx = SX + 70 + n * (bw + 6);
+        const bx = SX + 70 + position * (bw + 6);
         const waiting = this.bindingIdx === n;
         const g = this.add.graphics();
         drawFrame(g, bx, keysY, bw, 44, { fill: waiting ? 0x4a3f12 : C.panelHi, border: waiting ? C.gold : C.border, radius: 6 });

@@ -1,8 +1,8 @@
 import * as Phaser from 'phaser';
-import { summonStrikeCount } from '@/skills';
-import { drawShape } from '@/weapons';
-import { T } from '@/i18n';
-import { drawHeldWeapon, drawLog, kunai } from '@/art';
+import { summonStrikeCount } from '@/gameplay/skills';
+import { drawShape } from '@/gameplay/weapons';
+import { T } from '@/localization';
+import { drawHeldWeapon, drawLog, kunai } from '@/rendering/fighterArt';
 import type { BattleScene } from '@/scenes/BattleScene';
 
 /** The state and operations this system needs from the scene. No runtime scene dependency. */
@@ -10,11 +10,13 @@ type PresentationRendererContext = Phaser.Scene & Pick<BattleScene,
   'bossReserves' | 'caltrops' | 'chests' | 'drawScarf' | 'fighters'
   | 'findReviveTarget' | 'fx' | 'g' | 'gGlow' | 'gOver'
   | 'logs' | 'mode' | 'nameTags' | 'poseOf' | 'projectiles'
-  | 'renderAltar' | 'renderBarrier' | 'renderBell' | 'renderChest' | 'renderDirge'
+  | 'renderAltar' | 'renderBarrier' | 'renderBell' | 'renderChest' | 'renderDirge' | 'renderDragon' | 'renderWyverns'
   | 'renderDoors' | 'renderFlames' | 'renderFog' | 'renderGroveCast' | 'renderHerbs'
   | 'renderKegs' | 'renderLantern' | 'renderNight' | 'renderPads' | 'renderPortals'
   | 'renderQuestTree' | 'renderRescueGate' | 'renderRollers' | 'renderSeals' | 'renderSnareCast'
   | 'renderSpikes' | 'renderStorm' | 'renderTide' | 'renderTower' | 'renderVents'
+  | 'renderSpiritRelay'
+  | 'renderSandPits'
   | 'renderVortex' | 'renderWallAndPrincess' | 'renderWardenBond' | 'renderWind' | 'respawnTimers'
   | 'sideColor' | 'sprites' | 'summonColor' | 'summonTargets' | 'tagTexts'
   | 'time' | 'towerHeals' | 'towers' | 'walls'
@@ -42,6 +44,7 @@ export function render(this: PresentationRendererContext): void {
   for (const log of this.logs.values()) drawLog(g, log.x, log.y, log.a);
   this.renderWind(now);
   this.renderVortex(now);
+  this.renderSandPits(now);
   this.renderFog(now);
   this.renderSpikes(now);
   this.renderPortals(now);
@@ -62,7 +65,10 @@ export function render(this: PresentationRendererContext): void {
   this.renderSnareCast(now);
   this.renderNight(now);
   this.renderDirge();
+  this.renderDragon(now);
+  this.renderWyverns(now);
   this.renderSeals(now);
+  this.renderSpiritRelay(now);
   this.renderLantern(now);
   this.renderWardenBond(now);
   for (const c of this.caltrops) {
@@ -81,7 +87,19 @@ export function render(this: PresentationRendererContext): void {
   for (const p of this.projectiles) {
     const e = p.effect;
     const a = Math.atan2(p.vy, p.vx);
-    if (e.radius > 8) {
+    if (p.element === 'ice') {
+      // An ice shard: a pale spike with a frosty trail.
+      const c = Math.cos(a), s = Math.sin(a);
+      this.gGlow.lineStyle(6, 0x8fd8ff, 0.35).lineBetween(p.x - c * 34, p.y - s * 34, p.x, p.y);
+      over.fillStyle(0xe8fbff, 1).fillTriangle(p.x + c * 14, p.y + s * 14, p.x - c * 8 - s * 6, p.y - s * 8 + c * 6, p.x - c * 8 + s * 6, p.y - s * 8 - c * 6);
+    } else if (p.element === 'thunder') {
+      // A crackling bolt: a jagged streak behind a bright core.
+      const c = Math.cos(a), s = Math.sin(a);
+      const pts = [0, 1, 2, 3, 4].map((k) => new Phaser.Math.Vector2(p.x - c * k * 12 + (k % 2 ? -s : s) * 6, p.y - s * k * 12 + (k % 2 ? c : -c) * 6));
+      this.gGlow.lineStyle(5, 0xb08aff, 0.6).strokePoints(pts, false);
+      this.gGlow.lineStyle(2, 0xffffff, 0.9).strokePoints(pts, false);
+      this.gGlow.fillStyle(0xe8dcff, 1).fillCircle(p.x, p.y, e.radius * 0.7);
+    } else if (e.radius > 8) {
       // Fire jutsu: hot core over the flame trail.
       this.gGlow.fillStyle(0xff7a2a, 0.5).fillCircle(p.x, p.y, e.radius * 1.4);
       this.gGlow.fillStyle(0xffe08a, 0.9).fillCircle(p.x, p.y, e.radius * 0.7);
@@ -162,6 +180,7 @@ export function render(this: PresentationRendererContext): void {
     const stunned = f.state === 'stun';
     sprite.setAlpha(stunned && Math.floor(now * 20) % 2 === 0 ? 0.55 : 1);
     if (f.flashT > 0) sprite.setTint(0xffffff).setTintMode(Phaser.TintModes.FILL);
+    else if (f.burnT > 0 && Math.floor(now * 8) % 2 === 0) sprite.setTint(0xffa070).setTintMode(Phaser.TintModes.MULTIPLY);
     else if (f.chillT > 0) sprite.setTint(0xa8dcff).setTintMode(Phaser.TintModes.MULTIPLY);
     else if (f.paralyzed) sprite.setTint(0x9fc0ff).setTintMode(Phaser.TintModes.MULTIPLY);
     else sprite.clearTint().setTintMode(Phaser.TintModes.MULTIPLY);

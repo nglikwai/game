@@ -2,9 +2,9 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
 const { BattleScene } = load('src/scenes/BattleScene.ts');
-const { Fighter } = load('src/Fighter.ts');
-const { roleById } = load('src/roles.ts');
-const { WEAPONS } = load('src/weapons.ts');
+const { Fighter } = load('src/gameplay/Fighter.ts');
+const { roleById } = load('src/gameplay/roles.ts');
+const { WEAPONS } = load('src/gameplay/weapons.ts');
 
 function battle(mode = 'quest') {
   const scene = new BattleScene();

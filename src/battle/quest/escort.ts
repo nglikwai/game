@@ -1,7 +1,7 @@
 import type * as Phaser from 'phaser';
 import { TOWER_RESPAWN_HP, TOWER_RESPAWN_SOUL_KEEP, QUEST } from '@/config';
-import { Fighter } from '@/Fighter';
-import { sfx } from '@/sfx';
+import { Fighter } from '@/gameplay/Fighter';
+import { sfx } from '@/audio/sfx';
 import { advanceLantern } from '@/battle/quest/escortRules';
 import { S, ARENA } from '@/battle/coordinates';
 import type { BattleScene } from '@/scenes/BattleScene';
@@ -13,16 +13,8 @@ type QuestEscortContext = Phaser.Scene & Pick<BattleScene,
   | 'over' | 'paused'
 >;
 
-export function damageLantern(this: QuestEscortContext, damage: number, attacker?: Fighter): void {
-  const lantern = this.lantern;
-  if (!lantern?.alive || lantern.arrived || lantern.lost || this.over || this.paused || this.countdown > 0) return;
-  const taken = Math.min(lantern.hp, damage);
-  lantern.hp = Math.max(0, lantern.hp - damage);
-  lantern.alive = lantern.hp > 0;
-  if (attacker) attacker.stats.wall += taken;
-  this.fx.hitSpark(lantern.x, lantern.y, 0xffcc80);
-  sfx.wallHit();
-  if (!lantern.alive) this.fx.sparks(lantern.x, lantern.y, 0x90dfc3, 24);
+/** The lantern has no health. Pushing it is the only way to win or lose. */
+export function damageLantern(this: QuestEscortContext, _damage: number, _attacker?: Fighter): void {
 }
 
 export function updateEscort(this: QuestEscortContext, dt: number): void {
@@ -54,10 +46,10 @@ export function renderLantern(this: QuestEscortContext, now: number): void {
   if (!lantern) return;
   const { x, y, radius: r } = lantern;
   const g = this.g;
-  const color = !lantern.alive || lantern.lost ? 0x647b78 : lantern.push < 0 || lantern.hp < lantern.maxHp * 0.3 ? 0xff967a : 0x99e7c6;
+  const color = lantern.lost ? 0x647b78 : lantern.push < 0 ? 0xff967a : 0x99e7c6;
   g.fillStyle(color, 0.04).fillCircle(x, y, r);
   g.lineStyle(2, color, 0.5).strokeCircle(x, y, r);
-  // The ring fills with journey progress; the bar directly above is lantern HP.
+  // The ring fills with journey progress. The lantern itself has no health.
   for (let i = 0; i < 40; i++) {
     const angle = -Math.PI / 2 + i * Math.PI / 20;
     g.lineStyle(4, color, i / 40 < lantern.progress ? 0.9 : 0.12);
@@ -76,6 +68,4 @@ export function renderLantern(this: QuestEscortContext, now: number): void {
     this.gGlow.fillStyle(0x86e9ba, 0.07).fillCircle(x, ly - 3, 47);
     this.gGlow.fillStyle(0xffe5a1, 0.9).fillEllipse(x, ly - 4, 12 + Math.sin(now * 7) * 2, 26);
   }
-  g.fillStyle(0x102025, 0.95).fillRoundedRect(x - 43, y - 66, 86, 12, 3);
-  g.fillStyle(color, 1).fillRect(x - 40, y - 63, 80 * lantern.hp / lantern.maxHp, 6);
 }

@@ -1,9 +1,9 @@
 import { HEIGHT, WIDTH } from '@/config';
-import { T, getLang, setLang } from '@/i18n';
-import { isMuted, toggleMute } from '@/sfx';
-import { isMusicOn, toggleMusic } from '@/music';
+import { T, getLang, setLang } from '@/localization';
+import { isMuted, toggleMute } from '@/audio/sfx';
+import { isMusicOn, toggleMusic } from '@/audio/music';
 import { C, FocusNav, Petals, UIScene, addBackdrop, addButton, addSelector, txt } from '@/ui';
-import { drawLobbyCrest, drawLobbyPortrait } from '@/lobbyArt';
+import { drawLobbyCrest, drawLobbyPortrait } from '@/rendering/menuArt';
 
 export class TitleScene extends UIScene {
   private petals!: Petals;

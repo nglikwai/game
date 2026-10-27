@@ -16,20 +16,20 @@ function simple(patch = {}) {
 }
 
 test('a resting Pro Controller report does nothing', () => {
-  const { proStateFromReport } = sourceLoader()('src/joyhid.ts');
+  const { proStateFromReport } = sourceLoader()('src/input/nintendoHid.ts');
   const got = proStateFromReport(0x3f, simple()).state;
   assert.equal(got.mx, 0);
   assert.equal(got.my, 0);
   assert.equal(got.ax, 0);
   assert.equal(got.ay, 0);
-  assert.deepEqual([...got.actions], [false, false, false, false, false, false]);
+  assert.deepEqual([...got.actions], [false, false, false, false, false, false, false]);
   assert.equal(got.confirm, false);
   assert.equal(got.back, false);
   assert.equal(got.start, false);
 });
 
 test('Pro Controller face buttons follow the Switch positions', () => {
-  const { proStateFromReport } = sourceLoader()('src/joyhid.ts');
+  const { proStateFromReport } = sourceLoader()('src/input/nintendoHid.ts');
   const b = proStateFromReport(0x3f, simple({ buttons: 0x0001 })).state;
   assert.equal(b.actions[0], true);
   assert.equal(b.back, true);
@@ -51,7 +51,7 @@ test('Pro Controller face buttons follow the Switch positions', () => {
 });
 
 test('the hat moves and a centered hat leaves the sticks in charge', () => {
-  const { proStateFromReport } = sourceLoader()('src/joyhid.ts');
+  const { proStateFromReport } = sourceLoader()('src/input/nintendoHid.ts');
   assert.deepEqual([proStateFromReport(0x3f, simple({ hat: 0 })).state.mx, proStateFromReport(0x3f, simple({ hat: 0 })).state.my], [0, -1]);
   assert.deepEqual([proStateFromReport(0x3f, simple({ hat: 2 })).state.mx, proStateFromReport(0x3f, simple({ hat: 2 })).state.my], [1, 0]);
   assert.deepEqual([proStateFromReport(0x3f, simple({ hat: 4 })).state.mx, proStateFromReport(0x3f, simple({ hat: 4 })).state.my], [0, 1]);
@@ -62,7 +62,7 @@ test('the hat moves and a centered hat leaves the sticks in charge', () => {
 });
 
 test('the left stick moves and the right stick aims; up is a smaller Y', () => {
-  const { proStateFromReport } = sourceLoader()('src/joyhid.ts');
+  const { proStateFromReport } = sourceLoader()('src/input/nintendoHid.ts');
   const up = proStateFromReport(0x3f, simple({ ly: 32768 - 24000, ry: 32768 + 24000 })).state;
   assert.equal(up.my, -1);
   assert.equal(up.ay, 1);
@@ -71,7 +71,7 @@ test('the left stick moves and the right stick aims; up is a smaller Y', () => {
 });
 
 test('a full 0x30 report uses the standard Pro Controller bytes', () => {
-  const { proStateFromReport } = sourceLoader()('src/joyhid.ts');
+  const { proStateFromReport } = sourceLoader()('src/input/nintendoHid.ts');
   const bytes = new Uint8Array(11);
   bytes[2] = 0x08;
   bytes[3] = 0x02;
@@ -90,10 +90,10 @@ test('reading the Pro Controller directly replaces the browser pad that never de
   const load = sourceLoader({ navigator: { getGamepads: () => [pad] } });
   const pro = {
     kind: 'pro', connected: true, ready: true,
-    state: () => ({ mx: 0, my: -1, ax: 0, ay: 0, actions: [false, false, false, false, false, false], confirm: true, back: false, start: false }),
+    state: () => ({ mx: 0, my: -1, ax: 0, ay: 0, actions: [false, false, false, false, false, false, false], confirm: true, back: false, start: false }),
   };
-  load('src/joyhid.ts').hidPads().push(pro);
-  const sources = load('src/menuPads.ts').menuPadSources();
+  load('src/input/nintendoHid.ts').hidPads().push(pro);
+  const sources = load('src/input/menuInput.ts').menuPadSources();
   assert.equal(sources.length, 1);
   assert.equal(sources[0].st.confirm, true);
   assert.equal(sources[0].st.my, -1);

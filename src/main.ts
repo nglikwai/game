@@ -1,6 +1,6 @@
 import * as Phaser from 'phaser';
-import { musicState } from '@/music';
-import { initJoyConHid } from '@/joyhid';
+import { musicState } from '@/audio/music';
+import { initJoyConHid } from '@/input/nintendoHid';
 import { HEIGHT, RES, WIDTH } from '@/config';
 import { BattleScene } from '@/scenes/BattleScene';
 import { LobbyScene } from '@/scenes/LobbyScene';

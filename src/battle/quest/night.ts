@@ -1,14 +1,15 @@
+import { layoutPoint } from '@/maps/layout';
 import type * as Phaser from 'phaser';
 import { HARD_CPU_HP, MAX_PLAYERS, QUEST, HEIGHT, HUD_HEIGHT, RES, WIDTH } from '@/config';
-import { createController } from '@/controls';
-import { Fighter, type Arena } from '@/Fighter';
-import { skillById } from '@/skills';
-import { WEAPONS } from '@/weapons';
-import { T } from '@/i18n';
-import { sfx } from '@/sfx';
+import { createController } from '@/input/controllers';
+import { Fighter, type Arena } from '@/gameplay/Fighter';
+import { skillById } from '@/gameplay/skills';
+import { WEAPONS } from '@/gameplay/weapons';
+import { T } from '@/localization';
+import { sfx } from '@/audio/sfx';
 import { ARENA_MID_Y as SCREEN_MID_Y } from '@/maps';
-import { ninjaTexture } from '@/art';
-import { getSettings } from '@/settings';
+import { ninjaTexture } from '@/rendering/fighterArt';
+import { getSettings } from '@/state/gameSettings';
 import { FONT, toHex } from '@/ui';
 import { type NightCandle } from '@/battle/types';
 import { S, toWorld, WORLD_CENTER } from '@/battle/coordinates';
@@ -17,6 +18,7 @@ import type { BattleScene } from '@/scenes/BattleScene';
 
 /** The state and operations this system needs from the scene. No runtime scene dependency. */
 type QuestNightContext = Phaser.Scene & Arena & Pick<BattleScene,
+  'map' |
   'add' | 'countdown' | 'dealDamage' | 'fighters' | 'flareCandle'
   | 'freeSpot' | 'fx' | 'isHell' | 'lSprites' | 'lTop'
   | 'nameTags' | 'nightCandles' | 'nightFlames' | 'nightLights' | 'nightShade'
@@ -25,7 +27,7 @@ type QuestNightContext = Phaser.Scene & Arena & Pick<BattleScene,
   | 'spawns' | 'sprites' | 'stats' | 'tagTexts'
 >;
 
-/** The alley captain stands with the four enemies. The eight HUD seats stay the squad. */
+/** The alley captain stands with the two enemies. The eight HUD seats stay the squad. */
 export function spawnNightBoss(this: QuestNightContext, partySize: number): void {
   if (this.quest?.stage !== QUEST.nightStage) return;
   const index = MAX_PLAYERS;
@@ -34,7 +36,7 @@ export function spawnNightBoss(this: QuestNightContext, partySize: number): void
   const role = nightBossRole(partySize);
   const r = b.radius;
   const screen = { x: this.isHell ? 220 : WIDTH - 220, y: SCREEN_MID_Y };
-  const sp = this.freeSpot(toWorld(screen), this.fighters.map((f) => ({ x: f.x, y: f.y })), r + 4);
+  const sp = this.freeSpot(toWorld(layoutPoint(this.map, screen)), this.fighters.map((f) => ({ x: f.x, y: f.y })), r + 4);
   this.spawns[index] = sp;
   const body = this.physics.add.body(sp.x - r, sp.y - r, r * 2, r * 2);
   body.setCircle(r);

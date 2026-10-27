@@ -3,10 +3,10 @@ const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
 const { BattleScene } = load('src/scenes/BattleScene.ts');
 const { nightBossRole, bossRole } = load('@/battle/quest/roster.ts');
-const { Fighter } = load('src/Fighter.ts');
-const { WEAPONS } = load('src/weapons.ts');
-const { roleById } = load('src/roles.ts');
-const { QUEST, QUEST_FIGHTS, MAP_SCALE } = load('src/config.ts');
+const { Fighter } = load('src/gameplay/Fighter.ts');
+const { WEAPONS } = load('src/gameplay/weapons.ts');
+const { roleById } = load('src/gameplay/roles.ts');
+const { QUEST, QUEST_FIGHTS, MAP_SCALE } = load('src/config/index.ts');
 const { getMap } = load('src/maps/index.ts');
 
 function fighter(index, team, x = 200, y = 200) {
@@ -38,15 +38,15 @@ function battle() {
   return scene;
 }
 
-test('the night alley is an opening fight with four lanterns and a full enemy squad', () => {
+test('the night alley is an opening fight with four lanterns and the Night Oni plus two enemies', () => {
   assert.equal(QUEST.maps[QUEST.nightStage], 'night');
   assert.ok(QUEST_FIGHTS.includes(QUEST.nightStage));
   const map = getMap('night');
   assert.equal(map.obstacles.filter((o) => o.kind === 'lantern').length, 4);
-  assert.equal(QUEST.night.enemies, 4);
+  assert.equal(QUEST.night.enemies, 2);
   assert.ok(QUEST.night.hp > 1);
   const scene = battle();
-  assert.equal(scene.slots.filter((s) => s.team === 1 && s.control === 'cpu').length, 4);
+  assert.equal(scene.slots.filter((s) => s.team === 1 && s.control === 'cpu').length, 2);
   assert.equal(scene.bgm, 'hell');
   assert.equal(scene.nightCandles.length, 4);
   assert.ok(scene.nightCandles.every((c) => c.lit));
@@ -67,9 +67,9 @@ test('the alley clears only when every enemy is down', () => {
   assert.equal(cleared, 1);
 });
 
-test('the Night Oni is a small boss standing with the four enemies', () => {
+test('the Night Oni is a small boss standing with two enemies', () => {
   const scene = battle();
-  assert.equal(scene.slots.filter((s) => s.team === 1 && s.control === 'cpu').length, 4);
+  assert.equal(scene.slots.filter((s) => s.team === 1 && s.control === 'cpu').length, 2);
   const captain = nightBossRole(1);
   assert.ok(captain.maxHp > roleById('ronin').maxHp * QUEST.night.hp);
   assert.ok(captain.maxHp < bossRole(1).maxHp);
@@ -165,6 +165,7 @@ test('hell keeps the candles burning while the heroes are still in the alley', (
     ],
     quest: { stage: QUEST.nightStage, side: 'hell', rule: 'hell' },
   });
+  assert.equal(scene.slots.filter((s) => s.team === 0 && s.control === 'cpu').length, QUEST.night.enemies);
   scene.countdown = 0;
   scene.fighters = [fighter(0, 0), fighter(4, 1)];
   scene.questClear = () => assert.fail('living heroes must not clear the alley');

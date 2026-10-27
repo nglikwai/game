@@ -1,11 +1,11 @@
 import type * as Phaser from 'phaser';
 import { TOWER_RESPAWN_HP, TOWER_RESPAWN_SOUL_KEEP, QUEST } from '@/config';
-import { Fighter } from '@/Fighter';
-import { skillById } from '@/skills';
-import { CPU_ENEMY_SKILLS, randomCpuEquipment } from '@/cpuLoadout';
-import { WEAPONS } from '@/weapons';
-import { T } from '@/i18n';
-import { sfx } from '@/sfx';
+import { Fighter } from '@/gameplay/Fighter';
+import { skillById } from '@/gameplay/skills';
+import { CPU_ENEMY_SKILLS, QUEST_ENEMY_BANNED, randomCpuEquipment } from '@/ai/loadouts';
+import { WEAPONS } from '@/gameplay/weapons';
+import { T } from '@/localization';
+import { sfx } from '@/audio/sfx';
 import { BOSS_COLOR } from '@/battle/quest/roster';
 import type { BattleScene } from '@/scenes/BattleScene';
 
@@ -77,7 +77,7 @@ export function updateWardens(this: QuestBossesContext, dt: number): void {
   this.wardenReviveT = -1;
 }
 
-/** The extra guard on the warden stage keeps walking back in, so the bosses are never fought alone. */
+/** A leftover guard, if one is still in the fight, walks back in. The stage itself fields only the two wardens. */
 export function updateWardenGrunt(this: QuestBossesContext, dt: number): void {
   const grunt = this.fighters.find((f) => f.team === 1 && !f.boss);
   if (!grunt || grunt.alive) { this.wardenGruntT = QUEST.wardens.gruntRespawn; return; }
@@ -126,7 +126,7 @@ export function updateBossReinforcements(this: QuestBossesContext, dt: number): 
   boss.hp -= cost;
   boss.flashT = 0.15;
   if (!this.hasHellPlayers || this.slots[guard.index].control === 'cpu') {
-    const gear = randomCpuEquipment('quest', guard.role.id, ['lifeline'], CPU_ENEMY_SKILLS);
+    const gear = randomCpuEquipment('quest', guard.role.id, QUEST_ENEMY_BANNED, CPU_ENEMY_SKILLS);
     guard.weapon = WEAPONS[gear.weapon];
     guard.skills.splice(0, guard.skills.length, ...gear.skills.map(skillById));
     guard.cooldowns.length = guard.skills.length;

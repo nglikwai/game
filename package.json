@@ -6,8 +6,10 @@
   "scripts": {
     "dev": "vite",
     "test": "node --test test/*.test.cjs",
-    "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "build": "npm run check && vite build",
+    "preview": "vite preview",
+    "check:architecture": "node scripts/check-architecture.mjs",
+    "check": "npm run check:architecture && tsc --noEmit"
   },
   "dependencies": {
     "phaser": "4.2.1"

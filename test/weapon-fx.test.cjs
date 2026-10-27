@@ -1,11 +1,11 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
-const { WEAPONS } = load('src/weapons.ts');
+const { WEAPONS } = load('src/gameplay/weapons.ts');
 const { BattleScene } = load('src/scenes/BattleScene.ts');
-const { Fighter } = load('src/Fighter.ts');
-const { roleById } = load('src/roles.ts');
-const { Fx } = load('src/fx.ts');
+const { Fighter } = load('src/gameplay/Fighter.ts');
+const { roleById } = load('src/gameplay/roles.ts');
+const { Fx } = load('src/rendering/effects.ts');
 
 function graphics() {
   let calls = 0;

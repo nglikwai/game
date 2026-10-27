@@ -1,7 +1,7 @@
 import * as Phaser from 'phaser';
 import { QUEST, HUD_HEIGHT, PRINCESS_WALL_HP, RES, WIDTH } from '@/config';
-import { T } from '@/i18n';
-import { sfx } from '@/sfx';
+import { T } from '@/localization';
+import { sfx } from '@/audio/sfx';
 import { ARENA as SCREEN_ARENA, type Obstacle } from '@/maps';
 import { FONT, toHex } from '@/ui';
 import { type PrincessWall } from '@/battle/types';
@@ -10,11 +10,11 @@ import type { BattleScene } from '@/scenes/BattleScene';
 
 /** The state and operations this system needs from the scene. No runtime scene dependency. */
 type ObjectivesPrincessContext = Phaser.Scene & Pick<BattleScene,
-  'add' | 'endRound' | 'fighters' | 'g' | 'gGlow'
-  | 'helpCalloutSpot' | 'helpTexts' | 'isHell' | 'lTop' | 'obstacleRects'
-  | 'over' | 'princessText' | 'quest' | 'questClear' | 'questFail'
-  | 'questTree' | 'rescueGateOpen' | 'rescueGateX' | 'shotBlockers' | 'showBanner'
-  | 'sideColor' | 'time' | 'tweens' | 'updatePrincessProgress' | 'walls'
+  'add' | 'endRound' | 'fighters' | 'freeSpot' | 'fx' | 'g' | 'gGlow'
+  | 'helpCalloutSpot' | 'helpTexts' | 'isHell' | 'lTop' | 'nameTags' | 'obstacleRects'
+  | 'onRevived' | 'over' | 'princessText' | 'quest' | 'questClear' | 'questFail'
+  | 'questTree' | 'releaseRescueGuards' | 'rescueGateOpen' | 'rescueGateX' | 'shotBlockers' | 'showBanner'
+  | 'sideColor' | 'spawns' | 'time' | 'tweens' | 'updatePrincessProgress' | 'walls'
   | 'world'
 >;
 
@@ -151,12 +151,47 @@ export function breakWall(this: ObjectivesPrincessContext, wall: PrincessWall): 
     if (this.quest?.stage === QUEST.rescueStage) {
       this.rescueGateOpen = true;
       if (this.isHell) this.questFail();
-      else if (this.questTree && !this.questTree.alive && !this.fighters.some((f) => f.team === 1 && f.alive)) this.questClear();
-      else this.showBanner(T().questRescuedFight, this.sideColor(wall.team));
+      else {
+        this.releaseRescueGuards();
+        if (!this.fighters.some((f) => f.team === 1 && f.alive)) this.questClear();
+        else this.showBanner(T().questRescuedFight, this.sideColor(wall.team));
+      }
     }
     else this.endRound(wall.lastHitter ?? undefined, T().rescued(T().teamNames[wall.team]), this.sideColor(wall.team));
   } else {
     this.showBanner(T().princessProgress(T().teamNames[wall.team], teamWalls.filter((w) => w.rescued).length, teamWalls.length), this.sideColor(wall.team));
+  }
+}
+
+/** Two guards fight until both princesses are free. The other two wait off the field. */
+export function holdRescueReserves(this: ObjectivesPrincessContext): void {
+  if (this.quest?.stage !== QUEST.rescueStage || this.isHell) return;
+  const waiting = this.fighters.filter((f) => f.team === 1).sort((a, b) => a.index - b.index).slice(QUEST.rescue.held);
+  for (const f of waiting) {
+    f.hp = 0;
+    f.state = 'dead';
+    f.body.enable = false;
+    this.nameTags[f.index]?.setVisible(false);
+  }
+}
+
+/** Both princesses are free: every guard takes the field, up to four, and the tree stops replacing them. */
+export function releaseRescueGuards(this: ObjectivesPrincessContext): void {
+  if (this.quest?.stage !== QUEST.rescueStage || this.isHell) return;
+  const guards = this.fighters.filter((f) => f.team === 1).sort((a, b) => a.index - b.index);
+  let standing = guards.filter((f) => f.alive).length;
+  const taken = this.fighters.filter((f) => f.alive).map((f) => ({ x: f.x, y: f.y }));
+  for (const f of guards) {
+    if (standing >= QUEST.rescue.enemies) break;
+    if (f.alive) continue;
+    const home = this.spawns[f.index] ?? { x: f.x, y: f.y };
+    const spot = this.freeSpot(home, taken);
+    taken.push(spot);
+    f.revive(spot.x, spot.y);
+    this.nameTags[f.index]?.setVisible(true);
+    this.onRevived(f);
+    this.fx.smoke(spot.x, spot.y, 12, 1);
+    standing++;
   }
 }
 
@@ -204,7 +239,7 @@ export function renderWallAndPrincess(this: ObjectivesPrincessContext, g: Phaser
   const sy = wall.shakeT > 0 ? Phaser.Math.Between(-2, 2) : 0;
   const l = o.x - o.w / 2 + sx;
   const t = o.y - o.h / 2 + sy;
-  const th = this.quest?.stage === QUEST.rescueStage ? 50 : 38;
+  const th = this.quest?.stage === QUEST.rescueStage ? 22 : 38;
 
   if (!broken) {
     // Shadow, inner floor, then the brick ring.

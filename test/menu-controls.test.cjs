@@ -8,8 +8,8 @@ function menu(direct = false, { id = 'Joy-Con (L+R)', mode = 'whole', mapping = 
     axes: [0, 0, 0, 0], buttons: Array.from({ length: 16 }, () => ({ pressed: false, value: 0 })),
   };
   const load = sourceLoader({ navigator: { getGamepads: () => direct && !browserAlso ? [] : [pad] } });
-  load('src/padconfig.ts').setPadMode(pad.id, mode);
-  const { FocusNav, UIScene } = load('src/ui.ts');
+  load('src/input/padSettings.ts').setPadMode(pad.id, mode);
+  const { FocusNav, UIScene } = load('src/ui/index.ts');
   const graphics = new Proxy({}, { get: () => () => graphics });
   const scene = new UIScene();
   scene.add = {
@@ -30,7 +30,7 @@ function menu(direct = false, { id = 'Joy-Con (L+R)', mode = 'whole', mapping = 
   nav.done('first');
   scene.navs = [nav];
   const joy = { connected: true, ready: true, side: 'R', stick: [0, 0], down: {} };
-  if (direct) load('src/joyhid.ts').hidPads().push(joy);
+  if (direct) load('src/input/nintendoHid.ts').hidPads().push(joy);
   return {
     scene, nav, changes, load, pad, joy, activations: () => activations, backs: () => backs,
     poll: () => scene.pollPads(),
@@ -131,7 +131,7 @@ for (const side of ['L', 'R']) {
     assert.equal(m.nav.current, 'second');
     assert.deepEqual(m.changes, [0, 0]);
     m.pad.axes.fill(0); m.poll();
-    m.load('src/padconfig.ts').setPadGrip(m.pad.id, 'upright');
+    m.load('src/input/padSettings.ts').setPadGrip(m.pad.id, 'upright');
     m.nav.focus('first', false);
     m.pad.axes[axis] = 1; m.poll();
     assert.equal(m.nav.current, 'second');
@@ -166,7 +166,7 @@ for (const id of ['Joy-Con (L+R)', 'Joy-Con (R)']) {
 
 test('simultaneous confirm and Back perform one action, including after a modal opens', () => {
   const m = menu();
-  const { FocusNav } = m.load('src/ui.ts');
+  const { FocusNav } = m.load('src/ui/index.ts');
   let modalBacks = 0;
   const modal = new FocusNav(m.scene);
   modal.onBack = () => modalBacks++;
@@ -184,7 +184,7 @@ test('simultaneous confirm and Back perform one action, including after a modal 
 test('disconnecting one direct Joy-Con does not turn another held confirm into a new press', () => {
   const m = menu(true);
   const other = { connected: true, ready: true, side: 'L', stick: [0, 0], down: { left: true } };
-  m.load('src/joyhid.ts').hidPads().push(other);
+  m.load('src/input/nintendoHid.ts').hidPads().push(other);
   m.poll();
   assert.deepEqual(m.changes, [1, 0]);
   m.joy.connected = false;

@@ -1,8 +1,8 @@
 import type * as Phaser from 'phaser';
 import { TOWER_RESPAWN_HP, TOWER_RESPAWN_SOUL_KEEP, QUEST } from '@/config';
-import { T } from '@/i18n';
-import { sfx } from '@/sfx';
-import { chargeSeal } from '@/battle/quest/sealRules';
+import { T } from '@/localization';
+import { sfx } from '@/audio/sfx';
+import { chargeSeal, questSealConfig } from '@/battle/quest/sealRules';
 import type { BattleScene } from '@/scenes/BattleScene';
 
 /** The state and operations this system needs from the scene. No runtime scene dependency. */
@@ -14,16 +14,17 @@ type QuestSealsContext = Phaser.Scene & Pick<BattleScene,
 
 /** Seals charge only during play. Guards keep returning until all three are broken. */
 export function updateSeals(this: QuestSealsContext, dt: number): void {
-  if (this.quest?.stage !== QUEST.sealStage || this.over || this.paused || this.countdown > 0) return;
+  const config = questSealConfig(this.quest?.stage);
+  if (!config || this.over || this.paused || this.countdown > 0) return;
   this.seals.forEach((seal, i) => {
-    if (chargeSeal(seal, this.fighters, dt)) {
+    if (chargeSeal(seal, this.fighters, dt, config.chargeTime)) {
       this.showBanner(T().sealBroken(i + 1), 0x83dfd4);
       this.fx.sparks(seal.x, seal.y, 0x83dfd4, 24);
     }
   });
   if (this.seals.every((s) => s.sealed)) return;
   const guard = this.fighters.find((f) => f.team === 1 && !f.alive);
-  if (!guard) { this.sealRespawnT = QUEST.seals.respawnEvery; return; }
+  if (!guard) { this.sealRespawnT = config.respawnEvery; return; }
   this.sealRespawnT -= dt;
   if (this.sealRespawnT > 0) return;
   const spot = this.freeSpot(this.spawns[guard.index], this.fighters.filter((f) => f.alive).map((f) => ({ x: f.x, y: f.y })));
@@ -35,7 +36,7 @@ export function updateSeals(this: QuestSealsContext, dt: number): void {
   this.nameTags[guard.index]?.setVisible(true);
   this.fx.smoke(spot.x, spot.y, 12, 1);
   sfx.respawn();
-  this.sealRespawnT = QUEST.seals.respawnEvery;
+  this.sealRespawnT = config.respawnEvery;
 }
 
 export function renderSeals(this: QuestSealsContext, now: number): void {

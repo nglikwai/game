@@ -2,10 +2,10 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
 const { BattleScene } = load('src/scenes/BattleScene.ts');
-const { Fighter } = load('src/Fighter.ts');
-const { WEAPONS } = load('src/weapons.ts');
-const { roleById } = load('src/roles.ts');
-const { QUEST } = load('src/config.ts');
+const { Fighter } = load('src/gameplay/Fighter.ts');
+const { WEAPONS } = load('src/gameplay/weapons.ts');
+const { roleById } = load('src/gameplay/roles.ts');
+const { QUEST } = load('src/config/index.ts');
 const { getMap } = load('src/maps/index.ts');
 
 function fighter(index, team, x, y) {

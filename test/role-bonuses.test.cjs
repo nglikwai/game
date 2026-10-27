@@ -1,13 +1,13 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
-const { Fighter } = load('src/Fighter.ts');
+const { Fighter } = load('src/gameplay/Fighter.ts');
 const { BattleScene } = load('src/scenes/BattleScene.ts');
-const { ROLES, roleById } = load('src/roles.ts');
-const { skillById, skillCooldownFor, SKILLS } = load('src/skills.ts');
-const { WEAPONS } = load('src/weapons.ts');
-const { emptyIntent } = load('src/controls.ts');
-const { QUEST } = load('src/config.ts');
+const { ROLES, roleById } = load('src/gameplay/roles.ts');
+const { skillById, skillCooldownFor, SKILLS } = load('src/gameplay/skills.ts');
+const { WEAPONS } = load('src/gameplay/weapons.ts');
+const { emptyIntent } = load('src/input/index.ts');
+const { QUEST } = load('src/config/index.ts');
 
 function fighter(role) {
   const body = { center: { x: 100, y: 100 }, velocity: { x: 0, y: 0 },

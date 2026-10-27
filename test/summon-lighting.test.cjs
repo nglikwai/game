@@ -1,9 +1,9 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
-const { Fx } = load('src/fx.ts');
+const { Fx } = load('src/rendering/effects.ts');
 const { BattleScene } = load('src/scenes/BattleScene.ts');
-const { SUMMON_LIGHT_RADIUS } = load('src/config.ts');
+const { SUMMON_LIGHT_RADIUS } = load('src/config/index.ts');
 const { TREE_SUMMONS } = load('src/battle/quest/treeRules.ts');
 
 function graphics() {

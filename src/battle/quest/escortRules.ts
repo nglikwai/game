@@ -27,10 +27,10 @@ export interface SpiritLantern {
 }
 
 /** The lantern begins at the middle of the lane, halfway between the two sides. */
-export function createLantern(partySize: number, scale: number, hudHeight: number): SpiritLantern {
-  const path = QUEST.escort.path.map((p) => ({ x: p.x * scale, y: (p.y - hudHeight) * scale }));
+export function createLantern(partySize: number, scale: number, hudHeight: number, lane: readonly { x: number; y: number }[] = QUEST.escort.path): SpiritLantern {
+  const path = lane.map((p) => ({ x: p.x * scale, y: (p.y - hudHeight) * scale }));
   const hp = QUEST.escort.hpBase + QUEST.escort.hpPerPlayer * Math.max(1, partySize);
-  const start = path[1];
+  const start = { x: (path[0].x + path[2].x) / 2, y: path[1].y };
   const span = path[2].x - path[0].x;
   const progress = span > 0 ? (start.x - path[0].x) / span : 0.5;
   return {

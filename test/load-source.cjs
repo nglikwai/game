@@ -4,9 +4,8 @@ const path = require('node:path');
 const vm = require('node:vm');
 const ts = require('typescript');
 
-module.exports = function sourceLoader({ navigator = {}, music = {}, sfx = {} } = {}) {
+module.exports = function sourceLoader({ navigator = {}, music = {}, sfx = {}, storage = new Map() } = {}) {
   const cache = new Map();
-  const storage = new Map();
   const keys = {};
   const phaser = {
     Scene: class {},

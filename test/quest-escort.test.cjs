@@ -3,11 +3,11 @@ const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
 const { createLantern, advanceLantern, distanceToEscortPath } = load('src/battle/quest/escortRules.ts');
 const { BattleScene } = load('src/scenes/BattleScene.ts');
-const { AIController } = load('src/controls.ts');
-const { Fighter } = load('src/Fighter.ts');
-const { WEAPONS } = load('src/weapons.ts');
-const { roleById } = load('src/roles.ts');
-const { QUEST, MAP_SCALE, HUD_HEIGHT } = load('src/config.ts');
+const { AIController } = load('@/ai/AIController.ts');
+const { Fighter } = load('src/gameplay/Fighter.ts');
+const { WEAPONS } = load('src/gameplay/weapons.ts');
+const { roleById } = load('src/gameplay/roles.ts');
+const { QUEST, MAP_SCALE, HUD_HEIGHT } = load('src/config/index.ts');
 const { getMap, MAPS, ARENA } = load('src/maps/index.ts');
 
 function fighter(index, team, x, y) {
@@ -47,7 +47,7 @@ function riders(lantern, teams) {
 
 test('the lantern starts in the center; two allies push it, one does not, and both sides stop it', () => {
   const a = createLantern(1, MAP_SCALE, HUD_HEIGHT), b = createLantern(4, MAP_SCALE, HUD_HEIGHT);
-  assert.equal(a.x, QUEST.escort.path[1].x * MAP_SCALE);
+  assert.ok(Math.abs(a.x - QUEST.escort.path[1].x * MAP_SCALE) < 1e-9);
   assert.equal(a.progress, 0.5);
   const ally = { x: a.x, y: a.y, team: 0, alive: true };
   const enemy = { ...ally, team: 1 };
@@ -87,14 +87,13 @@ test('two allies can push the lantern to the enemy side, and enemies alone can p
   assert.equal(dead.progress, 0.5);
 });
 
-test('reaching the enemy side clears; a push back, a destroyed lantern, or a defeated party fails', () => {
-  for (const ending of ['arrive', 'lost', 'lantern', 'party']) {
+test('reaching the enemy side clears; a push back or a defeated party fails', () => {
+  for (const ending of ['arrive', 'lost', 'party']) {
     const scene = battle();
     let clears = 0, fails = 0;
     scene.questClear = () => clears++; scene.questFail = () => fails++;
     if (ending === 'arrive') scene.lantern.arrived = true;
     if (ending === 'lost') scene.lantern.lost = true;
-    if (ending === 'lantern') scene.damageLantern(100000);
     if (ending === 'party') scene.fighters[0].state = 'dead';
     scene.updateQuest(0.01);
     assert.equal(clears, ending === 'arrive' ? 1 : 0);
@@ -103,23 +102,21 @@ test('reaching the enemy side clears; a push back, a destroyed lantern, or a def
   }
 });
 
-test('melee damages the lantern once per swing and friendly attacks cannot hurt it', () => {
+test('attacks do not damage the lantern', () => {
   const scene = battle(), lantern = scene.lantern;
   scene.fighters[0].body.center = { x: 100, y: 800 };
   const guard = scene.fighters[1];
   guard.body.center = { x: lantern.x - 60, y: lantern.y }; guard.facing = 0;
-  const before = lantern.hp;
   scene.onSwingActive(guard);
-  assert.ok(lantern.hp < before);
-  const hit = lantern.hp;
   scene.onSwingActive(guard);
-  assert.equal(lantern.hp, hit);
   guard.team = 0; guard.swingHits.clear();
   scene.onSwingActive(guard);
-  assert.equal(lantern.hp, hit);
+  scene.damageLantern(100000, guard);
+  assert.equal(lantern.hp, lantern.maxHp);
+  assert.equal(lantern.alive, true);
 });
 
-test('hostile projectiles hit the lantern and friendly projectiles pass through', () => {
+test('projectiles pass through the lantern', () => {
   const scene = battle(), lantern = scene.lantern;
   const Rectangle = load('phaser').Geom.Rectangle;
   const previous = Rectangle.Contains;
@@ -131,9 +128,9 @@ test('hostile projectiles hit the lantern and friendly projectiles pass through'
       effect: { damage: 20, range: 1000, knockback: 0, hitstun: 0 } });
     scene.projectiles = [shot(1), shot(0)];
     scene.updateProjectiles(0.05);
-    assert.equal(lantern.hp, lantern.maxHp - 20);
-    assert.equal(scene.projectiles.length, 1);
-    assert.equal(scene.projectiles[0].team, 0);
+    assert.equal(lantern.hp, lantern.maxHp);
+    assert.equal(lantern.alive, true);
+    assert.equal(scene.projectiles.length, 2);
   } finally { Rectangle.Contains = previous; }
 });
 

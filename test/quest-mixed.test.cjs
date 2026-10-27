@@ -3,8 +3,8 @@ const assert = require('node:assert/strict');
 
 function setup(stageName = 'bossStage') {
   const load = require('./load-source.cjs')();
-  const { QUEST, prepareQuest } = load('src/config.ts');
-  const { getSettings } = load('src/settings.ts');
+  const { QUEST, prepareQuest } = load('src/config/index.ts');
+  const { getSettings } = load('src/state/gameSettings.ts');
   const { BattleScene } = load('src/scenes/BattleScene.ts');
   const slots = structuredClone(getSettings().slots);
   slots.forEach((s, i) => { s.control = i < 4 ? `kb${i + 1}` : 'off'; s.questSide = i % 2 ? 'hell' : 'heroes'; });
@@ -69,7 +69,7 @@ test('either faction can win a mixed finale without losing the winner on the res
     if (team === 1) scene.questFail(); else scene.questClear();
     assert.equal(scene.winningTeam, team);
     assert.equal(scene.over, true);
-    const { T } = load('src/i18n.ts');
+    const { T } = load('src/localization/index.ts');
     assert.equal(banner, T().teamWins(T().questSides[team === 1 ? 'hell' : 'heroes']));
   }
 });

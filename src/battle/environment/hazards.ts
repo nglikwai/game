@@ -1,5 +1,5 @@
 import * as Phaser from 'phaser';
-import { sfx } from '@/sfx';
+import { sfx } from '@/audio/sfx';
 import { C } from '@/ui';
 import { toWorld, toWorldRect, ARENA } from '@/battle/coordinates';
 import type { BattleScene } from '@/scenes/BattleScene';

@@ -4,10 +4,10 @@ const load = require('./load-source.cjs')();
 const { BattleScene } = load('src/scenes/BattleScene.ts');
 const { LobbyScene } = load('src/scenes/LobbyScene.ts');
 const { PadScene } = load('src/scenes/PadScene.ts');
-const { getSettings } = load('src/settings.ts');
-const { createMatchStats } = load('src/matchStats.ts');
-const { QUEST } = load('src/config.ts');
-const { T, setLang } = load('src/i18n.ts');
+const { getSettings } = load('src/state/gameSettings.ts');
+const { createMatchStats } = load('src/battle/results/stats.ts');
+const { QUEST } = load('src/config/index.ts');
+const { T, setLang } = load('src/localization/index.ts');
 const baseSlots = structuredClone(getSettings().slots);
 
 function defeat(stage) {
@@ -84,6 +84,26 @@ test('controller setup returns to the retry lobby without losing edits or the ch
   assert.equal(getSettings().slots[0].role, 'shinobi');
   assert.equal(lobby.retryQuest.stage, QUEST.rescueStage);
   assert.equal(lobby.retryQuest.carry.players[0].soul, 50);
+});
+
+test('player setup changed after a loss stays saved when the lobby is opened again', () => {
+  const d = defeat(QUEST.rescueStage);
+  d.buttons.find((b) => b.id === 'edit').onEnter();
+  const payload = d.started().data;
+  const before = payload.slots[0].role;
+  const lobby = new LobbyScene();
+  lobby.sys = { settings: { data: payload } };
+  lobby.init(payload);
+  const player = getSettings().slots[0];
+  player.role = before === 'mystic' ? 'samurai' : 'mystic';
+  player.weapon = 9;
+  player.skills = ['fury', 'blink', 'meditate', null];
+  // Going home and opening fighter setup again must not replay the lost stage's old slots.
+  lobby.init(lobby.sys.settings.data);
+  assert.equal(lobby.retryQuest, null);
+  assert.equal(getSettings().slots[0].role, player.role);
+  assert.equal(getSettings().slots[0].weapon, 9);
+  assert.equal(getSettings().slots[0].skills[0], 'fury');
 });
 
 test('entering the normal lobby clears retry state, so a fresh Quest starts at stage one', () => {

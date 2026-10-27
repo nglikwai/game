@@ -1,13 +1,14 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
+const { layoutPoint } = load('@/maps/layout.ts');
 const { chargeSeal } = load('src/battle/quest/sealRules.ts');
 const { BattleScene } = load('src/scenes/BattleScene.ts');
-const { AIController } = load('src/controls.ts');
-const { Fighter } = load('src/Fighter.ts');
-const { WEAPONS } = load('src/weapons.ts');
-const { roleById } = load('src/roles.ts');
-const { QUEST, nextQuestStage, MAP_SCALE, HUD_HEIGHT } = load('src/config.ts');
+const { AIController } = load('@/ai/AIController.ts');
+const { Fighter } = load('src/gameplay/Fighter.ts');
+const { WEAPONS } = load('src/gameplay/weapons.ts');
+const { roleById } = load('src/gameplay/roles.ts');
+const { QUEST, nextQuestStage, MAP_SCALE, HUD_HEIGHT } = load('src/config/index.ts');
 const { getMap, MAPS, ARENA, mulberry32 } = load('src/maps/index.ts');
 
 const point = (allies = 2) => ({ team: 0, x: 500, y: 500, radius: 90, allies, progress: 0, sealed: false, contested: false });
@@ -102,8 +103,8 @@ test('battle creates correctly scaled seals, clears only after all three and eve
   assert.equal(scene.seals.length, 3);
   assert.equal(JSON.stringify(scene.seals.map((p) => p.allies)), '[1,2,3]');
   scene.seals.forEach((p, i) => {
-    assert.equal(p.x, QUEST.seals.spots[i].x * MAP_SCALE);
-    assert.equal(p.y, (QUEST.seals.spots[i].y - HUD_HEIGHT) * MAP_SCALE);
+    assert.equal(p.x, layoutPoint(scene.map, QUEST.seals.spots[i]).x * MAP_SCALE);
+    assert.equal(p.y, (layoutPoint(scene.map, QUEST.seals.spots[i]).y - HUD_HEIGHT) * MAP_SCALE);
   });
   let clears = 0;
   scene.questClear = () => clears++;

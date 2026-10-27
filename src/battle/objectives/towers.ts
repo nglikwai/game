@@ -1,8 +1,8 @@
 import * as Phaser from 'phaser';
 import { MAIN_TOWER_HEAL, RESPAWN_TOWER_COST, TOWER_RESPAWN_HP, TOWER_RESPAWN_SOUL_KEEP, TEAM_RESPAWN, QUEST } from '@/config';
-import { Fighter } from '@/Fighter';
-import { T } from '@/i18n';
-import { sfx } from '@/sfx';
+import { Fighter } from '@/gameplay/Fighter';
+import { T } from '@/localization';
+import { sfx } from '@/audio/sfx';
 import { sideOf, towerSpots } from '@/maps';
 import { type Tower } from '@/battle/types';
 import { S, toWorld, WORLD_CENTER } from '@/battle/coordinates';
@@ -15,8 +15,8 @@ type ObjectivesTowersContext = Phaser.Scene & Pick<BattleScene,
   | 'freeSpot' | 'fx' | 'groveCast' | 'grovePhase' | 'obstacleRects'
   | 'over' | 'physics' | 'popText' | 'projectiles' | 'quest'
   | 'questTree' | 'questTreeCast' | 'releaseSnarePrisoner' | 'renderSnareTree' | 'renderTreeTower'
-  | 'rescueTreeSealed' | 'respawnTimers' | 'showBanner' | 'sideColor' | 'stats'
-  | 'teamRespawnT' | 'towerHeals' | 'towers'
+  | 'renderDragonHead' | 'renderWyvern' | 'rescueTreeSealed' | 'respawnTimers' | 'showBanner' | 'sideColor' | 'stats'
+  | 'teamRespawnT' | 'towerHeals' | 'towers' | 'walls'
 >;
 
 // ---------- watchtowers ----------
@@ -68,7 +68,7 @@ export function inTowerAura(this: ObjectivesTowersContext, f: Fighter): boolean 
 /** Towers shoot the nearest visible enemy in range. */
 export function updateTowers(this: ObjectivesTowersContext, dt: number): void {
   for (const tw of this.towers) {
-    if (!tw.alive || tw.tree) continue;
+    if (!tw.alive || tw.tree || tw.dragon || tw.wyvern) continue;
     tw.reload -= dt;
     if (tw.reload > 0) continue;
     const targets = this.fighters.filter((f) => f.alive && f.team !== tw.team && !f.hidden && !f.untouchable && Math.hypot(f.x - tw.x, f.y - tw.y) < tw.range);
@@ -92,6 +92,8 @@ export function damageTower(this: ObjectivesTowersContext, tw: Tower, dmg: numbe
     this.popText(tw.x, tw.y - tw.h / 2 - 16, T().rescueSealed, '#d4a9ef');
     return;
   }
+  // The prison guards never harm the tree. Only the rescue party can.
+  if (by && tw.tree && !tw.grove && by.team === tw.team) return;
   const real = Math.min(tw.hp, dmg);
   tw.hp -= real;
   tw.shakeT = 0.12;
@@ -113,12 +115,20 @@ export function destroyTower(this: ObjectivesTowersContext, tw: Tower): void {
   sfx.wallBreak();
   this.fx.smoke(tw.x, tw.y, 24, 1.4);
   this.fx.hammerSmash(tw.x, tw.y, 50);
-  this.showBanner(tw.grove ? T().groveTreeDown(tw.grove) : tw.tree ? T().questTreeDestroyed : (tw.main ? T().mainTowerDown : T().towerDown)(T().teamNames[tw.team]), this.sideColor(tw.team));
+  this.showBanner(tw.dragon ? T().dragonHeadDown(T().dragonHeads[tw.dragon]) : tw.wyvern ? T().wyvernDown(T().wyvernNames[tw.wyvern]) : tw.grove ? T().groveTreeDown(tw.grove) : tw.tree ? T().questTreeDestroyed : (tw.main ? T().mainTowerDown : T().towerDown)(T().teamNames[tw.team]), this.sideColor(tw.team));
   // The attackers get a short War Drum.
   for (const f of this.fighters) if (f.alive && f.team !== tw.team) f.empower(1.3, 5);
 }
 
 export function renderTower(this: ObjectivesTowersContext, g: Phaser.GameObjects.Graphics, over: Phaser.GameObjects.Graphics, tw: Tower, now: number): void {
+  if (tw.dragon) {
+    this.renderDragonHead(g, over, tw, now);
+    return;
+  }
+  if (tw.wyvern) {
+    this.renderWyvern(g, over, tw, now);
+    return;
+  }
   if (tw.tree) {
     if (tw.snare) this.renderSnareTree(g, over, tw, now);
     else this.renderTreeTower(g, over, tw, now);
@@ -169,6 +179,7 @@ export function renderTreeTower(this: ObjectivesTowersContext, g: Phaser.GameObj
     g.fillStyle(0x695442, 1).fillEllipse(x, y, 34 * S, 26 * S);
     return;
   }
+  const slim = tree.tree && !tree.grove ? 0.55 : 1;
   const tint = tree.grove === 'respawn' ? 0xc45a4a : tree.grove === 'illusion' ? 0xe2c56a : 0x945bc2;
   const wood = tree.grove === 'respawn' ? 0x5c3a32 : tree.grove === 'illusion' ? 0x6e6240 : 0x554631;
   const eye = tree.grove === 'respawn' ? 0xffb0a0 : tree.grove === 'illusion' ? 0xffe7a8 : 0xcf95ff;
@@ -180,20 +191,20 @@ export function renderTreeTower(this: ObjectivesTowersContext, g: Phaser.GameObj
   g.lineStyle(on ? 2 : 1, tint, on ? 0.55 : 0.2).strokeCircle(x, y, tree.aura);
   for (let k = 0; k < 11; k++) {
     const a = k * Math.PI * 2 / 11;
-    const length = (58 + (k % 3) * 10) * S;
+    const length = (58 + (k % 3) * 10) * S * (slim < 1 ? 0.72 : 1);
     const ex = x + Math.cos(a) * length, ey = y + Math.sin(a) * length;
     const limb = Array.from({ length: 9 }, (_, n) => {
       const t = n / 8, u = 1 - t;
       return { x: u * u * x + 2 * u * t * (ex + 15 * S) + t * t * ex,
         y: u * u * y + 2 * u * t * (y + Math.sin(a) * 20 * S) + t * t * ey };
     });
-    g.lineStyle(9 * S, wood, 1).strokePoints(limb as Phaser.Math.Vector2[], false);
-    g.lineStyle(1.5 * S, tint, 0.8).strokePoints(limb as Phaser.Math.Vector2[], false);
+    g.lineStyle(9 * S * slim, wood, 1).strokePoints(limb as Phaser.Math.Vector2[], false);
+    g.lineStyle(1.5 * S * slim, tint, 0.8).strokePoints(limb as Phaser.Math.Vector2[], false);
     const fork = limb[5], side = a + (k % 2 ? 0.65 : -0.65);
-    g.lineStyle(4 * S, wood, 1).lineBetween(fork.x, fork.y, fork.x + Math.cos(side) * 28 * S, fork.y + Math.sin(side) * 28 * S);
+    g.lineStyle(4 * S * slim, wood, 1).lineBetween(fork.x, fork.y, fork.x + Math.cos(side) * 28 * S * slim, fork.y + Math.sin(side) * 28 * S * slim);
   }
-  over.fillStyle(0x5a4534, 1).fillEllipse(x, y, 58 * S, 76 * S);
-  over.lineStyle(2, tint, 1).strokeEllipse(x, y, 58 * S, 76 * S);
+  over.fillStyle(0x5a4534, 1).fillEllipse(x, y, 58 * S * slim, 76 * S * slim);
+  over.lineStyle(2, tint, 1).strokeEllipse(x, y, 58 * S * slim, 76 * S * slim);
   over.lineStyle(2 * S, 0x382e27, 0.8).lineBetween(x - 8 * S, y + 10 * S, x - 4 * S, y + 30 * S).lineBetween(x + 11 * S, y + 13 * S, x + 8 * S, y + 33 * S);
   over.fillStyle(eye, 0.7 + pulse * 0.3).fillEllipse(x - 11 * S, y - 6 * S, 8 * S, 14 * S).fillEllipse(x + 11 * S, y - 6 * S, 8 * S, 14 * S);
   const bw = tree.w + 20;
@@ -204,7 +215,8 @@ export function renderTreeTower(this: ObjectivesTowersContext, g: Phaser.GameObj
 /**
    * While a team still has a tower, its fallen players come back at its main tower,
    * and only the main tower: the small towers can't. The wait starts short and grows
-   * as the battle goes on. The prison tree may return several guards at once, never past four alive.
+   * as the battle goes on. Before both princesses are free the prison tree keeps two guards
+   * standing. After that it brings nobody back.
    */
 export function updateTeamRespawns(this: ObjectivesTowersContext, dt: number): void {
   this.elapsed += dt;
@@ -225,8 +237,9 @@ export function updateTeamRespawns(this: ObjectivesTowersContext, dt: number): v
       this.teamRespawnT[team] = -1;
       continue;
     }
+    const rescued = this.quest?.stage === QUEST.rescueStage && this.walls.length === 2 && this.walls.every((w) => w.rescued);
     const room = this.quest?.stage === QUEST.rescueStage
-      ? QUEST.rescue.enemies - this.fighters.filter((f) => f.alive && f.team === team).length
+      ? (rescued ? 0 : QUEST.rescue.held) - this.fighters.filter((f) => f.alive && f.team === team).length
       : 1;
     if (room <= 0) {
       this.teamRespawnT[team] = -1;
@@ -237,10 +250,7 @@ export function updateTeamRespawns(this: ObjectivesTowersContext, dt: number): v
     // Countdown on the next one in line; the rest are waiting their turn.
     dead.forEach((f, k) => this.respawnTimers.set(f, k === 0 ? Math.max(0, this.teamRespawnT[team]) : Infinity));
     if (this.teamRespawnT[team] > 0) continue;
-    // The prison tree can return several fallen guards at once, from one up to a full set of four.
-    const bringing = this.quest?.stage === QUEST.rescueStage
-      ? 1 + Math.floor(Math.random() * Math.min(room, dead.length))
-      : 1;
+    const bringing = 1;
     const taken = this.fighters.filter((o) => o.alive).map((o) => ({ x: o.x, y: o.y }));
     for (let n = 0; n < bringing && home.alive; n++) {
       const f = dead[n];

@@ -1,12 +1,13 @@
 import type * as Phaser from 'phaser';
-import { playMusic } from '@/music';
+import { playMusic } from '@/audio/music';
 import { isQuestMode, prepareQuest, questStageNumber, nextQuestStage, QUEST, WIDTH } from '@/config';
-import { Fighter } from '@/Fighter';
-import { type Item } from '@/items';
-import { T } from '@/i18n';
-import { sfx } from '@/sfx';
+import { Fighter } from '@/gameplay/Fighter';
+import { type Item } from '@/gameplay/items';
+import { T } from '@/localization';
+import { sfx } from '@/audio/sfx';
 import { C, addButton, txt } from '@/ui';
 import { type QuestState, type BattleStartData } from '@/battle/types';
+import { questSealConfig } from '@/battle/quest/sealRules';
 import type { BattleScene } from '@/scenes/BattleScene';
 
 /** The state and operations this system needs from the scene. No runtime scene dependency. */
@@ -18,9 +19,10 @@ type QuestProgressionContext = Phaser.Scene & Pick<BattleScene,
   | 'questClear' | 'questFail' | 'questTeam' | 'questTree' | 'questTreeCast'
   | 'restartRound' | 'scene' | 'seals' | 'showBanner' | 'showEndBanner'
   | 'sideColor' | 'snareTrees' | 'spawns' | 'stats' | 'time'
-  | 'towers' | 'updateBossReinforcements' | 'updateDirge' | 'updateEscort' | 'updateGrove'
+  | 'towers' | 'dragonHeads' | 'updateDragon' | 'wyverns' | 'updateWyverns' | 'updateBossReinforcements' | 'updateDirge' | 'updateEscort' | 'updateGrove'
   | 'updateHellQuest' | 'updateNight' | 'updateQuestTree' | 'updateSeals' | 'updateSnare'
   | 'updateWardens' | 'walls' | 'wave' | 'waveT' | 'winningTeam'
+  | 'spiritRelay' | 'updateSpiritRelay'
 >;
 
 /** Every Quest stage entry, including retries, goes through the shared loading screen. */
@@ -47,16 +49,22 @@ export function updateHellQuest(this: QuestProgressionContext, dt: number): void
     : stage === QUEST.rescueStage ? this.walls.length === 2 && this.walls.every((w) => w.rescued)
     : stage === QUEST.groveStage ? this.groveTrees.length === 3 && this.groveTrees.every((t) => !t.alive)
     : stage === QUEST.snareStage ? !hell.some((f) => f.alive && !f.trapped)
-    : stage === QUEST.sealStage ? this.seals.length > 0 && this.seals.every((s) => s.sealed)
+    : questSealConfig(stage) ? this.seals.length > 0 && this.seals.every((s) => s.sealed)
+    : stage === QUEST.beaconStage ? !!this.spiritRelay && this.spiritRelay.delivered >= QUEST.beacons.required
     : stage === QUEST.escortStage ? !!this.lantern?.arrived
     : stage === QUEST.bossStage || stage === QUEST.dirgeStage ? bosses.length > 0 && !bosses.some((f) => f.alive)
-    : stage === QUEST.wardenStage ? bosses.length === 2 && !bosses.some((f) => f.alive) : false;
+    : stage === QUEST.wardenStage ? bosses.length === 2 && !bosses.some((f) => f.alive)
+    : stage === QUEST.dragonStage ? this.dragonHeads.length > 0 && this.dragonHeads.every((h) => !h.alive) && !hell.some((f) => f.alive)
+    : stage === QUEST.wyvernStage ? this.wyverns.length > 0 && this.wyverns.every((w) => !w.tower.alive) && !hell.some((f) => f.alive) : false;
   if (lost) { this.questFail(); return; }
 
   // Existing tower/tree reinforcements are now the player's reinforcements.
   const canReturn = this.towers.some((t) => t.team === 1 && t.main && t.alive)
     || stage === QUEST.groveStage && this.groveTrees.some((t) => t.grove === 'respawn' && t.alive)
-    || stage === QUEST.sealStage || stage === QUEST.escortStage;
+    || !!questSealConfig(stage) || stage === QUEST.escortStage
+    || stage === QUEST.beaconStage && !!this.spiritRelay && this.spiritRelay.delivered < QUEST.beacons.required
+    || stage === QUEST.dragonStage && this.dragonHeads.some((h) => h.alive)
+    || stage === QUEST.wyvernStage && this.wyverns.some((w) => w.tower.alive);
   if (!hell.some((f) => f.alive) && !canReturn) { this.questFail(); return; }
   if (stage === QUEST.escortStage && this.lantern?.lost) { this.questClear(); return; }
 
@@ -74,10 +82,16 @@ export function updateHellQuest(this: QuestProgressionContext, dt: number): void
   }
   if (stage === QUEST.groveStage) this.updateGrove(dt);
   else if (stage === QUEST.snareStage) this.updateSnare(dt);
-  else if (stage === QUEST.sealStage) this.updateSeals(dt);
+  else if (questSealConfig(stage)) this.updateSeals(dt);
+  else if (stage === QUEST.beaconStage) {
+    this.updateSpiritRelay(dt);
+    if (this.spiritRelay && this.spiritRelay.delivered >= QUEST.beacons.required) this.questFail();
+  }
   else if (stage === QUEST.escortStage) this.updateEscort(dt);
   else if (stage === QUEST.bossStage) this.updateBossReinforcements(dt);
   else if (stage === QUEST.dirgeStage) this.updateDirge(dt);
+  else if (stage === QUEST.dragonStage) this.updateDragon(dt);
+  else if (stage === QUEST.wyvernStage) this.updateWyverns(dt);
   else if (stage === QUEST.nightStage) this.updateNight(dt);
   else if (stage === QUEST.wardenStage) { this.updateQuestTree(dt); this.updateWardens(dt); }
 }
@@ -104,19 +118,22 @@ export function updateQuest(this: QuestProgressionContext, dt: number): void {
   } else if (q.stage === 1) {
     if (!this.towers.some((tw) => tw.team === 1 && tw.alive)) this.questClear();
   } else if (q.stage === QUEST.rescueStage) {
-    if (this.walls.length === 2 && this.walls.every((w) => w.rescued) && this.questTree && !this.questTree.alive && !foes.some((f) => f.alive)) this.questClear();
+    if (this.walls.length === 2 && this.walls.every((w) => w.rescued) && !foes.some((f) => f.alive)) this.questClear();
   } else if (q.stage === QUEST.groveStage) {
     this.updateGrove(dt);
     if (this.groveTrees.length === 3 && this.groveTrees.every((t) => !t.alive)) this.questClear();
   } else if (q.stage === QUEST.snareStage) {
     this.updateSnare(dt);
     if (this.snareTrees.length === 2 && this.snareTrees.every((t) => !t.alive) && !foes.some((f) => f.alive)) this.questClear();
-  } else if (q.stage === QUEST.sealStage) {
+  } else if (questSealConfig(q.stage)) {
     this.updateSeals(dt);
-    if (this.seals.length === QUEST.seals.spots.length && this.seals.every((s) => s.sealed) && !foes.some((f) => f.alive)) this.questClear();
+    if (this.seals.length === questSealConfig(q.stage)!.spots.length && this.seals.every((s) => s.sealed) && !foes.some((f) => f.alive)) this.questClear();
+  } else if (q.stage === QUEST.beaconStage) {
+    this.updateSpiritRelay(dt);
+    if (this.spiritRelay && this.spiritRelay.delivered >= QUEST.beacons.required) this.questClear();
   } else if (q.stage === QUEST.escortStage) {
     this.updateEscort(dt);
-    if (this.lantern && (!this.lantern.alive || this.lantern.lost)) this.questFail();
+    if (this.lantern?.lost) this.questFail();
     else if (this.lantern?.arrived) this.questClear();
   } else if (q.stage === QUEST.wardenStage) {
     this.updateQuestTree(dt);
@@ -124,6 +141,16 @@ export function updateQuest(this: QuestProgressionContext, dt: number): void {
   } else if (q.stage === QUEST.nightStage) {
     if (!foes.some((f) => f.alive)) this.questClear();
     else this.updateNight(dt);
+  } else if (q.stage === QUEST.ambushStage) {
+    if (!foes.some((f) => f.alive)) this.questClear();
+  } else if (q.stage === QUEST.dragonStage) {
+    // Every guard and all three heads must fall.
+    this.updateDragon(dt);
+    if (!foes.some((f) => f.alive) && this.dragonHeads.length > 0 && this.dragonHeads.every((h) => !h.alive)) this.questClear();
+  } else if (q.stage === QUEST.wyvernStage) {
+    // Both wyverns (down together, so neither can raise the other) and every guard.
+    this.updateWyverns(dt);
+    if (!foes.some((f) => f.alive) && this.wyverns.length > 0 && this.wyverns.every((w) => !w.tower.alive)) this.questClear();
   } else if (q.stage === QUEST.dirgeStage) {
     this.updateDirge(dt);
     if (!foes.some((f) => f.boss && f.alive)) this.questClear();
@@ -176,7 +203,7 @@ export function questClear(this: QuestProgressionContext, winningTeam = this.que
         const by = m.y + m.h - 50;
         addButton(this, m.content, m.nav, {
           id: 'next', x: WIDTH / 2 - 150, y: by, w: 240, h: 50, label: `${T().questNext}  ▶`, primary: true,
-          onPress: () => this.enterRound({ slots: this.lobbySlots, mode: this.mode, quest: { stage: next, route: q.route, campaign: 'quest', side: q.side, rule: q.rule, carry: this.questCarry() } }),
+          onPress: () => this.enterRound({ slots: this.lobbySlots, mode: this.mode, quest: { stage: next, layoutSeed: q.layoutSeed, route: q.route, campaign: 'quest', side: q.side, rule: q.rule, carry: this.questCarry() } }),
         });
         addButton(this, m.content, m.nav, { id: 'lobby', x: WIDTH / 2 + 150, y: by, w: 200, h: 50, label: T().toLobby, onPress: () => this.scene.start('Lobby') });
       },

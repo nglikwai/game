@@ -1,10 +1,10 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
-const { questFoeSkills, randomCpuEquipment, randomCpuLoadout, rollCpuLoadouts, skillsExceptGroup } = load('src/cpuLoadout.ts');
-const { ROLES } = load('src/roles.ts');
-const { WEAPONS } = load('src/weapons.ts');
-const { skillById } = load('src/skills.ts');
+const { QUEST_ENEMY_BANNED, questBossSkills, randomCpuEquipment, randomCpuLoadout, rollCpuLoadouts, skillsExceptGroup } = load('src/ai/loadouts.ts');
+const { ROLES } = load('src/gameplay/roles.ts');
+const { WEAPONS } = load('src/gameplay/weapons.ts');
+const { skillById } = load('src/gameplay/skills.ts');
 
 const slot = (control = 'cpu', role = 'ronin', team = 0) => ({ control, role, team, weapon: 0, skills: [], binds: [] });
 
@@ -55,11 +55,15 @@ test('Quest reserves party selections and the boss, with balanced enemy grunts a
     assert.equal(new Set(['shinobi', ...[0, 2, 3].map((i) => rolls.get(i).role)]).size, 4);
     assert.equal(rolls.has(4), false);
     assert.equal(new Set(['samurai', ...[5, 6, 7].map((i) => rolls.get(i).role)]).size, 4);
-    for (const i of [0, 2, 3]) assert.equal(rolls.get(i).skills.length, 3);
+    for (const i of [0, 2, 3]) {
+      assert.equal(rolls.get(i).skills.length, 4);
+      assert.equal(new Set(rolls.get(i).skills).size, 4);
+    }
     for (const i of [5, 6, 7]) {
       assert.equal(rolls.get(i).skills.length, 4);
       assert.equal(new Set(rolls.get(i).skills).size, 4);
       assert.ok(!rolls.get(i).skills.includes('lifeline'));
+      assert.ok(!rolls.get(i).skills.includes('sprint'));
       assert.ok(rolls.get(i).skills.every((id) => skillById(id).category !== 'team'));
     }
     for (const i of [0, 2, 3]) assert.ok(rolls.get(i).skills.every((id) => skillById(id).category !== 'team'));
@@ -91,28 +95,28 @@ test('FFA still rolls independent valid loadouts with no team-only skills', () =
   assert.equal(allRoles.size, 4);
 });
 
-test('finale bosses take every non-group skill, and middle foes take half of that list', () => {
+test('finale bosses take six non-group skills', () => {
   const pool = skillsExceptGroup();
-  const boss = questFoeSkills('boss');
-  assert.equal(JSON.stringify(boss), JSON.stringify(pool));
-  assert.ok(pool.length >= 8);
-  assert.ok(pool.every((id) => skillById(id).category !== 'team'));
+  const seen = new Set();
+  for (let n = 0; n < 20; n++) {
+    const boss = questBossSkills();
+    assert.equal(boss.length, 6);
+    assert.equal(new Set(boss).size, 6);
+    assert.ok(boss.every((id) => pool.includes(id) && skillById(id).category !== 'team' && id !== 'sprint'));
+    for (const id of boss) seen.add(id);
+  }
+  assert.ok(seen.size > 6);
   assert.equal(pool.includes('healing-circle'), false);
   assert.equal(pool.includes('spirit-circle'), false);
   assert.equal(pool.includes('war-drum'), false);
   assert.equal(pool.includes('ward-circle'), false);
-  const seen = new Set();
-  let seed = 11;
-  const random = () => {
-    seed = (seed * 16807) % 2147483647;
-    return seed / 2147483647;
-  };
-  for (let n = 0; n < 12; n++) {
-    const middle = questFoeSkills('middle', random);
-    assert.equal(middle.length, Math.floor(pool.length / 2));
-    assert.equal(new Set(middle).size, middle.length);
-    assert.ok(middle.every((id) => pool.includes(id)));
-    seen.add(middle.join(','));
+});
+
+test('ordinary quest enemies equip at most four skills, never Lifeline, Sprint or a group skill', () => {
+  for (let n = 0; n < 40; n++) {
+    const gear = randomCpuEquipment('quest', 'shinobi', QUEST_ENEMY_BANNED, 4);
+    assert.equal(gear.skills.length, 4);
+    assert.equal(new Set(gear.skills).size, 4);
+    assert.ok(gear.skills.every((id) => id !== 'lifeline' && id !== 'sprint' && skillById(id).category !== 'team'));
   }
-  assert.ok(seen.size > 1);
 });

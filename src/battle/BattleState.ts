@@ -1,18 +1,19 @@
 import * as Phaser from 'phaser';
-import { type Track } from '@/music';
+import { type Track } from '@/audio/music';
 import { QUEST, type GameMode, type GroveIllusion } from '@/config';
-import { type WorldView } from '@/controls';
-import { Fighter } from '@/Fighter';
+import { type WorldView } from '@/input/contracts';
+import { Fighter } from '@/gameplay/Fighter';
 import { type GameMap, type MapId } from '@/maps';
-import { type MatchStats } from '@/matchStats';
+import { type MatchStats } from '@/battle/results/stats';
 import { type SealPoint } from '@/battle/quest/sealRules';
 import { type SpiritLantern } from '@/battle/quest/escortRules';
-import { Fx } from '@/fx';
-import type { FighterState } from '@/Fighter';
-import { type SlotConfig } from '@/settings';
+import { Fx } from '@/rendering/effects';
+import type { FighterState } from '@/gameplay/Fighter';
+import { type SlotConfig } from '@/state/gameSettings';
 import { Petals, UIScene } from '@/ui';
-import { type Projectile, type Tower, type Chest, type QuestState, type PrincessWall, type QuestTreeCast, type NightCandle } from '@/battle/types';
+import { type Projectile, type Tower, type Chest, type QuestState, type PrincessWall, type QuestTreeCast, type NightCandle, type DragonCast, type DragonBeam, type DragonElement, type DragonBody, type Wyvern, type WyvernRing } from '@/battle/types';
 import { ARENA } from '@/battle/coordinates';
+import type { SpiritRelay } from '@/battle/types';
 
 /** Shared per-round state. Systems use narrow typed views; BattleScene owns initialization and lifecycle. */
 export abstract class BattleState extends UIScene {
@@ -23,6 +24,7 @@ export abstract class BattleState extends UIScene {
   mode: GameMode = 'ffa';
   /** Quest progress; null in other modes. */
   quest: QuestState | null = null;
+  spiritRelay: SpiritRelay | null = null;
   /** Quest stage 1: which wave is on, and the countdown to the next one (-1 = none coming). */
   wave = 1;
   waveT = -1;
@@ -101,6 +103,28 @@ export abstract class BattleState extends UIScene {
   nightLights?: Phaser.GameObjects.Graphics;
   nightFlames?: Phaser.GameObjects.Graphics;
   nightCandles: NightCandle[] = [];
+  /** The three-headed dragon: its walking body, its heads, the aim being taken, when the next comes, and which head went last. */
+  dragonBody: DragonBody | null = null;
+  dragonHeads: Tower[] = [];
+  /** Seconds until the dragon calls back a fallen guard. */
+  dragonGuardT = 0;
+  /** Where shots just burst (drawn briefly as fading rings). */
+  dragonBursts: { x: number; y: number; r: number; element: DragonElement; t: number }[] = [];
+  /** Follow-up shots waiting to fire (the ice head's second shard). */
+  dragonShots: { t: number; element: DragonElement; head: Tower; target: Fighter }[] = [];
+  dragonCast: DragonCast | null = null;
+  dragonBeam: DragonBeam | null = null;
+  dragonT = 0;
+  dragonLast: DragonElement | null = null;
+  /** Lightning jumping between teammates (drawn briefly), and the timer for burning embers. */
+  dragonChains: { x1: number; y1: number; x2: number; y2: number; t: number }[] = [];
+  dragonEmberT = 0;
+  /** 日月雙龍: the two wyverns, their frost rings and bursts, the chain's damage tick, and the guard return timer. */
+  wyverns: Wyvern[] = [];
+  wyvernRings: WyvernRing[] = [];
+  wyvernBursts: { x: number; y: number; r: number; color: number; t: number }[] = [];
+  wyvernTetherT = 0;
+  wyvernGuardT = 0;
   /** Seconds until the Dirge bell starts its warning, and the warning itself. */
   dirgeTollT = QUEST.dirge.tollEvery;
   dirgeWarn: { elapsed: number } | null = null;

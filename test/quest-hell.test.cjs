@@ -1,16 +1,16 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
-const { QUEST, prepareQuest } = load('src/config.ts');
+const { QUEST, prepareQuest } = load('src/config/index.ts');
 const { hellSlots, hellBossSlots, applyQuestRule, questFactions } = load('src/battle/quest/factions.ts');
 const { BattleScene } = load('src/scenes/BattleScene.ts');
 const { LobbyScene } = load('src/scenes/LobbyScene.ts');
-const { getSettings, saveSettings } = load('src/settings.ts');
-const { Fighter } = load('src/Fighter.ts');
-const { WEAPONS } = load('src/weapons.ts');
-const { roleById } = load('src/roles.ts');
-const { AIController } = load('src/controls.ts');
-const { T, setLang } = load('src/i18n.ts');
+const { getSettings, saveSettings } = load('src/state/gameSettings.ts');
+const { Fighter } = load('src/gameplay/Fighter.ts');
+const { WEAPONS } = load('src/gameplay/weapons.ts');
+const { roleById } = load('src/gameplay/roles.ts');
+const { AIController } = load('@/ai/AIController.ts');
+const { T, setLang } = load('src/localization/index.ts');
 
 function slots() {
   const slots = structuredClone(getSettings().slots);

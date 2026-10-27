@@ -1,13 +1,13 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
-const { Fighter } = load('src/Fighter.ts');
+const { Fighter } = load('src/gameplay/Fighter.ts');
 const { BattleScene } = load('src/scenes/BattleScene.ts');
-const { WEAPONS } = load('src/weapons.ts');
-const { roleById } = load('src/roles.ts');
-const { skillById } = load('src/skills.ts');
-const { ITEMS } = load('src/items.ts');
-const { createMatchStats } = load('src/matchStats.ts');
+const { WEAPONS } = load('src/gameplay/weapons.ts');
+const { roleById } = load('src/gameplay/roles.ts');
+const { skillById } = load('src/gameplay/skills.ts');
+const { ITEMS } = load('src/gameplay/items.ts');
+const { createMatchStats } = load('src/battle/results/stats.ts');
 
 function fighter(index = 0, arena = {}) {
   const body = { center: { x: 100, y: 100 }, velocity: { x: 0, y: 0 }, setVelocity() {}, reset() {} };
@@ -116,7 +116,7 @@ test('Quest carries every metric forward and new games start at zero', () => {
 });
 
 test('eight-player results render every metric in English and Chinese within the screen', () => {
-  const { setLang, T } = load('src/i18n.ts');
+  const { setLang, T } = load('src/localization/index.ts');
   for (const lang of ['en', 'zh']) {
     setLang(lang);
     const scene = new BattleScene();

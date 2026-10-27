@@ -1,32 +1,35 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
-const { QUEST, QUEST_MAX_CHESTS, chestsWithinCap, MAP_SCALE, HUD_HEIGHT, GAME_MODES, rollQuestRoute, prepareQuest, questStageNumber, nextQuestStage } = load('src/config.ts');
+const { layoutPoint } = load('@/maps/layout.ts');
+const { QUEST, QUEST_MAX_CHESTS, chestsWithinCap, MAP_SCALE, HUD_HEIGHT, GAME_MODES, rollQuestRoute, prepareQuest, questStageNumber, nextQuestStage } = load('src/config/index.ts');
 const { BattleScene } = load('src/scenes/BattleScene.ts');
 const { WARDEN_GEAR, wardenRole } = load('@/battle/quest/roster.ts');
-const { Fighter } = load('src/Fighter.ts');
-const { WEAPONS } = load('src/weapons.ts');
-const { skillById } = load('src/skills.ts');
-const { getSettings, validate, usesTeams } = load('src/settings.ts');
-const { rollCpuLoadouts } = load('src/cpuLoadout.ts');
-const { T, setLang } = load('src/i18n.ts');
+const { Fighter } = load('src/gameplay/Fighter.ts');
+const { WEAPONS } = load('src/gameplay/weapons.ts');
+const { skillById } = load('src/gameplay/skills.ts');
+const { getSettings, validate, usesTeams } = load('src/state/gameSettings.ts');
+const { rollCpuLoadouts } = load('src/ai/loadouts.ts');
+const { T, setLang } = load('src/localization/index.ts');
 
-test('a quest run draws two of three fights, two tactics, and one of three finales', () => {
+test('a quest run draws one of four fights, two tactics, one of two dragon semi-finals, and one of three finales', () => {
   assert.ok(GAME_MODES.includes('quest'));
   assert.equal(GAME_MODES.includes('quest2'), false);
-  const fights = [0, 1, QUEST.nightStage];
-  const tactics = [QUEST.rescueStage, QUEST.groveStage, QUEST.sealStage, QUEST.escortStage, QUEST.snareStage];
+  const fights = [0, 1, QUEST.nightStage, QUEST.ambushStage];
+  const tactics = [QUEST.rescueStage, QUEST.groveStage, QUEST.sealStage, QUEST.escortStage, QUEST.snareStage, QUEST.beaconStage];
   const bosses = new Set();
+  const semis = new Set();
   const omittedFights = new Set();
   const omittedTactics = new Set();
   for (let n = 0; n < 40; n++) {
     const route = rollQuestRoute();
     assert.equal(route.length, 5);
     assert.equal(new Set(route).size, 5);
-    assert.equal(route.slice(0, 2).filter((stage) => !fights.includes(stage)).length, 0);
-    assert.equal(fights.filter((stage) => !route.slice(0, 2).includes(stage)).length, 1);
-    assert.equal(route.slice(2, 4).filter((stage) => !tactics.includes(stage)).length, 0);
-    assert.equal(tactics.filter((stage) => !route.slice(2, 4).includes(stage)).length, 3);
+    assert.ok(fights.includes(route[0]));
+    assert.equal(route.slice(1, 3).filter((stage) => !tactics.includes(stage)).length, 0);
+    assert.equal(tactics.filter((stage) => !route.slice(1, 3).includes(stage)).length, 4);
+    assert.ok([QUEST.dragonStage, QUEST.wyvernStage].includes(route[3]));
+    semis.add(route[3]);
     assert.ok([QUEST.bossStage, QUEST.wardenStage, QUEST.dirgeStage].includes(route[4]));
     bosses.add(route[4]);
     fights.filter((stage) => !route.includes(stage)).forEach((stage) => omittedFights.add(stage));
@@ -37,6 +40,7 @@ test('a quest run draws two of three fights, two tactics, and one of three final
     }
   }
   assert.equal(bosses.size, 3);
+  assert.equal(semis.size, 2);
   assert.equal(omittedFights.size, fights.length);
   assert.equal(omittedTactics.size, tactics.length);
   const kept = [QUEST.groveStage, 0, QUEST.sealStage, QUEST.escortStage, 1, QUEST.wardenStage];
@@ -109,14 +113,16 @@ function wardens() {
 }
 function kill(f) { f.hp = 0; f.state = 'dead'; f.body.enable = false; }
 
-test('the final stage prepares two wardens, one guard, and a summon tree behind them', () => {
+test('the final stage prepares two wardens and a summon tree behind them', () => {
   const scene = wardens();
-  assert.equal(scene.slots.slice(4).filter((s) => s.control !== 'off').length, QUEST.wardens.enemies);
+  assert.equal(QUEST.wardens.enemies, 2);
+  assert.equal(scene.slots.slice(4).filter((s) => s.control !== 'off').length, 2);
+  assert.ok(QUEST.wardens.tree.interval >= 8);
   assert.equal(scene.questTree.alive, true);
   assert.equal(scene.questTree.main, false);
   assert.equal(scene.questTree.tree, true);
-  assert.equal(scene.questTree.x, QUEST.wardens.tree.x * MAP_SCALE);
-  assert.equal(scene.questTree.y, (QUEST.wardens.tree.y - HUD_HEIGHT) * MAP_SCALE);
+  assert.equal(scene.questTree.x, layoutPoint(scene.map, QUEST.wardens.tree).x * MAP_SCALE);
+  assert.equal(scene.questTree.y, (layoutPoint(scene.map, QUEST.wardens.tree).y - HUD_HEIGHT) * MAP_SCALE);
   assert.equal(scene.bgm, 'boss');
   assert.equal(scene.map.id, 'wardens');
   assert.deepEqual(Array.from(WARDEN_GEAR, (g) => WEAPONS[g.weapon].id), ['hammer', 'talisman']);

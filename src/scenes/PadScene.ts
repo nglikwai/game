@@ -1,14 +1,15 @@
+import { ACTION_COUNT } from '@/input/actions';
 import * as Phaser from 'phaser';
 import { HEIGHT, WIDTH } from '@/config';
-import { T, getLang } from '@/i18n';
-import { MAX_PAD_SLOTS } from '@/controls';
-import { configurable, connectJoyCons, hidKeys, hidPad, hidPads, hidState, hidSupported, isProPad, joyLabel, lastError, setHidMap, type HidMap, type JoyButtons } from '@/joyhid';
-import { padKind, padName, type PadSide } from '@/gamepads';
+import { T, getLang } from '@/localization';
+import { MAX_PAD_SLOTS } from '@/input/controllerIds';
+import { configurable, connectJoyCons, hidKeys, hidPad, hidPads, hidState, hidSupported, isProPad, joyLabel, lastError, setHidMap, type HidMap, type JoyButtons } from '@/input/nintendoHid';
+import { padKind, padName, type PadSide } from '@/input/gamepads';
 import {
   PAD_GRIPS, PAD_MODES, getPadGrip, getPadMode, isSplit, readController, resetPadMaps, setPadGrip, setPadMap, setPadMode, type PadMap,
-} from '@/padconfig';
+} from '@/input/padSettings';
 import { C, FocusNav, Petals, UIScene, addBackdrop, addButton, addMenuHeader, addSelector, drawFrame, toast, txt, type Modal } from '@/ui';
-import { drawControllerIcon } from '@/lobbyArt';
+import { drawControllerIcon } from '@/rendering/menuArt';
 
 /** Rows shown at once; more controllers than that go on further pages. */
 const ROWS = 4;
@@ -16,10 +17,10 @@ const ROW_Y = 110;
 const ROW_H = 118;
 const ROW_X = 40;
 const ROW_W = WIDTH - 80;
-const ACTIONS = 6;
+const ACTIONS = ACTION_COUNT;
 
-/** Short names of the six actions, for the live test line. */
-const actShort = () => (getLang() === 'zh' ? ['攻', '技1', '技2', '技3', '用', '換'] : ['Atk', 'S1', 'S2', 'S3', 'Use', 'Nxt']);
+/** Short names of the seven actions, for the live test line. */
+const actShort = () => (getLang() === 'zh' ? ['攻', '技1', '技2', '技3', '用', '換', '技4'] : ['Atk', 'S1', 'S2', 'S3', 'Use', 'Nxt', 'S4']);
 const actLine = (acts: boolean[]) => acts.slice(0, ACTIONS).map((on, n) => `${actShort()[n]}${on ? '●' : '○'}`).join(' ');
 
 /** One row of the page: a gamepad slot, or a Joy-Con connected directly. */
@@ -32,7 +33,7 @@ interface CalState {
   index: number;
   id: string;
   side?: PadSide;
-  /** 0 = movement (gamepads only), 1–6 = attack, skills 1–3, use item, next item. */
+  /** 0 = movement (gamepads only), 1–6 = attack, skills 1–3, use item, next item, skill 4. */
   step: number;
   map: PadMap;
   keys: (keyof JoyButtons | null)[];
@@ -331,7 +332,7 @@ export class PadScene extends UIScene {
     };
     this.cal.modal = this.openModal({
       w: 780,
-      h: 540,
+      h: 580,
       title: T().padCalTitle(who),
       closable: false,
       onClose: () => {

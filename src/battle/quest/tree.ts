@@ -1,11 +1,12 @@
+import { layoutPoint } from '@/maps/layout';
 import * as Phaser from 'phaser';
 import { SOUL_MISS_PARALYZE, QUEST, WIDTH } from '@/config';
-import { skillById } from '@/skills';
-import { T } from '@/i18n';
-import { sfx } from '@/sfx';
+import { skillById } from '@/gameplay/skills';
+import { T } from '@/localization';
+import { sfx } from '@/audio/sfx';
 import { ARENA_MID_Y as SCREEN_MID_Y } from '@/maps';
 import { pickTreeSummon } from '@/battle/quest/treeRules';
-import { REAPER_SWING } from '@/fx';
+import { REAPER_SWING } from '@/rendering/effects';
 import { toHex } from '@/ui';
 import { type QuestTreeCast } from '@/battle/types';
 import { S, toWorld } from '@/battle/coordinates';
@@ -14,6 +15,7 @@ import type { BattleScene } from '@/scenes/BattleScene';
 
 /** The state and operations this system needs from the scene. No runtime scene dependency. */
 type QuestTreeContext = Phaser.Scene & Pick<BattleScene,
+  'map' |
   'applyQuestTreeHit' | 'countdown' | 'dealDamage' | 'fighters' | 'freeSpot'
   | 'fx' | 'g' | 'gGlow' | 'gOver' | 'obstacleRects'
   | 'over' | 'paused' | 'physics' | 'popText' | 'quest'
@@ -54,7 +56,7 @@ export function updateQuestTree(this: QuestTreeContext, dt: number): void {
   const target = targets[Math.floor(Math.random() * targets.length)];
   const spell = pickTreeSummon();
   this.questTreeCast = { spell, target, x: target.x, y: target.y, elapsed: 0 };
-  const tree = toWorld(config);
+  const tree = toWorld(layoutPoint(this.map, config));
   this.popText(tree.x, tree.y - 75, T().questTreeCast(T().skillName(skillById(spell.skillId)!), target.index + 1), toHex(spell.color));
   sfx.summonCharge(spell.kind, spell.warn);
 }
@@ -123,7 +125,7 @@ export function placeQuestTowers(this: QuestTreeContext, partySize: number): voi
   const size = QUEST.tower.size;
   const hp = QUEST.tower.base + QUEST.tower.perPlayer * partySize;
   for (const dy of [-150, 150]) {
-    const p = this.freeSpot(toWorld({ x: WIDTH - 230, y: SCREEN_MID_Y + dy }), [], size / 2 + 10);
+    const p = this.freeSpot(toWorld(layoutPoint(this.map, { x: WIDTH - 230, y: SCREEN_MID_Y + dy })), [], size / 2 + 10);
     const body = this.physics.add.staticBody(p.x - size / 2, p.y - size / 2, size, size);
     const collider = this.physics.add.collider(bodies, body);
     const rect = new Phaser.Geom.Rectangle(p.x - size / 2, p.y - size / 2, size, size);
@@ -138,7 +140,7 @@ export function placeQuestTowers(this: QuestTreeContext, partySize: number): voi
   const mine = TOWER_STATS.small;
   const msize = mine.size;
   const mhp = (mine.hp * Math.max(2, partySize)) / 2;
-  const q = this.freeSpot(toWorld({ x: 380, y: SCREEN_MID_Y }), [], msize / 2 + 10);
+  const q = this.freeSpot(toWorld(layoutPoint(this.map, { x: 380, y: SCREEN_MID_Y })), [], msize / 2 + 10);
   const mbody = this.physics.add.staticBody(q.x - msize / 2, q.y - msize / 2, msize, msize);
   const mcollider = this.physics.add.collider(bodies, mbody);
   const mrect = new Phaser.Geom.Rectangle(q.x - msize / 2, q.y - msize / 2, msize, msize);
@@ -152,8 +154,8 @@ export function placeQuestTowers(this: QuestTreeContext, partySize: number): voi
 /** Keep the prison tree as a tree: destructible, able to revive guards, and never shooting arrows. */
 export function placeQuestTree(this: QuestTreeContext, partySize: number): void {
   const config = QUEST.rescue.tree;
-  const p = toWorld(config);
-  const w = 88 * S, h = 100 * S;
+  const p = toWorld(layoutPoint(this.map, config));
+  const w = 52 * S, h = 64 * S;
   const hp = config.hpBase + config.hpPerPlayer * partySize;
   const body = this.physics.add.staticBody(p.x - w / 2, p.y - h / 2, w, h);
   const collider = this.physics.add.collider(this.fighters.map((f) => f.body), body);
@@ -169,7 +171,7 @@ export function placeQuestTree(this: QuestTreeContext, partySize: number): void 
 /** A summon tree behind the twin wardens. It does not revive them. */
 export function placeWardenTree(this: QuestTreeContext, partySize: number): void {
   const config = QUEST.wardens.tree;
-  const p = toWorld(config);
+  const p = toWorld(layoutPoint(this.map, config));
   const w = 88 * S, h = 100 * S;
   const hp = config.hpBase + config.hpPerPlayer * partySize;
   const body = this.physics.add.staticBody(p.x - w / 2, p.y - h / 2, w, h);

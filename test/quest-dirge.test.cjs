@@ -2,10 +2,10 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
 const { BattleScene } = load('src/scenes/BattleScene.ts');
-const { Fighter } = load('src/Fighter.ts');
-const { WEAPONS } = load('src/weapons.ts');
-const { roleById } = load('src/roles.ts');
-const { QUEST, QUEST_BOSSES, MAP_SCALE, HUD_HEIGHT, WIDTH, HEIGHT } = load('src/config.ts');
+const { Fighter } = load('src/gameplay/Fighter.ts');
+const { WEAPONS } = load('src/gameplay/weapons.ts');
+const { roleById } = load('src/gameplay/roles.ts');
+const { QUEST, QUEST_BOSSES, MAP_SCALE, HUD_HEIGHT, WIDTH, HEIGHT } = load('src/config/index.ts');
 const { getMap } = load('src/maps/index.ts');
 const { hellBossSlots } = load('src/battle/quest/factions.ts');
 
@@ -75,6 +75,14 @@ test('the toll strikes the other side inside the ring and misses anyone who step
   scene.updateDirge(0.01);
   scene.updateDirge(QUEST.dirge.tollWarn);
   assert.equal(party.hp, before);
+  const side = QUEST.dirge.tolls[1];
+  party.body.center.x = side.x * MAP_SCALE;
+  party.body.center.y = (side.y - HUD_HEIGHT) * MAP_SCALE;
+  scene.dirgeTollT = 0;
+  scene.updateDirge(0.01);
+  scene.updateDirge(QUEST.dirge.tollWarn);
+  assert.ok(party.hp < before);
+  assert.equal(QUEST.dirge.tolls.length, 3);
 });
 
 test('the stage clears when the Bell Oni falls', () => {

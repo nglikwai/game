@@ -1,11 +1,12 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
+const { layoutPoint } = load('@/maps/layout.ts');
 const { BattleScene } = load('src/scenes/BattleScene.ts');
-const { Fighter } = load('src/Fighter.ts');
-const { WEAPONS } = load('src/weapons.ts');
-const { roleById } = load('src/roles.ts');
-const { QUEST, MAP_SCALE, HUD_HEIGHT } = load('src/config.ts');
+const { Fighter } = load('src/gameplay/Fighter.ts');
+const { WEAPONS } = load('src/gameplay/weapons.ts');
+const { roleById } = load('src/gameplay/roles.ts');
+const { QUEST, MAP_SCALE, HUD_HEIGHT } = load('src/config/index.ts');
 const { getMap } = load('src/maps/index.ts');
 
 function fighter(index, team) {
@@ -78,8 +79,8 @@ test('two allies start inside the trees and the first fighter stays free to brea
   assert.equal(battle.fighters[3].trapped, false);
   const S = MAP_SCALE;
   QUEST.snare.spots.forEach((spot, i) => {
-    assert.equal(battle.snareTrees[i].x, spot.x * S);
-    assert.equal(battle.snareTrees[i].y, (spot.y - HUD_HEIGHT) * S);
+    assert.equal(battle.snareTrees[i].x, layoutPoint(battle.map, spot).x * S);
+    assert.equal(battle.snareTrees[i].y, (layoutPoint(battle.map, spot).y - HUD_HEIGHT) * S);
     assert.ok(battle.snareTrees[i].w < 90);
   });
 });

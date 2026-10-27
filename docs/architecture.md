@@ -19,52 +19,60 @@ or the existing `load('src/battle/quest/sealRules.ts')` form.
 
 ```text
 src/
-  scenes/                  Phaser screens and lifecycle orchestration
-    BattleScene.ts         Round setup, input, update order, system bindings
-  battle/
-    BattleState.ts         Shared round state and its initial values
-    types.ts               Fighters' projectiles, towers, chests, quest checkpoints
-    coordinates.ts         Design/world conversions and arena bounds
-    combat/
-      actions.ts           Weapon hits, damage, healing, revives, movement skills
-      projectiles.ts       Projectile collision and caltrops
-      summons.ts           Summon targeting, strikes and feedback
-      summonRules.ts       Pure summon probability rules
-    environment/
-      hazards.ts           Storms, fire, vents, portals, rollers and spikes
-      features.ts          Doors, kegs, bells, barriers and herbs
-      terrain.ts           Terrain effects, pads, altars, fog, tides and wind
-    objectives/
-      chests.ts            Treasure spawning, opening and drawing
-      princess.ts          Walls, princess rescue and the rescue gate
-      towers.ts            Tower damage, healing, arrows, drawing and respawns
-      towerConfig.ts       Tower stats and projectile definitions
-    quest/
-      progression.ts       Win/loss rules, waves, carry-over, retries and advancement
-      roster.ts            Stage enemy counts, boss gear and scaled boss roles
-      factions.ts          Per-player factions, lobby rules and boss seat selection
-      tree.ts              Princess/warden trees and their summon attacks
-      treeRules.ts         Pure tree spell selection and timing rules
-      grove.ts             Rotating cursed-grove tree effects
-      snare.ts             Trapped teammates and the snare trees
-      night.ts             Night captain, darkness and candle mechanics
-      dirge.ts             Bell Oni mechanics
-      bosses.ts            Boss reinforcements and paired warden revival
-      escort.ts            Lantern updates, damage handling and drawing
-      escortRules.ts       Pure lantern movement and contest rules
-      seals.ts             Seal updates, enemy respawns and drawing
-      sealRules.ts         Pure seal charging rules
-      hud.ts               Stage objectives and boss bars
-    presentation/
-      effects.ts           Battle animation hooks, poses, banners and floating text
-      renderer.ts          Battlefield draw order and fighter rendering
-      hud.ts               Player panels, skill layout and loadout refresh
-      results.ts           Ranked result table, awards and round-end dialogs
-  maps/                    Map layouts, terrain definitions and arena artwork
-  config.ts                Balance values, stage registry and randomized routes
-  controls.ts              Controller implementations and CPU decisions
-  Fighter.ts               Individual fighter state and skill execution
-  i18n.ts                  English and Traditional Chinese text
+  main.ts                   Application bootstrap and scene registration
+  vite-env.d.ts             Vite's ambient TypeScript declarations
+  scenes/                   Phaser screens and lifecycle orchestration
+  gameplay/                 Fighter state machine, roles, weapons, skills and items
+  ai/                       CPU decisions and balanced random loadouts
+  input/                    Player controllers, keyboard, browser pads, Nintendo HID
+    contracts.ts            Intent, world-view and controller data contracts
+    actions.ts              Saved action indices and display order
+    controllerIds.ts        Controller identifiers and lobby options
+    keyboard.ts             Key sets, labels and keyboard input
+    controllers.ts          Human controller adapters and controller factory
+    gamepads.ts             Browser button/stick decoding
+    nintendoHid.ts          Direct Joy-Con / Pro Controller protocols
+    padSettings.ts          Saved calibration, split and grip settings
+    menuInput.ts            Deduplicated controller sources for menus
+  battle/                   Round state and battle systems
+    combat/                 Hits, projectiles, summons and their rules
+    environment/            Hazards, terrain and interactive map features
+    objectives/             Towers, princesses, treasure and respawns
+    quest/                  Stage mechanics, pure rules and campaign progression
+    presentation/           Rendering, effects, HUD and result dialogs
+    results/                Pure match statistics, scoring and awards
+    BattleState.ts          Shared scene-owned round state
+    types.ts                Projectile, tower, chest and checkpoint contracts
+    coordinates.ts          Screen/world coordinate conversions
+  maps/
+    arenas/                 Versus map definitions
+    quest/                  Quest map definitions, including the dragon lair
+    art/                    Map painting helpers and finishing passes
+    common.ts               Shared map types, bounds, placement and paint helpers
+    layout.ts               Seeded terrain variation
+    index.ts                Registry and arena texture creation
+  config/
+    display.ts              Dimensions, palette, render scale and scene timing
+    gameplay.ts             Combat, movement, resource and objective tuning
+    modes.ts                Mode types, difficulty and player limits
+    quest.ts                Stage configuration, route selection and checkpoints
+    index.ts                Public configuration API
+  ui/                       Menu framework, theme and reusable controls
+    UIScene.ts              Modal stack, menu routing and input hooks
+    FocusNav.ts             Mouse/keyboard/controller focus navigation
+    components.ts           Buttons, selectors and toast messages
+    theme.ts                Typography, colors, text and panel frames
+    skillIcons.ts           Skill badges
+    backdrop.ts             Shared menu background and header
+    particles.ts            Ambient particle objects
+    index.ts                Public UI API
+  rendering/                Fighter/weapon art, battle effects and menu artwork
+  audio/                    Procedural music and sound effects
+  localization/
+    locales/en.ts           English strings
+    locales/zh.ts           Traditional Chinese strings, checked against English
+    index.ts                Language selection and lookup
+  state/gameSettings.ts     Saved lobby setup, loadout validation and assignment
 ```
 
 ## State and lifecycle
@@ -93,7 +101,7 @@ configuration from `BattleScene`.
 
 ## Making changes
 
-- **Balance:** edit `config.ts`, `roles.ts`, `skills.ts`, `weapons.ts`, or the
+- **Balance:** edit `config/`, `gameplay/roles.ts`, `gameplay/skills.ts`, `gameplay/weapons.ts`, or the
   relevant quest rule module. Do not put balance values in rendering code.
 - **Stage behavior:** edit the corresponding `battle/quest/` module. For a new
   stage, add its map, config/route registration, localized goal, roster setup,
@@ -101,13 +109,56 @@ configuration from `BattleScene`.
   in `BattleScene` and keep their context lists explicit.
 - **Visuals:** edit `maps/` for arena art, `battle/presentation/` for battle UI
   and draw order, or the owning objective/stage module for its local graphics.
-- **Input/CPU:** edit `controls.ts`, gamepad helpers and menu navigation. Keep
+- **Input/CPU:** edit `input/` for human controls and `ai/` for CPU decisions. Keep
   input mapping separate from stage objectives.
 
 ## Verification
 
 Run `npm test` after gameplay changes and `npm run build` before committing.
+`npm run check` runs strict TypeScript and the architecture guard. The build also
+runs these checks before bundling.
 The tests execute gameplay logic with a small Phaser stub; they cover stage
 objectives, faction/controller ownership, respawns, retries, results, balance
 and drawing geometry. They do not replace a browser/WebGL or physical-gamepad
 playtest. The build checks strict TypeScript types and Vite's alias resolution.
+
+## Layout variation and action assignment
+
+`QuestState.layoutSeed` is generated at the start of a new run and retained by
+stage advancement and retries. `maps/layout.ts` derives a per-map seed and moves
+the two center anchors of an otherwise fixed arena. The monotonic, piecewise
+affine mapping keeps existing passages connected. `layoutPoint` maps authored
+objective/spawn positions; `layoutRect` maps obstacle edges. Route hints are
+queried in authored coordinates and their waypoints are mapped back. Variant
+painting clips the four affine sections from the original map artwork with a
+consistent art seed. Definitions in `config/quest.ts` and source maps are never mutated.
+The battle removes its variant texture on shutdown to bound texture memory.
+
+`input/actions.ts` owns the saved action order. Skill 4 is index 6, preserving
+use-item/next-item indices 4/5 in older keyboard and controller saves. UI code
+uses `skillAction()` and `DISPLAY_ACTIONS` rather than assuming every skill is
+at index `slot + 1`. Loadout assignments go through `state/gameSettings.assignSkill()`.
+`UIScene` offers key/pad hooks before normal navigation; `LobbyScene` consumes
+skill presses only for the edited character and a focused skill-pool tile.
+This prevents a shared skill/Back button from also closing the window.
+
+## Folder and dependency rules
+
+This is a modular, feature-oriented structure for this Phaser project; there is
+no universal industry folder tree. The root contains the application entry and
+environment declarations. Put behavior with the feature that owns it, and use
+shared folders only for genuinely shared responsibilities. Avoid a catch-all
+`utils/` or a folder for every individual function.
+
+Player input emits contracts consumed by gameplay and AI. AI decisions live in
+`ai/`, not in the player controller implementation. Audio and rendering own their
+platform-specific work. Locale data is separate from language selection. The
+configuration directory exposes a small public barrel while its implementation
+files import each other directly. UI follows the same rule: external consumers
+may use `@/ui`, but UI internals use their owning leaf modules.
+
+`scripts/check-architecture.mjs` checks source import resolution, requires `@/`
+for internal imports, reserves the source root for entry files, prevents runtime
+imports from battle systems back into scenes, and detects runtime import cycles.
+Type-only scene references used by battle contexts are permitted. This is run by
+`npm run check` and `npm run build` so the layout stays consistent as the game grows.

@@ -1,22 +1,23 @@
 import * as Phaser from 'phaser';
 import { BIG_CHEST_HP, BIG_CHEST_ITEMS, CHEST_HP, QUEST_MAX_CHESTS, maxRandomChests, randomChestInterval, EMPTY_CHEST_CHANCE } from '@/config';
-import { AIController } from '@/controls';
-import { Fighter } from '@/Fighter';
-import { rollItem } from '@/items';
-import { T } from '@/i18n';
-import { sfx } from '@/sfx';
-import { drawItemIcon } from '@/art';
+import { AIController } from '@/ai/AIController';
+import { Fighter } from '@/gameplay/Fighter';
+import { rollItem } from '@/gameplay/items';
+import { T } from '@/localization';
+import { sfx } from '@/audio/sfx';
+import { drawItemIcon } from '@/rendering/fighterArt';
 import { distanceToEscortPath } from '@/battle/quest/escortRules';
 import { type Chest } from '@/battle/types';
 import { ARENA } from '@/battle/coordinates';
 import type { BattleScene } from '@/scenes/BattleScene';
+import { sandPitContains } from '@/battle/environment/sandPits';
 
 /** The state and operations this system needs from the scene. No runtime scene dependency. */
 type ObjectivesChestsContext = Phaser.Scene & Pick<BattleScene,
   'add' | 'addChest' | 'chestTimer' | 'chests' | 'dropRandomChest'
   | 'fighters' | 'fx' | 'gGlow' | 'lTop' | 'lantern'
   | 'mode' | 'obstacleRects' | 'physics' | 'popText' | 'quest'
-  | 'seals' | 'time' | 'tweens'
+  | 'seals' | 'spiritRelay' | 'map' | 'time' | 'tweens'
 >;
 
 // ---------- treasure chests ----------
@@ -53,7 +54,10 @@ export function dropRandomChest(this: ObjectivesChestsContext, age: number): voi
     const nearChest = this.chests.some((c) => Math.hypot(c.x - x, c.y - y) < 80);
     const nearSeal = this.seals.some((s) => Math.hypot(s.x - x, s.y - y) < s.radius + 40);
     const onEscortRoad = this.lantern && distanceToEscortPath({ x, y }, this.lantern.path) < this.lantern.radius + 40;
-    if (blocked || crowded || nearChest || nearSeal || onEscortRoad) continue;
+    const nearSpiritPath = this.spiritRelay && [...this.spiritRelay.sources, this.spiritRelay.destination]
+      .some((p) => Math.hypot(p.x - x, p.y - y) < 100);
+    const nearPit = (this.map?.zones ?? []).some((zone) => sandPitContains(zone, x, y, 40));
+    if (blocked || crowded || nearChest || nearSeal || onEscortRoad || nearSpiritPath || nearPit) continue;
     this.addChest(x, y, age, false, EMPTY_CHEST_CHANCE, true);
     this.fx.sparks(x, y, 0xffd86b, 8);
     return;

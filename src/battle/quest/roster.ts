@@ -1,7 +1,7 @@
 import { MAX_PLAYERS, QUEST } from '@/config';
-import { roleById, type Role } from '@/roles';
-import { WEAPONS } from '@/weapons';
-import { type SlotConfig } from '@/settings';
+import { roleById, type Role } from '@/gameplay/roles';
+import { WEAPONS } from '@/gameplay/weapons';
+import { type SlotConfig } from '@/state/gameSettings';
 
 /** The boss: crimson, with a fixed loadout. */
 export const BOSS_COLOR = 0xb3202e;
@@ -56,12 +56,15 @@ export function questSlots(lobby: SlotConfig[], stage: number): SlotConfig[] {
   const enemies = stage === QUEST.wardenStage ? QUEST.wardens.enemies
     : stage === QUEST.bossStage ? Math.min(QUEST.boss.maxEnemies, MAX_PLAYERS - QUEST.partySlots)
       : stage === QUEST.dirgeStage ? 1
+      : stage === QUEST.beaconStage ? QUEST.beacons.enemies
       : stage === QUEST.groveStage ? QUEST.grove.enemies
         : stage === QUEST.rescueStage ? QUEST.rescue.enemies
           : stage === QUEST.sealStage ? QUEST.seals.enemies
         : stage === QUEST.escortStage ? QUEST.escort.enemies
           : stage === QUEST.snareStage ? QUEST.snare.enemies
             : stage === QUEST.nightStage ? QUEST.night.enemies
+            : stage === QUEST.dragonStage ? QUEST.dragon.enemies
+            : stage === QUEST.wyvernStage ? QUEST.wyverns.enemies
             : Math.min(MAX_PLAYERS - QUEST.partySlots, n + 1);
   const base = lobby[QUEST.partySlots] ?? lobby[0];
   const foes = Array.from({ length: MAX_PLAYERS - QUEST.partySlots }, (_, k): SlotConfig => ({ ...base, control: k < enemies ? 'cpu' : 'off', team: 1 }));

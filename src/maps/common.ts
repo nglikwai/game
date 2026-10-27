@@ -1,3 +1,4 @@
+import type { MapLayout } from '@/maps/layout';
 import { HEIGHT, HUD_HEIGHT, WIDTH, type GameMode } from '@/config';
 
 /**
@@ -65,9 +66,11 @@ export type MapId = 'courtyard' | 'river' | 'snow' | 'town' | 'lava' | 'garden' 
   | 'doors' | 'powder' | 'bell' | 'barrier' | 'whirlpool' | 'herbs'
   | 'tea' | 'storm' | 'sunken' | 'frostfire' | 'orchard' | 'astral'
   /** 闖關 Quest stages only. */
-  | 'sanzu' | 'yama' | 'prison' | 'grove' | 'seals' | 'lantern' | 'onihall' | 'wardens' | 'snare' | 'night' | 'dirge';
+  | 'sanzu' | 'yama' | 'prison' | 'grove' | 'seals' | 'lantern' | 'onihall' | 'wardens' | 'snare' | 'night' | 'dirge' | 'dragon' | 'beacons' | 'ambush' | 'eclipse';
 
 export interface GameMap {
+  /** Seeded Quest variation; source maps and menu thumbnails have no layout. */
+  layout?: MapLayout;
   id: MapId;
   name: string;
   zh: string;
@@ -131,6 +134,8 @@ export type TerrainKind =
   | 'fog' | 'pad' | 'altar' | 'tide'
   /** Whirlpool: drags you towards its centre (`pull` px/s) and swirls you round. */
   | 'vortex'
+  /** A sinking sand funnel: inward pull, damage inside, and a fatal central opening. */
+  | 'sandpit'
   | 'floor';
 
 export interface TerrainZone {
@@ -141,6 +146,10 @@ export interface TerrainZone {
   group?: number;
   /** Whirlpool strength (battlefield px/s at the edge, stronger towards the middle). */
   pull?: number;
+  /** Sand-pit damage per second. */
+  dps?: number;
+  /** Fatal core size as a fraction of the pit's elliptical radii (0–1). */
+  core?: number;
   /** Centre and size. */
   x: number;
   y: number;

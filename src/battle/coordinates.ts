@@ -1,5 +1,5 @@
 import { MAP_SCALE, HUD_HEIGHT } from '@/config';
-import { T } from '@/i18n';
+import { T } from '@/localization';
 import { ARENA as SCREEN_ARENA } from '@/maps';
 
 // ---------- battlefield coordinates ----------

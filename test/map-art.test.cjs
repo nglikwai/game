@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
 const load = require('./load-source.cjs')();
 const { MAPS, QUEST_MAPS, addArenaTexture } = load('src/maps/index.ts');
-const { MAP_ART, polishMapArt } = load('src/maps/finishArt.ts');
+const { MAP_ART, polishMapArt } = load('src/maps/art/finish.ts');
 const { mulberry32 } = load('src/maps/common.ts');
 
 function canvas() {
@@ -26,9 +26,9 @@ function canvas() {
   return { ctx, finish: () => ({ hash: hash.digest('hex'), calls, depth }) };
 }
 
-test('all 42 versus maps and all eleven Quest stages have explicit art direction', () => {
+test('all 42 versus maps and all fifteen Quest stages have explicit art direction', () => {
   const maps = [...MAPS, ...QUEST_MAPS];
-  assert.equal(maps.length, 53);
+  assert.equal(maps.length, 57);
   assert.deepEqual(Object.keys(MAP_ART).sort(), maps.map((m) => m.id).sort());
   assert.ok(new Set(Object.values(MAP_ART).map((a) => a.light)).size > 30);
 });

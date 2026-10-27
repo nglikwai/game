@@ -1,12 +1,12 @@
 import * as Phaser from 'phaser';
 import { isQuestMode, prepareQuest, questStageNumber, QUEST, BATTLE_LOADING_HOLD_MS, BATTLE_LOADING_MS, HEIGHT, WIDTH } from '@/config';
 import { questFactions } from '@/battle/quest/factions';
-import { T } from '@/i18n';
+import { T } from '@/localization';
 import { getMap } from '@/maps';
-import { drawLobbyBackdrop, drawLobbyCrest } from '@/lobbyArt';
+import { drawLobbyBackdrop, drawLobbyCrest } from '@/rendering/menuArt';
 import { C, setupCamera, txt } from '@/ui';
-import { stopMusic } from '@/music';
-import { sfx } from '@/sfx';
+import { stopMusic } from '@/audio/music';
+import { sfx } from '@/audio/sfx';
 import type { BattleStartData } from '@/battle/types';
 
 /** An input-free transition into a battle or the next Quest stage. */

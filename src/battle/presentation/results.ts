@@ -1,13 +1,13 @@
 import type * as Phaser from 'phaser';
-import { playMusic } from '@/music';
+import { playMusic } from '@/audio/music';
 import { isQuestMode, prepareQuest, WIDTH } from '@/config';
-import { Fighter } from '@/Fighter';
-import { T } from '@/i18n';
-import { sfx } from '@/sfx';
+import { Fighter } from '@/gameplay/Fighter';
+import { T } from '@/localization';
+import { sfx } from '@/audio/sfx';
 import { ARENA_MID_Y as SCREEN_MID_Y } from '@/maps';
-import { drawWeaponIcon } from '@/art';
-import { type MatchStats } from '@/matchStats';
-import { performanceScore, rankMatchResults, selectMatchAwards } from '@/matchAwards';
+import { drawWeaponIcon } from '@/rendering/fighterArt';
+import { type MatchStats } from '@/battle/results/stats';
+import { performanceScore, rankMatchResults, selectMatchAwards } from '@/battle/results/awards';
 import { C, addButton, toHex, txt } from '@/ui';
 import type { BattleScene } from '@/scenes/BattleScene';
 

@@ -1,8 +1,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
-const { performanceScore, rankMatchResults, selectMatchAwards } = load('src/matchAwards.ts');
-const { createMatchStats } = load('src/matchStats.ts');
+const { performanceScore, rankMatchResults, selectMatchAwards } = load('src/battle/results/awards.ts');
+const { createMatchStats } = load('src/battle/results/stats.ts');
 const player = (index, team, stats) => ({ index, team, stats: createMatchStats(stats) });
 
 test('MVP comes from the winners and SVP from the losing team, regardless of overall score', () => {

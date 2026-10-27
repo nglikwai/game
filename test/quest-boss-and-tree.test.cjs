@@ -3,13 +3,14 @@ const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
 const { BattleScene } = load('src/scenes/BattleScene.ts');
 const { bossRole } = load('@/battle/quest/roster.ts');
-const { Fighter } = load('src/Fighter.ts');
-const { AIController, emptyIntent } = load('src/controls.ts');
-const { summonStrikeCount } = load('src/skills.ts');
-const { WEAPONS } = load('src/weapons.ts');
-const { ROLES, roleById } = load('src/roles.ts');
-const { skillById, skillCooldownFor } = load('src/skills.ts');
-const { QUEST, SOUL_PER_LEVEL, SOUL_FIRE, SOUL_THUNDER, SOUL_REAPER, SOUL_TREE } = load('src/config.ts');
+const { Fighter } = load('src/gameplay/Fighter.ts');
+const { AIController } = load('@/ai/AIController.ts');
+const { emptyIntent } = load('@/input/index.ts');
+const { summonStrikeCount } = load('src/gameplay/skills.ts');
+const { WEAPONS } = load('src/gameplay/weapons.ts');
+const { ROLES, roleById } = load('src/gameplay/roles.ts');
+const { skillById, skillCooldownFor } = load('src/gameplay/skills.ts');
+const { QUEST, SOUL_PER_LEVEL, SOUL_LEVELS, SOUL_FROM_HURT, SOUL_FIRE, SOUL_THUNDER, SOUL_REAPER, SOUL_TREE } = load('src/config/index.ts');
 const { TREE_SUMMONS } = load('src/battle/quest/treeRules.ts');
 
 function battle(stage = QUEST.bossStage) {
@@ -100,6 +101,25 @@ test('all boss paralysis is capped at one second and repeated hits do not extend
   }
   const { guards } = battle(); guards[0].paralyze(3.5);
   assert.equal(guards[0].stateDur, 3.5);
+});
+
+test('finale soul scaling reduces damage dealt and hurt gains without reducing player gains or the meter cap', () => {
+  const { scene, boss, party, guards } = battle();
+  boss.soulGainScale = QUEST.boss.soulGainScale;
+  scene.stats = [];
+  for (const f of scene.fighters) scene.stats[f.index] = f.stats;
+
+  scene.dealDamage(boss, party, 20, 1, 0, 0, 0);
+  assert.equal(boss.soul, 16);
+  assert.equal(party.soul, 20 * SOUL_FROM_HURT);
+  scene.dealDamage(party, boss, 20, 1, 0, 0, 0);
+  assert.equal(boss.soul, 16 + 16 * SOUL_FROM_HURT);
+  assert.equal(party.soul, 20 + 20 * SOUL_FROM_HURT);
+
+  guards[0].addSoul(20);
+  assert.equal(guards[0].soul, 20);
+  boss.addSoul(1000);
+  assert.equal(boss.soul, SOUL_LEVELS * SOUL_PER_LEVEL);
 });
 
 test('boss speed and cooldown buffs use the actual Fighter movement and skill timers without changing normal roles', () => {
@@ -226,15 +246,15 @@ test('the boss summon strikes two players per soul level and uses that level\'s 
   assert.equal(new AIController().decide(grunt, { ...world, fighters: [party, second, grunt] }).skills[0], false);
 });
 
-test('rescuing both princesses does not stop a living tree from casting or reviving guards', () => {
+test('after both princesses are rescued the living tree keeps casting but stops reviving guards', () => {
   const { scene, tree, guard } = treeBattle();
   scene.walls = [{ rescued: true }, { rescued: true }];
   scene.questTreeT = 0;
   scene.updateQuestTree(0.1);
   assert.ok(scene.questTreeCast);
   guard.state = 'dead'; scene.teamRespawnT[1] = 0; scene.updateTeamRespawns(0);
-  assert.equal(guard.alive, true);
-  assert.equal(tree.hp, 1080);
+  assert.equal(guard.alive, false);
+  assert.equal(tree.hp, tree.maxHp);
 });
 
 test('every guard return rerolls equipment, refreshes its HUD, and preserves role, scaled HP and stats', () => {

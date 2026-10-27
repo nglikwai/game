@@ -1,20 +1,21 @@
+import { createQuestLayout, layoutPoint } from '@/maps/layout';
 import * as Phaser from 'phaser';
 import { isQuestMode, prepareQuest, HARD_CPU_HP, QUEST_MAX_CHESTS, chestsWithinCap, randomChestInterval, startRandomChests, BATTLE_READY_SECONDS, COUNTDOWN, QUEST, QUEST_TACTICS, QUEST_BOSSES, EMPTY_CHEST_CHANCE, HEIGHT, HUD_HEIGHT, PLAYER_COLORS, RES, TEAM_COLORS, WIDTH } from '@/config';
-import { createController } from '@/controls';
-import { Fighter, type Arena } from '@/Fighter';
+import { createController } from '@/input/controllers';
+import { Fighter, type Arena } from '@/gameplay/Fighter';
 import { hellSlots, hellBossSlots, questFactions, questSideOf } from '@/battle/quest/factions';
-import { SKILL_SLOTS, skillById } from '@/skills';
-import { roleById, type Role } from '@/roles';
-import { questFoeSkills, rollCpuLoadouts } from '@/cpuLoadout';
-import { WEAPONS, rollOniWeapon } from '@/weapons';
-import { T } from '@/i18n';
-import { sfx } from '@/sfx';
+import { SKILL_SLOTS, skillById } from '@/gameplay/skills';
+import { roleById, type Role } from '@/gameplay/roles';
+import { CPU_ENEMY_SKILLS, QUEST_ENEMY_BANNED, questBossSkills, randomCpuEquipment, rollCpuLoadouts } from '@/ai/loadouts';
+import { WEAPONS, rollOniWeapon } from '@/gameplay/weapons';
+import { T } from '@/localization';
+import { sfx } from '@/audio/sfx';
 import { ARENA_MID_Y as SCREEN_MID_Y, MAPS, MAP_RES, addArenaTexture, chestsFor, getMap, obstaclesFor, sideOf, spawnPoint } from '@/maps';
-import { ninjaTexture } from '@/art';
-import { createMatchStats } from '@/matchStats';
+import { ninjaTexture } from '@/rendering/fighterArt';
+import { createMatchStats } from '@/battle/results/stats';
 import { createLantern } from '@/battle/quest/escortRules';
-import { Fx } from '@/fx';
-import { getSettings } from '@/settings';
+import { Fx } from '@/rendering/effects';
+import { getSettings } from '@/state/gameSettings';
 import { FONT, addButton, toHex, txt } from '@/ui';
 import { type BattleStartData } from '@/battle/types';
 import { S, toWorld, toWorldRect, toDesign, ARENA, WORLD_CENTER } from '@/battle/coordinates';
@@ -23,15 +24,20 @@ import { BattleState } from '@/battle/BattleState';
 import * as environmentHazardsSystem from '@/battle/environment/hazards';
 import * as environmentFeaturesSystem from '@/battle/environment/features';
 import * as environmentTerrainSystem from '@/battle/environment/terrain';
+import { renderSandPits, updateSandPits, sandPitContains, sandPitDangers } from '@/battle/environment/sandPits';
 import * as questTreeSystem from '@/battle/quest/tree';
 import * as questGroveSystem from '@/battle/quest/grove';
 import * as questSnareSystem from '@/battle/quest/snare';
 import * as questNightSystem from '@/battle/quest/night';
 import * as questDirgeSystem from '@/battle/quest/dirge';
+import * as questDragonSystem from '@/battle/quest/dragon';
+import * as questWyvernSystem from '@/battle/quest/wyverns';
 import * as questProgressionSystem from '@/battle/quest/progression';
 import * as questBossesSystem from '@/battle/quest/bosses';
 import * as questEscortSystem from '@/battle/quest/escort';
 import * as questSealsSystem from '@/battle/quest/seals';
+import { questSealConfig } from '@/battle/quest/sealRules';
+import { createSpiritRelay, updateSpiritRelay, renderSpiritRelay } from '@/battle/quest/soulRelay';
 import * as questHudSystem from '@/battle/quest/hud';
 import * as combatSummonsSystem from '@/battle/combat/summons';
 import * as objectivesTowersSystem from '@/battle/objectives/towers';
@@ -93,9 +99,19 @@ export class BattleScene extends BattleState implements Arena {
     this.lobbySlots = data.slots;
     this.mode = data.mode ?? 'ffa';
     this.quest = isQuestMode(this.mode) ? { ...data.quest, ...prepareQuest(data.quest) } : null;
+    if (this.quest && !Number.isInteger(this.quest.layoutSeed)) this.quest.layoutSeed = Math.floor(Math.random() * 0x100000000);
     // The underworld has its own music; the last stage gets the boss theme.
-    this.bgm = this.quest ? (this.quest.stage === QUEST.bossStage || this.quest.stage === QUEST.wardenStage || this.quest.stage === QUEST.dirgeStage ? 'boss' : 'hell') : 'battle';
+    this.bgm = this.quest ? (this.quest.stage === QUEST.bossStage || this.quest.stage === QUEST.wardenStage || this.quest.stage === QUEST.dirgeStage || this.quest.stage === QUEST.dragonStage || this.quest.stage === QUEST.wyvernStage ? 'boss' : 'hell') : 'battle';
     this.slots = this.hasHellPlayers ? hellSlots(data.slots, this.quest?.side ?? 'heroes') : this.quest ? questSlots(data.slots, this.quest.stage) : data.slots;
+    // Hell fills every left seat. The Night Oni is an extra foe, so only two invaders walk in with him.
+    if (this.quest?.stage === QUEST.nightStage && this.hasHellPlayers) {
+      let foes = 0;
+      for (let i = 0; i < QUEST.partySlots; i++) {
+        if (this.slots[i].control === 'off') continue;
+        if (foes < QUEST.night.enemies) { foes++; continue; }
+        if (this.slots[i].control === 'cpu') this.slots[i] = { ...this.slots[i], control: 'off' };
+      }
+    }
     this.questBossSeats = this.hasHellPlayers ? hellBossSlots(data.slots, this.quest!.stage, this.quest?.side ?? 'heroes')
       : this.quest?.stage === QUEST.bossStage || this.quest?.stage === QUEST.dirgeStage ? [QUEST.partySlots] : this.quest?.stage === QUEST.wardenStage ? [QUEST.partySlots, QUEST.partySlots + 1] : [];
     // 'random' picks a new map each round (and rematches keep it random). Quest stages have their own maps.
@@ -120,6 +136,8 @@ export class BattleScene extends BattleState implements Arena {
     this.barrierAnnounced = false;
     this.herbs = [];
     this.map = this.mapChoice === 'random' ? MAPS[Math.floor(Math.random() * MAPS.length)] : getMap(this.mapChoice);
+    if (this.quest) this.map = createQuestLayout(this.map, this.quest.layoutSeed!);
+    this.spiritRelay = this.quest?.stage === QUEST.beaconStage ? createSpiritRelay(this.map) : null;
     this.shotBlockers = [];
     this.walls = [];
     this.princessText = undefined;
@@ -127,7 +145,7 @@ export class BattleScene extends BattleState implements Arena {
     this.questTreeCast = null;
     this.questTree = null;
     this.rescueGateOpen = false;
-    this.rescueGateX = this.quest?.stage === QUEST.rescueStage ? QUEST.rescue.tree.gateX * S : 0;
+    this.rescueGateX = this.quest?.stage === QUEST.rescueStage ? layoutPoint(this.map, { x: QUEST.rescue.tree.gateX, y: 0 }).x * S : 0;
     this.groveTrees = [];
     this.groveLabels = [];
     this.groveVeil = undefined;
@@ -153,12 +171,29 @@ export class BattleScene extends BattleState implements Arena {
       : [];
     this.dirgeTollT = QUEST.dirge.tollEvery;
     this.dirgeWarn = null;
-    this.seals = this.quest?.stage === QUEST.sealStage ? QUEST.seals.spots.map((p, i) => ({
-      ...toWorld(p), team: 0, radius: QUEST.seals.radius * S, allies: QUEST.seals.allies[i] ?? 1, progress: 0, sealed: false, contested: false,
+    this.dragonBody = null;
+    this.dragonHeads = [];
+    this.dragonShots = [];
+    this.dragonBursts = [];
+    this.dragonGuardT = 0;
+    this.dragonCast = null;
+    this.dragonBeam = null;
+    this.dragonT = 0;
+    this.dragonLast = null;
+    this.dragonChains = [];
+    this.dragonEmberT = 0;
+    this.wyverns = [];
+    this.wyvernRings = [];
+    this.wyvernBursts = [];
+    this.wyvernTetherT = 0;
+    this.wyvernGuardT = 0;
+    const sealConfig = questSealConfig(this.quest?.stage);
+    this.seals = sealConfig ? sealConfig.spots.map((p, i) => ({
+      ...toWorld(layoutPoint(this.map, p)), team: 0, radius: sealConfig.radius * S, allies: sealConfig.allies[i] ?? 1, progress: 0, sealed: false, contested: false,
     })) : [];
-    this.sealRespawnT = QUEST.seals.respawnEvery;
+    this.sealRespawnT = sealConfig?.respawnEvery ?? QUEST.seals.respawnEvery;
     this.lantern = this.quest?.stage === QUEST.escortStage
-      ? createLantern(data.slots.slice(0, QUEST.partySlots).filter((sl) => sl.control !== 'off').length, S, HUD_HEIGHT) : null;
+      ? createLantern(data.slots.slice(0, QUEST.partySlots).filter((sl) => sl.control !== 'off').length, S, HUD_HEIGHT, QUEST.escort.path.map((p) => layoutPoint(this.map, p))) : null;
     this.escortRespawnT = QUEST.escort.respawnEvery;
     this.wardenReviveT = -1;
     this.wardenGruntT = QUEST.wardens.gruntRespawn;
@@ -223,13 +258,15 @@ export class BattleScene extends BattleState implements Arena {
     this.lOver = this.add.container();
     this.lTop = this.add.container();
     world.add([this.lFloor, this.lSprites, this.lOver, this.lTop]);
-    this.lFloor.add(this.add.image(0, 0, addArenaTexture(this, this.map)).setOrigin(0, 0).setScale(S / MAP_RES));
+    const arenaTexture = addArenaTexture(this, this.map);
+    if (this.map.layout) this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.textures.remove(arenaTexture));
+    this.lFloor.add(this.add.image(0, 0, arenaTexture).setOrigin(0, 0).setScale(S / MAP_RES));
 
     // Random each round: which side red starts on (team modes) and who starts where.
     const flip = this.mode !== 'ffa' && !this.quest && Math.random() < 0.5;
     const obstacles = obstaclesFor(this.map, this.mode, flip)
       .filter((o) => !(o.kind === 'deadtree' && (
-        (this.quest?.stage === QUEST.rescueStage && o.x === QUEST.rescue.tree.x && o.y === QUEST.rescue.tree.y) ||
+        (this.quest?.stage === QUEST.rescueStage) ||
         this.quest?.stage === QUEST.groveStage)))
       .map(toWorldRect);
     const walls = obstacles.map((o) => {
@@ -275,7 +312,7 @@ export class BattleScene extends BattleState implements Arena {
       const warden = this.quest?.stage === QUEST.wardenStage ? this.questBossSeats.indexOf(i) : -1;
       const isBoss = this.questBossSeats.includes(i);
       const dirge = this.quest?.stage === QUEST.dirgeStage && isBoss;
-      const sp = isBoss ? this.freeSpot(toWorld(warden >= 0 ? { x: 900, y: warden === 0 ? 265 : 547 } : dirge ? { x: QUEST.dirge.bell.x + 90, y: QUEST.dirge.bell.y } : { x: WIDTH - 140, y: SCREEN_MID_Y }), [], (dirge ? QUEST.dirge.radius : QUEST.boss.radius) + 4) : startAt[i];
+      const sp = isBoss ? this.freeSpot(toWorld(layoutPoint(this.map, warden >= 0 ? { x: 900, y: warden === 0 ? 265 : 547 } : dirge ? { x: QUEST.dirge.bell.x + 90, y: QUEST.dirge.bell.y } : { x: WIDTH - 140, y: SCREEN_MID_Y })), [], (dirge ? QUEST.dirge.radius : QUEST.boss.radius) + 4) : startAt[i];
       this.spawns[i] = sp;
       const r = isBoss ? (dirge ? QUEST.dirge.radius : QUEST.boss.radius) : 18;
       const body = this.physics.add.body(sp.x - r, sp.y - r, r * 2, r * 2);
@@ -286,8 +323,9 @@ export class BattleScene extends BattleState implements Arena {
       const finaleBoss = isBoss && slot.control === 'cpu' && QUEST_BOSSES.includes(this.quest?.stage ?? -1);
       const middleFoe = !!this.quest && QUEST_TACTICS.includes(this.quest.stage) && slot.control === 'cpu' && !isBoss
         && (this.isHell ? slot.team === 0 : i >= QUEST.partySlots);
-      const skillIds = finaleBoss ? questFoeSkills('boss')
-        : middleFoe ? questFoeSkills('middle')
+      // Tactic-stage enemies (in Hell, the hero side) roll the same four sensible skills as any CPU enemy.
+      const skillIds = finaleBoss ? questBossSkills()
+        : middleFoe ? randomCpuEquipment(this.mode, gear.role, QUEST_ENEMY_BANNED, CPU_ENEMY_SKILLS).skills
           : isBoss && slot.control !== 'cpu' ? gear.skills.slice(0, SKILL_SLOTS) : gear.skills;
       const skills = skillIds.map(skillById);
       const weapon = oniWeapon && isBoss ? oniWeapon : WEAPONS[gear.weapon];
@@ -307,8 +345,24 @@ export class BattleScene extends BattleState implements Arena {
         const hard = slot.control === 'cpu' && getSettings().difficulty === 'hard' ? HARD_CPU_HP : 1;
         f.maxHp = f.hp = Math.round(role.maxHp * QUEST.night.hp * hard);
       } else if (this.quest && i < QUEST.partySlots) f.maxHp = f.hp = Math.round(role.maxHp * QUEST.partyHp * (this.isHell && getSettings().difficulty === 'hard' ? HARD_CPU_HP : 1));
-      else if (this.quest && i >= QUEST.partySlots && (this.quest.stage === QUEST.sealStage || this.quest.stage === QUEST.escortStage)) {
-        const tougher = this.quest.stage === QUEST.sealStage ? QUEST.seals.guardHp : QUEST.escort.guardHp;
+      else if (this.quest?.stage === QUEST.ambushStage && f.team === 1) {
+        const hard = !this.isHell && slot.control === 'cpu' && getSettings().difficulty === 'hard' ? HARD_CPU_HP : 1;
+        f.maxHp = f.hp = Math.round(role.maxHp * QUEST.ambush.enemyHp * hard);
+      }
+      else if (this.quest && i >= QUEST.partySlots && this.quest.stage === QUEST.dragonStage) {
+        // The dragon's guards are cave cultists: less HP and softer hits.
+        const hard = !this.isHell && slot.control === 'cpu' && getSettings().difficulty === 'hard' ? HARD_CPU_HP : 1;
+        f.maxHp = f.hp = Math.round(role.maxHp * QUEST.dragon.guardHp * hard);
+        f.damageScale = QUEST.dragon.guardDamage;
+      }
+      else if (this.quest && i >= QUEST.partySlots && this.quest.stage === QUEST.wyvernStage) {
+        // The wyverns' guards are gorge bandits: less HP and softer hits.
+        const hard = !this.isHell && slot.control === 'cpu' && getSettings().difficulty === 'hard' ? HARD_CPU_HP : 1;
+        f.maxHp = f.hp = Math.round(role.maxHp * QUEST.wyverns.guardHp * hard);
+        f.damageScale = QUEST.wyverns.guardDamage;
+      }
+      else if (this.quest && i >= QUEST.partySlots && (questSealConfig(this.quest.stage) || this.quest.stage === QUEST.escortStage || this.quest.stage === QUEST.beaconStage)) {
+        const tougher = this.quest.stage === QUEST.beaconStage ? QUEST.beacons.guardHp : questSealConfig(this.quest.stage)?.guardHp ?? QUEST.escort.guardHp;
         const hard = !this.isHell && slot.control === 'cpu' && getSettings().difficulty === 'hard' ? HARD_CPU_HP : 1;
         f.maxHp = f.hp = Math.round(role.maxHp * tougher * hard);
       }
@@ -319,6 +373,7 @@ export class BattleScene extends BattleState implements Arena {
         f.boss = true;
         f.radius = r;
         f.damageScale = warden >= 0 ? QUEST.wardens.damage : dirge ? QUEST.dirge.damage : QUEST.boss.damage;
+        if (QUEST_BOSSES.includes(this.quest?.stage ?? -1)) f.soulGainScale = QUEST.boss.soulGainScale;
       }
       this.prepareBossReserve(f, partySize);
       // Quest: items and soul carry over from the last stage.
@@ -342,6 +397,7 @@ export class BattleScene extends BattleState implements Arena {
       this.lTop.add(this.nameTags[i]);
     });
     this.spawnNightBoss(partySize);
+    this.holdRescueReserves();
 
     const bodies = this.fighters.map((f) => f.body);
     this.physics.add.collider(bodies, walls);
@@ -355,6 +411,8 @@ export class BattleScene extends BattleState implements Arena {
       if (this.quest.stage === QUEST.groveStage) this.placeGroveTrees(partySize);
       if (this.quest.stage === QUEST.wardenStage) this.placeWardenTree(partySize);
       if (this.quest.stage === QUEST.snareStage) this.placeSnareTrees(partySize);
+      if (this.quest.stage === QUEST.dragonStage) this.placeDragon(partySize);
+      if (this.quest.stage === QUEST.wyvernStage) this.placeWyverns(partySize);
       if (this.quest.stage === QUEST.nightStage) {
         this.nightShade = this.add.renderTexture(0, 0, WIDTH, HEIGHT).setOrigin(0, 0).setDepth(3);
         this.nightLights = this.add.graphics().setVisible(false);
@@ -390,16 +448,20 @@ export class BattleScene extends BattleState implements Arena {
       lootChests: !this.quest,
       towers: this.towers,
       capturePoints: this.seals,
+      spiritRelay: this.spiritRelay ?? undefined,
       escort: this.lantern ?? undefined,
       siege: this.mode === 'siege' || this.quest?.stage === 1 || this.quest?.stage === QUEST.rescueStage || this.quest?.stage === QUEST.groveStage || this.quest?.stage === QUEST.snareStage,
+      towersWhenClear: this.quest?.stage === QUEST.dragonStage || this.quest?.stage === QUEST.wyvernStage ? 220 : undefined,
       coordinateCaptures: this.hasHellPlayers,
-      defendTeam: this.isHell ? 1 : this.quest?.stage === 1 || this.quest?.stage === QUEST.rescueStage || this.quest?.stage === QUEST.groveStage || this.quest?.stage === QUEST.sealStage || this.quest?.stage === QUEST.escortStage || this.quest?.stage === QUEST.snareStage ? 0 : undefined,
+      defendTeam: this.isHell ? 1 : this.quest?.stage === 1 || this.quest?.stage === QUEST.rescueStage || this.quest?.stage === QUEST.groveStage || questSealConfig(this.quest?.stage) || this.quest?.stage === QUEST.escortStage || this.quest?.stage === QUEST.snareStage || this.quest?.stage === QUEST.ambushStage || this.quest?.stage === QUEST.beaconStage ? 0 : undefined,
       safe: this.map.barrier ? () => this.barrierCircle() : undefined,
       herbs: this.map.herbs ? () => this.herbs.filter((h) => h.grown) : undefined,
       fires: () => [
         ...this.flameMarks.map((m) => ({ x: m.x, y: m.y, r: m.r })),
         ...this.flamePatches.map((p) => ({ x: p.x, y: p.y, r: p.r })),
         ...(this.map.vents ? this.ventMarks.map((m) => ({ x: m.x, y: m.y, r: this.map.vents!.radius })) : []),
+        ...this.wyvernDangers(),
+        ...sandPitDangers(this.map),
       ],
     };
     if (this.walls.length > 0) this.showPrincessIntro();
@@ -429,13 +491,22 @@ export class BattleScene extends BattleState implements Arena {
     };
     const active = this.slots.map((s, i) => ({ s, i })).filter(({ s }) => s.control !== 'off');
     const out: { x: number; y: number }[] = [];
-    if (this.mode === 'ffa') {
+    if (this.quest?.stage === QUEST.ambushStage) {
+      for (const team of [0, 1]) {
+        const spots = team === 0 ? QUEST.ambush.heroes : QUEST.ambush.enemies;
+        shuffle(active.filter(({ s }) => s.team === team)).forEach(({ i }, k) => {
+          out[i] = toWorld(layoutPoint(this.map, spots[k % spots.length]!));
+        });
+      }
+    } else if (this.mode === 'ffa') {
       const order = shuffle(active.map((_, k) => k));
-      active.forEach(({ i }, k) => (out[i] = toWorld(spawnPoint(order[k], null, 0))));
+      active.forEach(({ i }, k) => (out[i] = toWorld(layoutPoint(this.map, spawnPoint(order[k], null, 0)))));
     } else {
+      // The dragon's (or wyverns') guards start in front of it instead of at the back wall, where the dragon lies.
+      const guards = this.quest?.stage === QUEST.dragonStage ? QUEST.dragon.guards : this.quest?.stage === QUEST.wyvernStage ? QUEST.wyverns.guards : null;
       for (const team of [0, 1]) {
         const members = shuffle(active.filter(({ s }) => s.team === team));
-        members.forEach(({ i }, k) => (out[i] = toWorld(spawnPoint(0, sideOf(team, flip), k))));
+        members.forEach(({ i }, k) => (out[i] = toWorld(layoutPoint(this.map, guards && team === 1 ? guards[k % guards.length]! : spawnPoint(0, sideOf(team, flip), k)))));
       }
     }
     const taken: { x: number; y: number }[] = [];
@@ -451,6 +522,7 @@ export class BattleScene extends BattleState implements Arena {
     const clear = (x: number, y: number) =>
       x > ARENA.x + r && x < ARENA.x + ARENA.w - r && y > ARENA.y + r && y < ARENA.y + ARENA.h - r &&
       !this.obstacleRects.some((o) => x > o.x - r && x < o.right + r && y > o.y - r && y < o.bottom + r) &&
+      !(this.map?.zones ?? []).some((zone) => sandPitContains(zone, x, y, r)) &&
       !taken.some((t) => Math.hypot(t.x - x, t.y - y) < r * 2.2);
     if (clear(p.x, p.y)) return p;
     for (let d = 20; d < 300; d += 20) {
@@ -497,6 +569,7 @@ export class BattleScene extends BattleState implements Arena {
       this.updateStorm(dt);
       this.updateVents(dt);
       this.updateFlames(dt);
+      this.updateSandPits(dt);
       this.updatePortals();
       this.updateRollers(dt);
       this.updateSpikes(dt);
@@ -736,6 +809,8 @@ export class BattleScene extends BattleState implements Arena {
 
   // environment terrain
   renderVortex: OmitThisParameter<typeof environmentTerrainSystem.renderVortex> = environmentTerrainSystem.renderVortex.bind(this);
+  renderSandPits: OmitThisParameter<typeof renderSandPits> = renderSandPits.bind(this);
+  updateSandPits: OmitThisParameter<typeof updateSandPits> = updateSandPits.bind(this);
   updatePads: OmitThisParameter<typeof environmentTerrainSystem.updatePads> = environmentTerrainSystem.updatePads.bind(this);
   renderPads: OmitThisParameter<typeof environmentTerrainSystem.renderPads> = environmentTerrainSystem.renderPads.bind(this);
   updateAltar: OmitThisParameter<typeof environmentTerrainSystem.updateAltar> = environmentTerrainSystem.updateAltar.bind(this);
@@ -782,6 +857,19 @@ export class BattleScene extends BattleState implements Arena {
   renderSnareCast: OmitThisParameter<typeof questSnareSystem.renderSnareCast> = questSnareSystem.renderSnareCast.bind(this);
   renderSnareTree: OmitThisParameter<typeof questSnareSystem.renderSnareTree> = questSnareSystem.renderSnareTree.bind(this);
 
+  // quest dragon
+  placeDragon: OmitThisParameter<typeof questDragonSystem.placeDragon> = questDragonSystem.placeDragon.bind(this);
+  updateDragon: OmitThisParameter<typeof questDragonSystem.updateDragon> = questDragonSystem.updateDragon.bind(this);
+  renderDragon: OmitThisParameter<typeof questDragonSystem.renderDragon> = questDragonSystem.renderDragon.bind(this);
+  renderDragonHead: OmitThisParameter<typeof questDragonSystem.renderDragonHead> = questDragonSystem.renderDragonHead.bind(this);
+  applyDragonHit: OmitThisParameter<typeof questDragonSystem.applyDragonHit> = questDragonSystem.applyDragonHit.bind(this);
+  dragonBlast: OmitThisParameter<typeof questDragonSystem.dragonBlast> = questDragonSystem.dragonBlast.bind(this);
+  // quest wyverns
+  placeWyverns: OmitThisParameter<typeof questWyvernSystem.placeWyverns> = questWyvernSystem.placeWyverns.bind(this);
+  updateWyverns: OmitThisParameter<typeof questWyvernSystem.updateWyverns> = questWyvernSystem.updateWyverns.bind(this);
+  renderWyverns: OmitThisParameter<typeof questWyvernSystem.renderWyverns> = questWyvernSystem.renderWyverns.bind(this);
+  renderWyvern: OmitThisParameter<typeof questWyvernSystem.renderWyvern> = questWyvernSystem.renderWyvern.bind(this);
+  wyvernDangers: OmitThisParameter<typeof questWyvernSystem.wyvernDangers> = questWyvernSystem.wyvernDangers.bind(this);
   // quest dirge
   updateDirge: OmitThisParameter<typeof questDirgeSystem.updateDirge> = questDirgeSystem.updateDirge.bind(this);
   renderDirge: OmitThisParameter<typeof questDirgeSystem.renderDirge> = questDirgeSystem.renderDirge.bind(this);
@@ -816,6 +904,8 @@ export class BattleScene extends BattleState implements Arena {
   // quest seals
   updateSeals: OmitThisParameter<typeof questSealsSystem.updateSeals> = questSealsSystem.updateSeals.bind(this);
   renderSeals: OmitThisParameter<typeof questSealsSystem.renderSeals> = questSealsSystem.renderSeals.bind(this);
+  updateSpiritRelay: OmitThisParameter<typeof updateSpiritRelay> = updateSpiritRelay.bind(this);
+  renderSpiritRelay: OmitThisParameter<typeof renderSpiritRelay> = renderSpiritRelay.bind(this);
 
   // objectives chests
   addChest: OmitThisParameter<typeof objectivesChestsSystem.addChest> = objectivesChestsSystem.addChest.bind(this);
@@ -831,6 +921,8 @@ export class BattleScene extends BattleState implements Arena {
   helpCalloutSpot: OmitThisParameter<typeof objectivesPrincessSystem.helpCalloutSpot> = objectivesPrincessSystem.helpCalloutSpot.bind(this);
   updatePrincessProgress: OmitThisParameter<typeof objectivesPrincessSystem.updatePrincessProgress> = objectivesPrincessSystem.updatePrincessProgress.bind(this);
   breakWall: OmitThisParameter<typeof objectivesPrincessSystem.breakWall> = objectivesPrincessSystem.breakWall.bind(this);
+  holdRescueReserves: OmitThisParameter<typeof objectivesPrincessSystem.holdRescueReserves> = objectivesPrincessSystem.holdRescueReserves.bind(this);
+  releaseRescueGuards: OmitThisParameter<typeof objectivesPrincessSystem.releaseRescueGuards> = objectivesPrincessSystem.releaseRescueGuards.bind(this);
   rescueTreeSealed: OmitThisParameter<typeof objectivesPrincessSystem.rescueTreeSealed> = objectivesPrincessSystem.rescueTreeSealed.bind(this);
   updateRescueGate: OmitThisParameter<typeof objectivesPrincessSystem.updateRescueGate> = objectivesPrincessSystem.updateRescueGate.bind(this);
   renderRescueGate: OmitThisParameter<typeof objectivesPrincessSystem.renderRescueGate> = objectivesPrincessSystem.renderRescueGate.bind(this);

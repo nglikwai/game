@@ -1,12 +1,12 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
-const { AIController } = load('src/controls.ts');
+const { AIController } = load('@/ai/AIController.ts');
 const { BattleScene } = load('src/scenes/BattleScene.ts');
-const { Fighter } = load('src/Fighter.ts');
-const { WEAPONS } = load('src/weapons.ts');
-const { roleById } = load('src/roles.ts');
-const { skillById } = load('src/skills.ts');
+const { Fighter } = load('src/gameplay/Fighter.ts');
+const { WEAPONS } = load('src/gameplay/weapons.ts');
+const { roleById } = load('src/gameplay/roles.ts');
+const { skillById } = load('src/gameplay/skills.ts');
 
 function fighter(index, team, x, y, weapon = 'shuriken') {
   const body = { center: { x, y }, velocity: { x: 100, y: 100 } };

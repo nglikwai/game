@@ -1,14 +1,14 @@
 import * as Phaser from 'phaser';
 import { QUEST } from '@/config';
-import { Fighter } from '@/Fighter';
-import { sfx } from '@/sfx';
+import { Fighter } from '@/gameplay/Fighter';
+import { sfx } from '@/audio/sfx';
 import type { BattleScene } from '@/scenes/BattleScene';
 
 /** The state and operations this system needs from the scene. No runtime scene dependency. */
 type CombatProjectilesContext = Phaser.Scene & Pick<BattleScene,
-  'arenaRect' | 'bouncers' | 'caltrops' | 'chests' | 'countdown'
-  | 'damageLantern' | 'damageTower' | 'dealDamage' | 'explodeKeg' | 'fighters'
-  | 'fx' | 'kegs' | 'lantern' | 'over' | 'projectiles'
+  'dragonBlast' | 'arenaRect' | 'bouncers' | 'caltrops' | 'chests' | 'countdown'
+  | 'damageTower' | 'dealDamage' | 'explodeKeg' | 'fighters'
+  | 'fx' | 'kegs' | 'over' | 'projectiles'
   | 'quest' | 'rescueGateOpen' | 'rescueGateX' | 'shotBlockers' | 'stats'
   | 'towers'
 >;
@@ -36,7 +36,11 @@ export function updateProjectiles(this: CombatProjectilesContext, dt: number): v
     const wall =
       this.shotBlockers.some((r) => Phaser.Geom.Rectangle.Contains(r, p.x, p.y)) ||
       this.chests.some((c) => Math.abs(p.x - c.x) < c.w / 2 && Math.abs(p.y - c.y) < c.h / 2);
-    const tower = p.ignoreObstacles ? undefined : this.towers.find((tw) => tw.alive && Phaser.Geom.Rectangle.Contains(tw.rect, p.x, p.y));
+    // A dragon's shots fly through its own heads (and a wyvern's through both wyverns).
+    const tower = p.ignoreObstacles ? undefined : this.towers.find((tw) => tw.alive
+      && !(p.element && (tw.dragon || tw.wyvern) && tw.team === p.team)
+      && !(tw.tree && !tw.grove && p.team === tw.team)
+      && Phaser.Geom.Rectangle.Contains(tw.rect, p.x, p.y));
     if (tower) {
       // Enemy shots damage the tower; friendly ones just stop.
       if (tower.team !== p.team) this.damageTower(tower, e.damage * (p.owner?.role.attack ?? 1), p.owner);
@@ -54,22 +58,23 @@ export function updateProjectiles(this: CombatProjectilesContext, dt: number): v
       p.dead = true;
       continue;
     }
-    const lantern = this.lantern;
-    if (lantern?.alive && p.team !== lantern.team && Math.abs(p.x - lantern.x) <= lantern.w / 2 + p.radius && Math.abs(p.y - lantern.y) <= lantern.h / 2 + p.radius) {
-      this.damageLantern(e.damage * (p.owner?.role.attack ?? 1), p.owner);
-      p.dead = true;
-      continue;
-    }
     for (const t of this.fighters) {
       if (t.team === p.team || !t.alive || t.untouchable) continue;
       if (Math.hypot(t.x - p.x, t.y - p.y) > t.radius + p.radius) continue;
       const s = Math.hypot(p.vx, p.vy);
-      this.dealDamage(p.owner, t, e.damage * (p.owner?.role.attack ?? 1), p.vx / s, p.vy / s, e.knockback, e.hitstun);
+      // A dragon's shot bursts on whoever it reaches (the burst below does the damage).
+      if (!p.element) this.dealDamage(p.owner, t, e.damage * (p.owner?.role.attack ?? 1), p.vx / s, p.vy / s, e.knockback, e.hitstun);
       p.dead = true;
       break;
     }
   }
-  for (let i = this.projectiles.length - 1; i >= 0; i--) if (this.projectiles[i].dead) this.projectiles.splice(i, 1);
+  for (let i = this.projectiles.length - 1; i >= 0; i--) {
+    const p = this.projectiles[i]!;
+    if (!p.dead) continue;
+    // A dragon's shot bursts wherever it stops: on a fighter, a stone, the wall or at the end of its range.
+    if (p.element) this.dragonBlast(p);
+    this.projectiles.splice(i, 1);
+  }
 }
 
 export function dropCaltrops(this: CombatProjectilesContext, f: Fighter, e: { radius: number; duration: number; dps: number; slow: number }): void {

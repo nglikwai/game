@@ -1,10 +1,10 @@
 import * as Phaser from 'phaser';
 import { HEIGHT, HUD_HEIGHT, RES, WIDTH } from '@/config';
-import { Fighter } from '@/Fighter';
-import { rayAngles } from '@/weapons';
-import { sfx } from '@/sfx';
+import { Fighter } from '@/gameplay/Fighter';
+import { rayAngles } from '@/gameplay/weapons';
+import { sfx } from '@/audio/sfx';
 import { ARENA as SCREEN_ARENA } from '@/maps';
-import { type Pose } from '@/art';
+import { type Pose } from '@/rendering/fighterArt';
 import { FONT, Petals, toHex, txt } from '@/ui';
 import { S, toWorld, ARENA } from '@/battle/coordinates';
 import type { BattleScene } from '@/scenes/BattleScene';
@@ -110,6 +110,12 @@ export function weaponFx(this: PresentationEffectsContext, f: Fighter): void {
       break;
     case 'yari':
       if (s.kind === 'rect') this.fx.spearThrust(f.x, f.y, f.facing, s.offset, s.length, s.width, f.color);
+      break;
+    case 'nunchaku':
+      if (s.kind === 'wings') this.fx.nunchakuWhirl(() => ({ x: f.x, y: f.y }), f.facing, s.radius, s.angle);
+      break;
+    case 'whip':
+      if (s.kind === 'wave') this.fx.whipLash(() => ({ x: f.x, y: f.y }), f.facing, s);
       break;
     case 'talisman':
       if (s.kind === 'cross') this.fx.lightningCross(f.x, f.y, f.facing, s.arm, s.width);

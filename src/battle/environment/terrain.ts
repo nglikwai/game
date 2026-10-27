@@ -1,12 +1,13 @@
 import type { TerrainZone } from '@/maps';
 import * as Phaser from 'phaser';
 import { QUEST, ALTAR, PLAYER_COLORS } from '@/config';
-import { Fighter } from '@/Fighter';
-import { sfx } from '@/sfx';
+import { Fighter } from '@/gameplay/Fighter';
+import { sfx } from '@/audio/sfx';
 import { type TerrainKind } from '@/maps';
 import { C } from '@/ui';
 import { S, toWorld, toWorldRect, toDesign } from '@/battle/coordinates';
 import type { BattleScene } from '@/scenes/BattleScene';
+import { sandPitContains, sandPitForce } from '@/battle/environment/sandPits';
 
 /** The state and operations this system needs from the scene. No runtime scene dependency. */
 type EnvironmentTerrainContext = Phaser.Scene & Pick<BattleScene,
@@ -169,7 +170,7 @@ export function renderWind(this: EnvironmentTerrainContext, now: number): void {
 /** The first zone under a battlefield point (zones are in map / design coordinates). */
 export function zoneAt(this: EnvironmentTerrainContext, wx: number, wy: number): TerrainZone | undefined {
   const { x, y } = toDesign(wx, wy);
-  return this.map.zones?.find((zone) => Math.abs(x - zone.x) < zone.w / 2 && Math.abs(y - zone.y) < zone.h / 2);
+  return this.map.zones?.find((zone) => zone.kind === 'sandpit' ? sandPitContains(zone, wx, wy) : Math.abs(x - zone.x) < zone.w / 2 && Math.abs(y - zone.y) < zone.h / 2);
 }
 
 export function terrainAt(this: EnvironmentTerrainContext, wx: number, wy: number): TerrainKind | null {
@@ -201,6 +202,7 @@ export function tideState(this: EnvironmentTerrainContext): { flooded: boolean; 
 export function windAt(this: EnvironmentTerrainContext, wx: number, wy: number): { x: number; y: number; } | null {
   const z = this.zoneAt(wx, wy);
   if (z?.kind === 'wind' && z.push) return z.push;
+  if (z?.kind === 'sandpit') return sandPitForce(z, wx, wy);
   if (z?.kind === 'vortex' && z.pull) {
     // Drag towards the middle (harder near it) and swirl round.
     const c = toWorld(z);

@@ -4,8 +4,8 @@ const load = require('./load-source.cjs')();
 const { BattleScene } = load('src/scenes/BattleScene.ts');
 const { MAPS } = load('src/maps/index.ts');
 const { ARENA, cagesFor, obstaclesFor, chestsFor, sideOf } = load('src/maps/common.ts');
-const { PRINCESS_WALL_HP } = load('src/config.ts');
-const { createMatchStats } = load('src/matchStats.ts');
+const { PRINCESS_WALL_HP } = load('src/config/index.ts');
+const { createMatchStats } = load('src/battle/results/stats.ts');
 
 function battle() {
   const scene = new BattleScene();

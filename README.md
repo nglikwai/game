@@ -16,7 +16,7 @@ still adjusts settings, and Enter/Space cycles them too.
 
 ## Language
 The interface defaults to Traditional Chinese (繁體中文); 設定 (Settings) on the title screen switches to English
-and toggles sound effects and music. All UI text lives in `src/i18n.ts`.
+and toggles sound effects and music. All UI text lives in `src/localization/index.ts`.
 
 The menus share an ink-blue and brass style: illustrated fighter portraits and weapon crests,
 map thumbnails, framed skill badges and clear primary actions. The lobby keeps all eight slots
@@ -25,7 +25,7 @@ dialogs, battle HUD panels and MVP/SVP medals follow the same visual language.
 
 ## Modes
 
-In **闖關**, choose **自由 / Free** under the faction rules to give each active player card its own **勇者陣營 / Heroes** or **地獄陣營 / Hell** selector. P1 can play a hero while P2 (or any other players) controls a Hell enemy in the same run. Mixed factions compete over the existing stage objectives: heroes advance by completing them, Hell wins by defeating the heroes or pushing the lantern home. Each stage announces its winning faction, and both sides can continue along the randomized route. CPU fighters fill the remaining seats when Hell is playable. All-hero cooperative runs and all-Hell defensive runs remain available. In the finale, the first human Hell player controls the Oni King, or the first two human Hell players become Crimson/Jade (CPU fills a missing boss). Human bosses use three skills on the usual buttons; CPU bosses retain four. Player numbers, controls, items and stats stay with their selected faction across stages. Factions stay fixed during retry setup; weapons, skills and controls can still be edited.
+In **闖關**, choose **自由 / Free** under the faction rules to give each active player card its own **勇者陣營 / Heroes** or **地獄陣營 / Hell** selector. P1 can play a hero while P2 (or any other players) controls a Hell enemy in the same run. Mixed factions compete over the existing stage objectives: heroes advance by completing them, Hell wins by defeating the heroes or pushing the lantern home. Each stage announces its winning faction, and both sides can continue along the randomized route. CPU fighters fill the remaining seats when Hell is playable. All-hero cooperative runs and all-Hell defensive runs remain available. In the finale, the first human Hell player controls the Oni King, or the first two human Hell players become Crimson/Jade (CPU fills a missing boss). Human bosses use four skills on the usual buttons; CPU bosses retain four. Player numbers, controls, items and stats stay with their selected faction across stages. Factions stay fixed during retry setup; weapons, skills and controls can still be edited.
 
 - **混戰 Free-for-all**: last fighter standing wins.
 - **團隊戰 Team Battle**: each player picks 紅隊 / 藍隊. No friendly fire. Last team standing wins.
@@ -51,6 +51,55 @@ In **闖關**, choose **自由 / Free** under the faction rules to give each act
   party. Between stages the fallen come back and everyone heals; items, soul and stats carry over. If the whole party
   falls you can retry the stage, change your party's setup before retrying that same stage, or start over.
   Changing setup preserves the stage-start items, soul and stats checkpoint. The underworld has its own music, with a boss theme for the last stage.
+  **龍巢 Dragon's Lair** is one of the two semi-finals (each run draws one fight, two tactics, one dragon semi-final, then the finale): a three-headed dragon walks the
+  right half of the cave, keeps its distance from the nearest fighter and turns to face it, so its heads can shoot in
+  any direction. Each head is a separate target riding on the body (120 + 650 HP per party member), and the heads take
+  turns aiming at a fighter (the head glows while it takes aim, then locks for a moment before the shot). Shots are fast,
+  reach across the whole cave and burst where they land (on a fighter, a stone or the wall) over a wide area, so step
+  out of the way when a head starts glowing, or put a standing stone between you and the dragon. 炎首 fires a wide fan of three fireballs
+  (灼燒 burn: 2 HP/s for 3 s, healing on you halved), 冰首 fires a fast ice shard and a second re-aimed one (凍傷 frostbite:
+  40% slower and slower swings for 2.5 s; a second ice hit while frostbitten 冰封 freezes you for 1 s), and 雷首 fires one
+  very fast bolt (感電: 0.8 s paralysis, −15 PE, and it chains to the nearest teammate for half). Fire melts a freeze;
+  lightning does +50% to the frostbitten. Cutting off a head stops its element, but the others shoot 20% faster for each
+  head lost; while any guard stands the dragon holds back a little. Each head randomly chooses, with equal chances,
+  between its usual projectiles and a
+  three-second beam sweeping through 90 degrees. Its head glows for 0.5 s first, with no warning lines. Fire breath
+  burns, ice breath chills and freezes, and lightning breath shocks; beam control effects last at most 0.15 s and
+  damage ticks every 0.5 s at half projectile damage. Stone pillars and chests block the beam. Cutting off the firing
+  head interrupts it. Three guards (cave cultists: 70% HP, 85% damage)
+  start in front of it, and while any head lives a fallen guard comes back beside the dragon every 12 s, up to three
+  standing. To pass, cut off all three heads, then defeat the remaining guards. Healing herbs grow in the left half of
+  the cave. CPU allies fight guards that come close and otherwise chase the heads. In a Hell run the dragon fights on
+  Hell's side, which loses only when the guards and all heads fall.
+  **日月峽 Eclipse Gorge** is the other semi-final: the **日月雙龍 Sun & Moon Wyverns**, two single-headed wyverns
+  (250 + 900 HP per party member each) that walk the gorge, the Sun in the upper half and the Moon in the lower, keeping
+  their distance from the party and 280–620 px from each other. A **lightning chain** joins them while both stand and
+  shocks anyone touching it every 0.5 s (short paralysis), so it sweeps the gorge as they move. 曜日龍 the Sun Wyvern
+  either drops **烈日墜 Sunfall** (a sun bomb marked under up to three fighters, landing 1.3 s later with a fire burst)
+  or lines up a **烈焰衝鋒 Blaze Charge** (its lane shows for 1 s, then it rushes down it, burning and knocking aside
+  everyone in the way). 蝕月龍 the Moon Wyvern sends out a **寒月環 Frost Ring** that spreads across the gorge with
+  three safe gaps (bright wedges show where they will open; anywhere else on the ring is frostbite, or a freeze if
+  already frostbitten) or a fan of five **月影冰刺 Moon Shards**. **The bond**: when one wyvern falls, the other attacks
+  60% faster and raises it 15 s later at half HP; fell both within 15 s and they stay down for good. Two guards
+  (bandits: 80% HP, 85% damage) fight in front; while both wyverns stand, a fallen guard returns every 18 s. To pass,
+  fell both wyverns and the guards. Boulders and a standing stone give cover; herbs grow at the mouth of the gorge.
+  In a Hell run the wyverns fight on Hell's side, which loses only when both wyverns and every guard fall.
+  **赤砂伏擊 Red Sand Ambush** joins the first 「擊敗敵人」 phase, which draws one of four opening fights.
+  Heroes start together in a caravan yard covered in red sand, wind ripples and dunes; enemies attack from both flanks. Clear every enemy
+  to pass. Ambushers retain their original 125% role HP, normal damage, and two-to-four enemy scaling.
+  Four large sand funnels (240 design pixels across) surround safe central lanes: entering one slows, pulls inward
+  and deals 10 damage per second.
+  The dark core (18% of the pit radius) is instantly fatal, including while casting or holding a Revival Pill.
+  Weapon and barrel knockback can push either side into the pits. CPUs route around them; forced spawn positions
+  and random chests stay clear. Stone cover, explosive barrels and healing herbs provide room to fight back.
+  Hell players take the ambushers' side. Randomized pit geometry and visible funnels stay aligned on retry.
+  **引魂古道 Spirit Lantern Path** is a carrying trial in the six-stage tactical pool (two are drawn per run).
+  Collect blue wandering spirits at the three springs and bring six back to the green lantern on the left.
+  Each hero can carry one; being defeated or trapped drops it for another hero to recover. Delivery is immediate.
+  Up to three spirits are available at once, with replacements every eight seconds until six can be delivered.
+  Guards return one at a time every ten seconds and prioritize couriers; CPU heroes collect and return spirits.
+  Delivering the sixth clears immediately, without needing to defeat the remaining guards. Hell players intercept
+  the couriers and win by defeating the heroes. Both new stages keep the run's randomized layout on retry.
   The party fights with 120% of its role's max HP and recovers PE 10% faster in every Quest stage (including
   CPU allies, stacking with role and tower bonuses). Enemy and boss PE recovery stays unchanged.
   In stage 2 the party also has a small tower of its own that shoots enemies and buffs allies standing near it (it can be destroyed, and it doesn't bring anyone back). Enemies never get 續命 Lifeline. Stage 2 towers revive guards at 2.5 times the normal wait (10–35 seconds); the stage 3 tree uses twice the normal wait (8–28 seconds).
@@ -73,7 +122,7 @@ twice as fast and take 20% less damage. Wounded teammates inside their main towe
 tower loses the same; it never drains below 10%). Weapons and projectiles can destroy enemy towers, and the attacking team gets
 a 5 s War Drum when one falls. Only the main tower can bring players back (the small towers can't): while a team's main tower stands, its fallen players come back one at a time there, with 75% HP, an empty pocket and half their 魂 (each respawn costs that tower 10% of its max HP; in normal modes this never destroys it, while Quest stage 2 enemy towers can be exhausted); the normal wait starts at 4 s and grows to
 14 s as the battle goes on. In Team Battle a team is out once it has no
-one standing and no main tower left. Tower and respawn numbers are in `src/config.ts`.
+one standing and no main tower left. Tower and respawn numbers are in `src/config/index.ts`.
 
 Starting from the lobby and entering any Quest stage (including retries) shows a silent five-second loading screen, followed by a transition sound over one second of black. The arena music begins when the game scene appears.
 Every round then shows the frozen battlefield for three seconds before a five-second
@@ -100,9 +149,11 @@ Skills have distinct cast flourishes: healing lotuses, faceted golden shields, w
 and departure seals for ninja tricks. Team skills mark their living recipients, and Lifeline draws a thread to the revived
 ally. Thunder, Holy Fire, Sacred Tree and Reaper have separate ritual glyphs and matching target marks; their lighting
 stays within the caster's local circle. Holy Fire blooms into tapered flames and roots rise into a leafy cage.
-All twelve weapons have their own motion and impact treatment: tapered fire and frost crescents, shuriken
+All fourteen weapons have their own motion and impact treatment: tapered fire and frost crescents, shuriken
 afterimages, three kunai trails, hammer debris, visible chain links and a spiked flail head, crossing dagger cuts,
-a pointed sword lunge, a travelling spear pressure ring, paper lightning charms and layered bomb pressure waves.
+a pointed sword lunge, a travelling spear pressure ring, paper lightning charms and layered bomb pressure waves, nunchaku sticks whirled out to both sides,
+and a nine-section chain whip lashed along its S. 雙節棍 Nunchaku hits only to your left and right (nothing straight ahead
+or behind), so turn side-on to strike; 九節鞭 Chain Whip hits along an S-shaped band in front, leaving pockets in its bends.
 Weapon-specific hit accents appear only when damage lands. Throwing glints use the game clock, so pausing
 also freezes them; all visual effects expire without changing weapon reach, damage or attack timing.
 火山口 Volcano Crater (fire vents erupt two at a time after a warning) · 傳送神社 Portal Shrine (three portal pairs) ·
@@ -220,27 +271,27 @@ Settings are stored per controller name in the browser.
 The lobby's control selector lists only what is actually connected (keyboards, CPU and Off, plus the gamepads, Joy-Con halves and directly connected Joy-Cons that are present right now; a saved choice stays visible so it can be changed). Joy-Cons fall asleep and can come back in a different slot, so each "Gamepad N" choice remembers which controller model it had and follows it if it reappears elsewhere. If a player's controller drops out mid-fight the game freezes with a "controller disconnected, press a button to reconnect" message and carries on when it is back; the lobby won't start a fight while a chosen gamepad is missing. (Browsers only list a controller after a button press on the current page, so press one after reloading.)
 
 ## Where things live
-- `src/config.ts`: tuning numbers (HP, PE regen, balance budgets)
-- `src/weapons.ts`: weapon shapes, with dimensions solved from their area budgets; hit tests
-- `src/skills.ts`: skill pool per slot
-- `src/Fighter.ts`: fighter state machine (attack, skills, hits, PE)
-- `src/controls.ts`: keyboard, gamepad and CPU AI controllers
-- `src/gamepads.ts`: gamepad reading, including Switch Pro Controllers and single sideways Joy-Cons
-- `src/joyhid.ts`: direct Joy-Con input over WebHID (reports, SL / SR, reconnection)
-- `src/padconfig.ts` + `src/scenes/PadScene.ts`: the Controller Setup page: per-controller mode (whole / split Joy-Con halves) and custom button maps
-- `src/i18n.ts`: Traditional Chinese / English UI text
+- `src/config/index.ts`: tuning numbers (HP, PE regen, balance budgets)
+- `src/gameplay/weapons.ts`: weapon shapes, with dimensions solved from their area budgets; hit tests
+- `src/gameplay/skills.ts`: skill pool per slot
+- `src/gameplay/Fighter.ts`: fighter state machine (attack, skills, hits, PE)
+- `src/input/`: keyboard, gamepad and HID controllers; `src/ai/`: CPU decisions and loadouts
+- `src/input/gamepads.ts`: gamepad reading, including Switch Pro Controllers and single sideways Joy-Cons
+- `src/input/nintendoHid.ts`: direct Joy-Con input over WebHID (reports, SL / SR, reconnection)
+- `src/input/padSettings.ts` + `src/scenes/PadScene.ts`: the Controller Setup page: per-controller mode (whole / split Joy-Con halves) and custom button maps
+- `src/localization/index.ts`: Traditional Chinese / English UI text
 - `src/maps/`: 42 versus maps, eight stages across two Quest campaigns, shared map helpers, spawn points and the cached art finishing pass (`finishArt.ts`)
-- `src/art.ts`: ninja characters, held weapons, weapon / item icons (all drawn in code)
-- `src/fx.ts`: particles, weapon effects, skill cast flourishes and elemental summon rituals
-- `src/roles.ts`: the four roles
-- `src/cpuLoadout.ts`: random CPU role / weapon / skills
-- `src/items.ts`: chest items, drop chances and pocket size
-- `src/sfx.ts`: sound effects generated with the Web Audio API (including menu button sounds, and a synthesized
+- `src/rendering/fighterArt.ts`: ninja characters, held weapons, weapon / item icons (all drawn in code)
+- `src/rendering/effects.ts`: particles, weapon effects, skill cast flourishes and elemental summon rituals
+- `src/gameplay/roles.ts`: the four roles
+- `src/ai/loadouts.ts`: random CPU role / weapon / skills
+- `src/gameplay/items.ts`: chest items, drop chances and pocket size
+- `src/audio/sfx.ts`: sound effects generated with the Web Audio API (including menu button sounds, and a synthesized
   death scream whose voice depends on the fighter: deep for a 武士 or the boss, high for a 忍者)
-- `src/music.ts`: procedural background music: koto and flute in the menus, taiko and shamisen in battle, dark
+- `src/audio/music.ts`: procedural background music: koto and flute in the menus, taiko and shamisen in battle, dark
   'hell' and 'boss' pieces for Quest, and victory / defeat music at the end of a round
-- `src/settings.ts`: saved lobby setup (mode, slots, loadouts) and validation
-- `src/ui.ts`: UI kit (theme, frames, buttons, modals, arrow-key focus navigation)
+- `src/state/gameSettings.ts`: saved lobby setup (mode, slots, loadouts) and validation
+- `src/ui/`: UI kit, split into theme, components, focus navigation, particles and modal scene support
 - `src/scenes/`: Title, Mode, Lobby (+ loadout window) and Battle scenes
 
 ## Code structure
@@ -250,3 +301,32 @@ Battle systems are grouped under `src/battle/`; `BattleScene.ts` owns the Phaser
 See [the architecture guide](docs/architecture.md) for module ownership, state flow and how to add stages.
 
 Run `npm test` for gameplay checks and `npm run build` for type checking and the production bundle.
+
+## Random Quest layouts and skill shortcuts
+
+Every Quest stage receives a seeded terrain variation: rivers and bridges, trees,
+gates, cover, seals, lantern lanes and fire sources shift together. Artwork,
+collision rectangles, spawn placement and CPU routing share the same mapping.
+Arena borders stay fixed and passage widths remain usable. Retrying a stage
+(including editing its loadout) keeps its layout; a fresh run draws a new seed.
+Variant arena textures are removed when the battle scene shuts down.
+
+Human players can equip **four skills**. Highlight a skill in the loadout pool
+and press the skill key/button that should cast it to assign that exact slot.
+Replacing a slot moves an already-equipped skill without creating a duplicate.
+Keyboard Enter and mouse clicks retain the usual equip/remove behavior.
+
+Skill 4 defaults to **T** (WASD), **\** (arrows), **P** (IJKL) or **Num7**.
+On a directly connected Joy-Con it uses the free outer shoulder: **L** on the
+left Joy-Con or **R** on the right. SL/SR keep their item actions. Full Switch
+Pro / Xbox-style pads use **L / LB**. Browser-split Joy-Con pairs fall back to
+the stick click because their SL/SR buttons are not exposed in that mapping;
+Controller Setup can assign a different physical button. Existing saved
+six-action maps and keyboard bindings retain their original action indices;
+skill 4 is appended, and an unused key is chosen if its default is already bound.
+
+The source root contains only `main.ts` and `vite-env.d.ts`. Gameplay, AI,
+player input, audio, rendering, UI, localization, configuration and saved settings
+live in their owning folders. Quest maps and versus arenas are grouped separately.
+Run `npm run check` for architecture and TypeScript checks; `npm run build`
+also enforces these boundaries before producing the game bundle.

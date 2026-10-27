@@ -1,18 +1,18 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
-const { FIRE_KUNAI, THUNDER_FAN, WEAPONS, rollOniWeapon, shapeArea, shapeReach, shapeHits, shapeHitsRect } = load('src/weapons.ts');
-const { WEAPON_AREA, DAMAGE_PER_SEC, PE_COST_PER_SEC, KNOCKBACK_PER_SEC } = load('src/config.ts');
-const { randomCpuLoadout } = load('src/cpuLoadout.ts');
+const { FIRE_KUNAI, THUNDER_FAN, WEAPONS, rollOniWeapon, shapeArea, shapeReach, shapeHits, shapeHitsRect } = load('src/gameplay/weapons.ts');
+const { WEAPON_AREA, DAMAGE_PER_SEC, PE_COST_PER_SEC, KNOCKBACK_PER_SEC } = load('src/config/index.ts');
+const { randomCpuLoadout } = load('src/ai/loadouts.ts');
 const { BattleScene } = load('src/scenes/BattleScene.ts');
-const { Fx } = load('src/fx.ts');
-const { drawHeldWeapon, drawWeaponIcon } = load('src/art.ts');
-const { T, setLang } = load('src/i18n.ts');
+const { Fx } = load('src/rendering/effects.ts');
+const { drawHeldWeapon, drawWeaponIcon } = load('src/rendering/fighterArt.ts');
+const { T, setLang } = load('src/localization/index.ts');
 const yari = WEAPONS.find((w) => w.id === 'yari');
 
 test('Yari appends a bilingual option while preserving saved weapon indices and balance', () => {
   assert.deepEqual(Array.from(WEAPONS, (w) => w.id), [
-    'fan', 'shuriken', 'hammer', 'daggers', 'flail', 'kusarigama', 'bomb', 'ninjato', 'talisman', 'staff', 'kunai', 'yari',
+    'fan', 'shuriken', 'hammer', 'daggers', 'flail', 'kusarigama', 'bomb', 'ninjato', 'talisman', 'staff', 'kunai', 'yari', 'nunchaku', 'whip',
   ]);
   assert.ok(Math.abs(shapeArea(yari.shape) - WEAPON_AREA) < 1e-6);
   assert.equal(yari.damage / yari.cycle, DAMAGE_PER_SEC);

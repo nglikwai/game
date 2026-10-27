@@ -1,11 +1,12 @@
+import { skillAction } from '@/input/actions';
 import * as Phaser from 'phaser';
 import { SOUL_LEVELS, SOUL_PER_LEVEL, MAX_PLAYERS, QUEST, HUD_HEIGHT, PLAYER_COLORS, RES, WIDTH } from '@/config';
-import { Fighter } from '@/Fighter';
+import { Fighter } from '@/gameplay/Fighter';
 import { questSideOf } from '@/battle/quest/factions';
-import { POCKET_SIZE, type Item } from '@/items';
-import { skillCooldownFor } from '@/skills';
-import { T } from '@/i18n';
-import { drawWeaponIcon, drawItemIcon } from '@/art';
+import { POCKET_SIZE, type Item } from '@/gameplay/items';
+import { skillCooldownFor } from '@/gameplay/skills';
+import { T } from '@/localization';
+import { drawWeaponIcon, drawItemIcon } from '@/rendering/fighterArt';
 import { FONT, toHex } from '@/ui';
 import type { BattleScene } from '@/scenes/BattleScene';
 
@@ -84,7 +85,7 @@ export function createHudText(this: PresentationHudContext): void {
       const cy = y0 + box.y + box.size / 2;
       this.hudSkillGlyphs[i][k] = this.add.text(cx, cy, s ? s.zh[0] : '—', { fontFamily: FONT, resolution: RES, fontSize: box.size >= 20 ? '12px' : box.size >= 14 ? '11px' : '8px', color: '#ffffff' }).setOrigin(0.5).setDepth(2);
       // Key label tucked into the box's corner. CPU enemies have no key for a fourth skill.
-      return this.add.text(cx + box.size / 2 - 1, y0 + box.y + box.size - 1, f.controller.labels[k + 1] ?? '', { fontFamily: FONT, resolution: RES, fontSize: '7px', color: '#c9ced8' }).setOrigin(1, 1);
+      return this.add.text(cx + box.size / 2 - 1, y0 + box.y + box.size - 1, f.controller.labels[skillAction(k)] ?? '', { fontFamily: FONT, resolution: RES, fontSize: '7px', color: '#c9ced8' }).setOrigin(1, 1);
     });
   });
 }

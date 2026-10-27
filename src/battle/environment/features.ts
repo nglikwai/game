@@ -1,7 +1,7 @@
 import * as Phaser from 'phaser';
 import { WIDTH } from '@/config';
-import { T } from '@/i18n';
-import { sfx } from '@/sfx';
+import { T } from '@/localization';
+import { sfx } from '@/audio/sfx';
 import { ARENA_MID_Y as SCREEN_MID_Y } from '@/maps';
 import { S, toWorld, toWorldRect } from '@/battle/coordinates';
 import type { BattleScene } from '@/scenes/BattleScene';

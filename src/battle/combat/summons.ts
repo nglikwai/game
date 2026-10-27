@@ -1,10 +1,10 @@
 import * as Phaser from 'phaser';
 import { SOUL_CAST_TIME, SOUL_REAPER, SOUL_FIRE, SOUL_TREE, SOUL_MISS_PARALYZE, SOUL_THUNDER } from '@/config';
-import { Fighter } from '@/Fighter';
-import { summonStrikeCount, type SkillEffect } from '@/skills';
-import { T } from '@/i18n';
-import { sfx } from '@/sfx';
-import { REAPER_SWING } from '@/fx';
+import { Fighter } from '@/gameplay/Fighter';
+import { summonStrikeCount, type SkillEffect } from '@/gameplay/skills';
+import { T } from '@/localization';
+import { sfx } from '@/audio/sfx';
+import { REAPER_SWING } from '@/rendering/effects';
 import { toHex, txt } from '@/ui';
 import { soulHitChance, summonHitChance } from '@/battle/combat/summonRules';
 import type { BattleScene } from '@/scenes/BattleScene';
