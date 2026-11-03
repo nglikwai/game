@@ -1,3 +1,5 @@
+import { paintWaterSurface } from '@/maps/art/water';
+import { paintScenery } from '@/maps/art/renderedProps';
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, paintVignette,
@@ -76,6 +78,7 @@ function paintStrait(ctx: Ctx, rand: () => number) {
   g.addColorStop(1, '#5ac0d0');
   ctx.fillStyle = g;
   ctx.fillRect(l, ARENA.y, STRAIT_W, ARENA.h);
+  paintWaterSurface(ctx, { x: CX, y: ARENA.y + ARENA.h / 2, w: STRAIT_W, h: ARENA.h }, 'rect', 'river', rand);
   // Foam along both shores.
   ctx.strokeStyle = 'rgba(255,255,255,0.7)';
   ctx.lineWidth = 2;
@@ -108,6 +111,7 @@ function paintWhirlpool(ctx: Ctx, z: TerrainZone) {
 }
 
 function paintShoreRock(ctx: Ctx, o: Obstacle) {
+  if (paintScenery(ctx, o)) return;
   const g = ctx.createRadialGradient(o.x - 6, o.y - 6, 2, o.x, o.y, o.w * 0.6);
   g.addColorStop(0, '#9a948a');
   g.addColorStop(1, '#4a4640');

@@ -1,3 +1,4 @@
+import { paintScenery } from '@/maps/art/renderedProps';
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, mirrored,
@@ -171,6 +172,7 @@ function paintWell(ctx: Ctx, o: Obstacle) {
 }
 
 function paintBarrel(ctx: Ctx, o: Obstacle) {
+  if (paintScenery(ctx, o)) return;
   blob(ctx, o.x + 4, o.y + 6, o.w * 0.7, 'rgba(0,0,0,0.5)');
   const g = ctx.createRadialGradient(o.x - 4, o.y - 4, 2, o.x, o.y, o.w / 2);
   g.addColorStop(0, '#9a6a3a');

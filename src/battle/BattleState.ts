@@ -1,3 +1,5 @@
+import type { ExpeditionState } from '@/battle/expedition/rules';
+import type { ExpeditionPresentation } from '@/battle/expedition/presentation';
 import * as Phaser from 'phaser';
 import { type Track } from '@/audio/music';
 import { QUEST, type GameMode, type GroveIllusion } from '@/config';
@@ -25,6 +27,9 @@ export abstract class BattleState extends UIScene {
   /** Quest progress; null in other modes. */
   quest: QuestState | null = null;
   spiritRelay: SpiritRelay | null = null;
+  expedition: ExpeditionState | null = null;
+  expeditionView: ExpeditionPresentation | null = null;
+  worldLayer!: Phaser.GameObjects.Container;
   /** Quest stage 1: which wave is on, and the countdown to the next one (-1 = none coming). */
   wave = 1;
   waveT = -1;
@@ -174,7 +179,7 @@ export abstract class BattleState extends UIScene {
   projectiles: Projectile[] = [];
   world!: WorldView;
   obstacleRects: Phaser.Geom.Rectangle[] = [];
-  readonly arenaRect = new Phaser.Geom.Rectangle(ARENA.x, ARENA.y, ARENA.w, ARENA.h);
+  arenaRect = new Phaser.Geom.Rectangle(ARENA.x, ARENA.y, ARENA.w, ARENA.h);
   petals!: Petals;
   paused = false;
   /** Per fighter (by slot index): damage dealt to fighters, KOs, damage dealt to their princess's wall. */

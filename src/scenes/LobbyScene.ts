@@ -1,11 +1,12 @@
+import type { ExpeditionCheckpoint } from '@/battle/expedition/rules';
 import { DISPLAY_ACTIONS, SKILL_ACTIONS, skillAction } from '@/input/actions';
 import * as Phaser from 'phaser';
-import { connectedPads, halfLabels, halfName, labelsForPad, padKind, padLabels, padName } from '@/input/gamepads';
-import { isSplit, resolvePad } from '@/input/padSettings';
-import { directLabels, hidPad, hidPads, isProPad } from '@/input/nintendoHid';
-import { isQuestMode, isStoredQuestRoute, prepareQuest, questStageNumber, rollQuestRoute, DIFFICULTIES, HEIGHT, MAX_PLAYERS, PLAYER_COLORS, QUEST, QUEST_BOSSES, QUEST_FIGHTS, QUEST_SEMIFINALS, QUEST_RULES, QUEST_TACTICS, TEAM_COLORS, WEAPON_AREA, WIDTH } from '@/config';
+import { halfLabels, halfName, labelsForPad, padKind, padLabels, padName } from '@/input/gamepads';
+import { resolvePad } from '@/input/padSettings';
+import { directLabels, hidPad, hidPads, isProPad, onHidChange } from '@/input/nintendoHid';
+import { isPartyMode, isQuestMode, isStoredQuestRoute, prepareQuest, questStageNumber, rollQuestRoute, DIFFICULTIES, HEIGHT, MAX_PLAYERS, PLAYER_COLORS, QUEST, QUEST_BOSSES, QUEST_FIGHTS, QUEST_SEMIFINALS, QUEST_RULES, QUEST_TACTICS, TEAM_COLORS, WEAPON_AREA, WIDTH } from '@/config';
 import { KEY_SETS, isKeySet, keyLabel } from '@/input/keyboard';
-import { MAX_PAD_SLOTS, parsePad } from '@/input/controllerIds';
+import { parsePad } from '@/input/controllerIds';
 import { type ControlId } from '@/input/contracts';
 import { applyQuestRule, questFactions, questRuleOf, questSideOf } from '@/battle/quest/factions';
 import { T } from '@/localization';
@@ -16,16 +17,18 @@ import {
   C, FocusNav, Petals, UIScene, addBackdrop, addButton, addSelector, drawFrame, drawSkillIcon, toHex, toast, txt, type Modal,
 } from '@/ui';
 import { drawWeaponIcon } from '@/rendering/fighterArt';
+import { connectLobbyNavigation } from '@/ui/lobbyNavigation';
 import { drawLobbyCrest, drawLobbyDie, drawLobbyPortrait, drawRosterFrame } from '@/rendering/menuArt';
 import { addArenaTexture, getMap } from '@/maps';
 import { ROLES, roleById } from '@/gameplay/roles';
-import { WEAPONS, drawShape, shapeArea, type Weapon } from '@/gameplay/weapons';
+import { WEAPONS, drawShape, shapeArea, shapeReach, type Weapon } from '@/gameplay/weapons';
 import type { QuestState } from '@/battle/types';
 
 /** Free rule: the stage the run starts on (null = a normal run from the first stage). Kept while the game is open. */
 let freeStage: number | null = null;
 
 export interface LobbySceneData {
+  retryExpedition?: ExpeditionCheckpoint;
   /** The failed stage's starting checkpoint, preserved while editing the party. */
   retryQuest?: QuestState;
   slots?: SlotConfig[];
@@ -76,21 +79,9 @@ const K = Phaser.Input.Keyboard.KeyCodes;
 /** Keys the menus / battle already use, so they can't be bound. */
 const RESERVED_KEYS = new Set<number>([K.ENTER, K.ESC]);
 
-/**
- * The control choices to cycle through: keyboards, CPU and Off, plus only the gamepads and Joy-Cons that are connected
- * right now. A Joy-Con pair that the system joined into one controller also offers its left and right halves as two
- * separate players (listed right after that pad).
- */
+/** Keyboard, CPU and Off choices, plus directly connected controllers. Keep a selected HID visible after disconnect. */
 export function controlOptions(current: ControlId): ControlId[] {
-  const connected = new Set(connectedPads().map((p) => p.index + 1));
-  const split = new Set(connectedPads().filter((p) => isSplit(p)).map((p) => p.index + 1));
   const out: ControlId[] = ['off', 'kb1', 'kb2', 'kb3', 'kb4'];
-  for (let n = 1; n <= MAX_PAD_SLOTS; n++) {
-    // Only controllers that are actually connected are offered (plus the one already chosen, so it can be seen and changed).
-    const here = current.startsWith(`pad${n}`);
-    if (connected.has(n) || here) out.push(`pad${n}` as ControlId);
-    if (split.has(n) || (here && current.length === 5)) out.push(`pad${n}L` as ControlId, `pad${n}R` as ControlId);
-  }
   // Joy-Cons connected directly (WebHID): the Nth one connected.
   const direct = hidPads().filter((p) => p.connected).length;
   for (let n = 1; n <= 4; n++) if (n <= direct || current === `hid${n}`) out.push(`hid${n}` as ControlId);
@@ -106,6 +97,7 @@ export class LobbyScene extends UIScene {
   private bindingIdx: number | null = null;
   private loadout: { index: number; modal: Modal } | null = null;
   private retryQuest: QuestState | null = null;
+  private retryExpedition: ExpeditionCheckpoint | null = null;
   /** Stage ids for the quest run this lobby is preparing. */
   private questRoute: number[] = [];
 
@@ -115,6 +107,8 @@ export class LobbyScene extends UIScene {
 
   init(data: LobbySceneData = {}) {
     this.loadout = null;
+    this.retryExpedition = data.retryExpedition ? structuredClone(data.retryExpedition) : null;
+    if (this.retryExpedition) { const s = getSettings(); s.mode = 'expedition'; if (data.slots) s.slots = structuredClone(data.slots); }
     this.retryQuest = data.retryQuest ? structuredClone(data.retryQuest) : null;
     if (this.retryQuest) {
       const settings = getSettings();
@@ -133,6 +127,8 @@ export class LobbyScene extends UIScene {
     } else {
       this.questRoute = [];
     }
+    // Browser gamepad entries are no longer offered. Leave their seats ready for a direct connection.
+    for (const slot of getSettings().slots) if (parsePad(slot.control)) setControl(slot, 'off');
     // Phaser reuses the last scene payload when the next start passes none. Drop it, or returning
     // home and opening the lobby again would reload this stage's old slots over the saved config.
     if (this.sys?.settings) this.sys.settings.data = {};
@@ -155,16 +151,12 @@ export class LobbyScene extends UIScene {
     this.nav.onBack = () => this.leaveLobby();
     this.pushNav(this.nav);
     this.build();
-    // Plugging in (or waking up) a controller updates the cards straight away.
+    // Direct connection changes refresh the available controls and controller count.
     const refresh = () => {
       if (this.navs.length === 1) this.build();
     };
-    window.addEventListener('gamepadconnected', refresh);
-    window.addEventListener('gamepaddisconnected', refresh);
-    this.events.once('shutdown', () => {
-      window.removeEventListener('gamepadconnected', refresh);
-      window.removeEventListener('gamepaddisconnected', refresh);
-    });
+    const stopRefreshing = onHidChange(refresh);
+    this.events.once('shutdown', stopRefreshing);
   }
 
   update(_t: number, dms: number) {
@@ -178,7 +170,7 @@ export class LobbyScene extends UIScene {
     this.layer.removeAll(true);
     this.nav.reset();
 
-    const active = (isQuestMode(s.mode) ? s.slots.slice(0, QUEST.partySlots) : s.slots).filter((slot) => slot.control !== 'off').length;
+    const active = (isPartyMode(s.mode) ? s.slots.slice(0, QUEST.partySlots) : s.slots).filter((slot) => slot.control !== 'off').length;
     const header = this.add.graphics();
     drawLobbyCrest(header, 55, 39, 25);
     header.fillStyle(0x172230, 1).fillRoundedRect(WIDTH - 236, 23, 206, 34, 17);
@@ -188,7 +180,7 @@ export class LobbyScene extends UIScene {
     const questHint = s.questRule === 'hell' ? T().hellHint : s.questRule === 'free' ? T().questFactionHint : T().questStandardHint;
     this.layer.add(txt(this, 96, 55, isQuestMode(s.mode) ? questHint : 'S H A D O W  &  S T E E L', 10, C.dim, { origin: [0, 0.5] }));
     this.layer.add(txt(this, WIDTH / 2, 39, this.retryQuest ? T().questRetrySetup(questStageNumber(this.questRoute, this.retryQuest.stage)) : T().lobbyTagline, 15, '#bba983', { title: true, origin: 0.5 }));
-    this.layer.add(txt(this, WIDTH - 124, 40, T().lobbyCount(active, isQuestMode(s.mode) ? QUEST.partySlots : MAX_PLAYERS), 13, C.text, { bold: true, origin: 0.5 }));
+    this.layer.add(txt(this, WIDTH - 124, 40, T().lobbyCount(active, isPartyMode(s.mode) ? QUEST.partySlots : MAX_PLAYERS), 13, C.text, { bold: true, origin: 0.5 }));
 
     const chip = (id: string, x: number, w: number, label: string, value: string, action?: () => void, valueColor = C.text) => {
       const g = this.add.graphics();
@@ -202,7 +194,7 @@ export class LobbyScene extends UIScene {
         this.nav.add({ id, x, y: 91, w, h: 46, onEnter: action, radius: 8 });
       }
     };
-    chip('mode', 30, 250, T().mode, T().modeNames(s.mode), this.retryQuest ? undefined : () => this.scene.start('Mode'));
+    chip('mode', 30, 250, T().mode, T().modeNames(s.mode), this.retryQuest || this.retryExpedition ? undefined : () => this.scene.start('Mode'));
 
     const cycleDifficulty = () => {
       s.difficulty = DIFFICULTIES[(DIFFICULTIES.indexOf(s.difficulty) + 1) % DIFFICULTIES.length];
@@ -239,10 +231,10 @@ export class LobbyScene extends UIScene {
     const mapW = WIDTH - 30 - mapX;
     const freePick = this.picksStage();
     const questMap = this.retryQuest ? getMap(QUEST.maps[this.retryQuest.stage]) : freePick && freeStage !== null ? getMap(QUEST.maps[freeStage]) : null;
-    const mapLabel = isQuestMode(s.mode) ? questMap ? T().mapName(questMap) : freePick ? T().questStageAll : T().questMaps : s.mapId === 'random' ? T().randomShort : T().mapName(getMap(s.mapId));
-    const mapAction = !isQuestMode(s.mode) ? () => this.scene.start('Map') : freePick ? () => this.openStagePicker() : undefined;
+    const mapLabel = s.mode === 'expedition' ? T().expeditionStage : isQuestMode(s.mode) ? questMap ? T().mapName(questMap) : freePick ? T().questStageAll : T().questMaps : s.mapId === 'random' ? T().randomShort : T().mapName(getMap(s.mapId));
+    const mapAction = s.mode === 'expedition' ? undefined : !isQuestMode(s.mode) ? () => this.scene.start('Map') : freePick ? () => this.openStagePicker() : undefined;
     chip('map', mapX, mapW, freePick ? T().questStagePickLabel : T().map, mapLabel, mapAction);
-    const preview = isQuestMode(s.mode) ? questMap : getMap(s.mapId === 'random' ? undefined : s.mapId);
+    const preview = s.mode === 'expedition' ? null : isQuestMode(s.mode) ? questMap : getMap(s.mapId === 'random' ? undefined : s.mapId);
     if (preview) {
       this.layer.add(this.add.image(WIDTH - 105, 114, addArenaTexture(this, preview)).setDisplaySize(98, 42));
       const previewTrim = this.add.graphics();
@@ -251,10 +243,19 @@ export class LobbyScene extends UIScene {
     }
 
     s.slots.forEach((slot, i) => {
-      if (isQuestMode(s.mode) && i >= QUEST.partySlots) return;
+      if (isPartyMode(s.mode) && i >= QUEST.partySlots) return;
       this.buildCard(slot, i);
     });
     if (isQuestMode(s.mode)) this.drawQuestStages();
+    if (s.mode === 'expedition') {
+      const g = this.add.graphics();
+      g.fillStyle(0x1c3334, 1).fillRoundedRect(30, 405, WIDTH - 60, 205, 12);
+      this.layer.add(g);
+      this.layer.add(txt(this, 58, 434, T().expeditionStage, 26, '#cbdcba', { bold: true }));
+      this.layer.add(txt(this, 58, 482, T().expeditionGoal, 22, C.text, { wrap: 1120 }));
+      this.layer.add(txt(this, 58, 535, T().expeditionHealer, 18, '#a5d2b5'));
+      this.layer.add(txt(this, 58, 574, T().modeDesc('expedition'), 15, C.dim, { wrap: 1100 }));
+    }
 
     const footer = this.add.graphics();
     footer.fillStyle(0x121b29, 0.98).fillRoundedRect(30, 638, WIDTH - 60, 62, 10);
@@ -268,12 +269,13 @@ export class LobbyScene extends UIScene {
     launchLabel.setScale(Math.min(1, 168 / launchLabel.width));
     this.layer.add(launchLabel);
     this.nav.add({ id: 'fight', x: 1016, y: 645, w: 224, h: 47, onEnter: () => this.startBattle(), radius: 7 });
-    addButton(this, this.layer, this.nav, { id: 'pads', x: 323, y: 668, w: 230, h: 36, label: T().padOpen, size: 15, onPress: () => this.scene.start('Pads', { from: 'Lobby', fromData: { ...(this.retryQuest ? { retryQuest: this.retryQuest } : {}), ...(this.questRoute.length ? { questRoute: this.questRoute } : {}) } }) });
+    addButton(this, this.layer, this.nav, { id: 'pads', x: 323, y: 668, w: 230, h: 36, label: T().padOpen, size: 15, onPress: () => this.scene.start('Pads', { from: 'Lobby', fromData: { ...(this.retryQuest ? { retryQuest: this.retryQuest } : {}), ...(this.retryExpedition ? { retryExpedition: this.retryExpedition } : {}), ...(this.questRoute.length ? { questRoute: this.questRoute } : {}) } }) });
     addButton(this, this.layer, this.nav, { id: 'back', x: 116, y: 668, w: 140, h: 36, label: `‹  ${T().back}`, size: 16, onPress: () => this.leaveLobby() });
-    const connected = connectedPads().length + hidPads().filter((p) => p.connected).length;
+    const connected = hidPads().filter((p) => p.connected).length;
     this.layer.add(txt(this, 482, 658, connected ? T().lobbyControllers(connected) : T().noPads, 12, C.dim, { origin: [0, 0.5] }));
     this.layer.add(txt(this, 482, 681, T().lobbyControllerHint, 11, C.faint, { origin: [0, 0.5] }));
     this.layer.add(txt(this, WIDTH / 2, 712, T().confirmHint, 10, C.faint, { origin: 0.5 }));
+    connectLobbyNavigation(this.nav, isPartyMode(s.mode) ? QUEST.partySlots : MAX_PLAYERS);
     this.nav.done('c0-control');
   }
 
@@ -420,7 +422,7 @@ export class LobbyScene extends UIScene {
     L.add(weaponName);
     const role = roleById(slot.role);
     for (const [n, label, value, tint] of [
-      [0, 'HP', Math.round(role.maxHp * (isQuestMode(s.mode) ? QUEST.partyHp : 1)), 0xce7b7b],
+      [0, 'HP', Math.round(role.maxHp * (isPartyMode(s.mode) ? QUEST.partyHp : 1)), 0xce7b7b],
       [1, 'PE', role.maxPe, 0xc4aa6b],
     ] as const) {
       const bx = x + 107 + n * 90;
@@ -494,7 +496,7 @@ export class LobbyScene extends UIScene {
   private startBattle() {
     const s = getSettings();
     // Every player on a gamepad needs it connected (press a button on it so the browser sees it).
-    const active = isQuestMode(s.mode) ? s.slots.slice(0, QUEST.partySlots) : s.slots;
+    const active = isPartyMode(s.mode) ? s.slots.slice(0, QUEST.partySlots) : s.slots;
     const missing = active
       .map((sl, i) => ({ sel: parsePad(sl.control), hid: /^hid(\d)$/.exec(sl.control), i, off: sl.control === 'off' }))
       .filter((x) => !x.off && ((x.sel && !resolvePad(x.sel.index)) || (x.hid && !hidPad(Number(x.hid[1])))));
@@ -502,6 +504,11 @@ export class LobbyScene extends UIScene {
     if (err) {
       sfx.menuError();
       toast(this, err);
+      return;
+    }
+    if (s.mode === 'expedition') {
+      saveSettings(); sfx.start();
+      this.scene.start('Loading', { mode: 'expedition', slots: structuredClone(s.slots), expedition: this.retryExpedition ?? undefined });
       return;
     }
     if (isQuestMode(s.mode)) {
@@ -631,15 +638,20 @@ export class LobbyScene extends UIScene {
       const g = this.add.graphics();
       g.fillStyle(C.well, 1).fillRoundedRect(L, previewY, 380, 172, 10);
       preview.add(g);
-      const sg = this.add.graphics({ x: L + 60, y: previewY + 50 }).setScale(0.38);
-      drawShape(sg, w.shape, 0, 0, 0, color, 0.5);
-      sg.fillStyle(color, 1).fillCircle(0, 0, 18);
-      preview.add(sg);
+      const weaponArt = this.add.graphics();
+      drawWeaponIcon(weaponArt, w.id, L + 48, previewY + 44, 58, color);
+      preview.add(weaponArt);
+      preview.add(txt(this, L + 86, previewY + 24, T().weaponName(w), 17, C.text, { bold: true, origin: [0, 0.5] }));
+      const path = this.add.graphics({ x: L + 248, y: previewY + 48 });
+      path.setScale(Math.min(.3, 90 / shapeReach(w.shape)));
+      drawShape(path, w.shape, 0, 0, 0, color, .45);
+      path.fillStyle(color, 1).fillCircle(0, 0, 12);
+      preview.add(path);
       const bars: [string, number, string][] = [
         [T().area, shapeArea(w.shape) / WEAPON_AREA, `${Math.round(shapeArea(w.shape))}`],
         [T().speed, 0.32 / w.cycle, T().perSec((1 / w.cycle).toFixed(1))],
         [T().force, w.damage / 25, T().dmg(w.damage.toFixed(0))],
-        [T().peCost, w.peCost / 40, `${w.peCost.toFixed(0)}`],
+        [T().reach, shapeReach(w.shape) / 330, `${Math.round(shapeReach(w.shape))}`],
       ];
       bars.forEach(([label, frac, value], n) => {
         const by = previewY + 102 + n * 18;

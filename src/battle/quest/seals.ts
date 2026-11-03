@@ -23,19 +23,21 @@ export function updateSeals(this: QuestSealsContext, dt: number): void {
     }
   });
   if (this.seals.every((s) => s.sealed)) return;
-  const guard = this.fighters.find((f) => f.team === 1 && !f.alive);
-  if (!guard) { this.sealRespawnT = config.respawnEvery; return; }
+  const fallen = this.fighters.filter((f) => f.team === 1 && !f.alive);
+  if (!fallen.length) { this.sealRespawnT = config.respawnEvery; return; }
   this.sealRespawnT -= dt;
   if (this.sealRespawnT > 0) return;
-  const spot = this.freeSpot(this.spawns[guard.index], this.fighters.filter((f) => f.alive).map((f) => ({ x: f.x, y: f.y })));
-  guard.revive(spot.x, spot.y, guard.maxHp * TOWER_RESPAWN_HP);
-  guard.pocket.length = 0;
-  guard.selectedItem = 0;
-  guard.soul *= TOWER_RESPAWN_SOUL_KEEP;
-  this.onRevived(guard);
-  this.nameTags[guard.index]?.setVisible(true);
-  this.fx.smoke(spot.x, spot.y, 12, 1);
-  sfx.respawn();
+  for (const guard of fallen.slice(0, QUEST.reinforcementBatch)) {
+    const spot = this.freeSpot(this.spawns[guard.index], this.fighters.filter((f) => f.alive).map((f) => ({ x: f.x, y: f.y })));
+    guard.revive(spot.x, spot.y, guard.maxHp * TOWER_RESPAWN_HP);
+    guard.pocket.length = 0;
+    guard.selectedItem = 0;
+    guard.soul *= TOWER_RESPAWN_SOUL_KEEP;
+    this.onRevived(guard);
+    this.nameTags[guard.index]?.setVisible(true);
+    this.fx.smoke(spot.x, spot.y, 12, 1);
+    sfx.respawn();
+  }
   this.sealRespawnT = config.respawnEvery;
 }
 

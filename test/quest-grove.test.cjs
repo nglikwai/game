@@ -231,3 +231,17 @@ test('the summon tree covers a wider circle and lands more often than the prison
     if (spell.hitChance < 1) assert.ok(chance > spell.hitChance);
   }
 });
+
+test('grove waves pay for each guard and stop immediately when their tree is exhausted', () => {
+  for (const hp of [1000, 100]) {
+    const scene = grove(); trees(scene);
+    const tree = scene.groveTrees[0]; tree.hp = hp; tree.maxHp = 1000;
+    const guards = [4, 5, 6].map(i => fighter(i, 1));
+    guards.forEach(f => { f.state = 'dead'; }); scene.fighters.push(...guards);
+    scene.destroyTower = tw => { tw.alive = false; };
+    scene.groveRespawnT = 0; scene.updateGroveRespawn(0);
+    assert.equal(guards.filter(f => f.alive).length, hp === 1000 ? 2 : 1);
+    assert.equal(tree.hp, hp === 1000 ? 800 : 0);
+    assert.equal(tree.alive, hp === 1000);
+  }
+});

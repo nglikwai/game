@@ -1,3 +1,4 @@
+import { paintScenery } from '@/maps/art/renderedProps';
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, paintShadow, paintVignette,
@@ -110,6 +111,7 @@ function paintVent(ctx: Ctx, v: { x: number; y: number }) {
 }
 
 function paintObsidian(ctx: Ctx, o: Obstacle) {
+  if (paintScenery(ctx, o)) return;
   const l = o.x - o.w / 2;
   const t = o.y - o.h / 2;
   ctx.fillStyle = '#14101a';

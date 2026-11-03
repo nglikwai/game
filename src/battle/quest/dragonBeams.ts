@@ -6,8 +6,10 @@ import { DRAGON_COLORS, dragonRayEntry, touchesDragonBeam } from '@/battle/quest
 import type { BattleScene } from '@/scenes/BattleScene';
 
 type DragonBeamContext = Pick<BattleScene,
-  'applyDragonHit' | 'chests' | 'dragonBeam' | 'fighters' | 'gGlow' | 'shotBlockers'
+  'applyDragonHit' | 'chests' | 'dragonBeam' | 'fighters' | 'fx' | 'gGlow' | 'shotBlockers'
 >;
+
+const BREATH_SOUND_INTERVAL = 0.25;
 
 /** The same clipped segment is used for drawing and damage, so stones provide real cover. */
 export function dragonBeamPath(beam: DragonBeam, blockers: DragonBeamContext['shotBlockers'], chests: DragonBeamContext['chests']) {
@@ -29,30 +31,35 @@ export function dragonBeamPath(beam: DragonBeam, blockers: DragonBeamContext['sh
 export function startDragonBeam(this: DragonBeamContext, cast: DragonCast): void {
   const direction = Math.random() < 0.5 ? -1 : 1;
   const startAngle = cast.angle - direction * QUEST.dragon.beam.sweep / 2;
-  this.dragonBeam = { element: cast.element, head: cast.head, startAngle, angle: startAngle, direction, elapsed: 0, tick: 0 };
-  if (cast.element === 'fire') sfx.fireball();
-  else if (cast.element === 'ice') sfx.iceStaff();
-  else sfx.thunder();
+  this.dragonBeam = { element: cast.element, head: cast.head, startAngle, angle: startAngle, direction, elapsed: 0, hitAt: new Map(), touching: [] };
+  sfx.dragonBeam(cast.element);
 }
 
-/** A slow angular sweep, with damage on half-second ticks rather than every rendered frame. */
+/** A slow angular sweep. Touching it hurts at once, then again every `tick` s while a fighter stays in it. */
 export function updateDragonBeam(this: DragonBeamContext, dt: number): void {
   const beam = this.dragonBeam;
   if (!beam) return;
   const spec = QUEST.dragon.beam;
   if (!beam.head.alive || beam.elapsed + dt >= spec.duration) { this.dragonBeam = null; return; }
+  const previousPulse = Math.floor(beam.elapsed / BREATH_SOUND_INTERVAL);
   beam.elapsed += dt;
+  if (Math.floor(beam.elapsed / BREATH_SOUND_INTERVAL) > previousPulse) sfx.dragonBeam(beam.element);
   beam.angle = beam.startAngle + beam.direction * spec.sweep * beam.elapsed / spec.duration;
-  beam.tick -= dt;
-  if (beam.tick > 0) return;
-  beam.tick += spec.tick;
+  const hitAt = beam.hitAt ??= new Map();
+  beam.touching = [];
   const path = dragonBeamPath(beam, this.shotBlockers, this.chests);
   if (path.length <= 0) return;
   for (const target of this.fighters) {
     if (!target.alive || target.team === beam.head.team || target.untouchable || target.trapped) continue;
-    if (touchesDragonBeam(target.x, target.y, target.radius, path, beam.angle, path.length, path.width)) {
-      this.applyDragonHit(target, beam.element, path, 1, [], true);
-    }
+    if (!touchesDragonBeam(target.x, target.y, target.radius, path, beam.angle, path.length, path.width)) continue;
+    beam.touching.push(target);
+    // Flames, frost or sparks lick whoever is in the stream every frame.
+    if (beam.element === 'fire') this.fx.fireTrail(target.x, target.y, target.radius * 1.4);
+    else this.fx.sparks(target.x, target.y, DRAGON_COLORS[beam.element], 1);
+    const last = hitAt.get(target);
+    if (last !== undefined && beam.elapsed - last < spec.tick - 1e-9) continue;
+    hitAt.set(target, beam.elapsed);
+    this.applyDragonHit(target, beam.element, path, 1, [], true);
   }
 }
 
@@ -88,4 +95,16 @@ export function renderDragonBeam(this: DragonBeamContext, now: number): void {
   g.fillStyle(color, 0.85).fillCircle(path.x, path.y, path.width * 0.7 * pulse);
   g.fillStyle(0xffffff, 0.9).fillCircle(path.x, path.y, path.width * 0.25);
   g.fillStyle(color, 0.45).fillCircle(path.endX, path.endY, path.width * 0.8);
+  // A flaring splash where the stream strikes a fighter, so it never looks like it passes harmlessly through.
+  for (const t of beam.touching ?? []) {
+    if (!t.alive) continue;
+    const flare = t.radius * (1.25 + 0.2 * Math.sin(now * 30));
+    g.fillStyle(color, 0.5).fillCircle(t.x, t.y, flare * 1.4);
+    g.fillStyle(beam.element === 'fire' ? 0xffc354 : 0xffffff, 0.75).fillCircle(t.x, t.y, flare * 0.8);
+    for (let k = 0; k < 6; k++) {
+      const a = beam.angle + Math.PI + (k - 2.5) * 0.45 + Math.sin(now * 20 + k) * 0.15;
+      const len = flare * (1.5 + 0.5 * Math.sin(now * 24 + k * 1.7));
+      g.lineStyle(3, beam.element === 'fire' ? 0xff8a2a : color, 0.85).lineBetween(t.x, t.y, t.x + Math.cos(a) * len, t.y + Math.sin(a) * len);
+    }
+  }
 }

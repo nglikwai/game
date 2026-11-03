@@ -1,5 +1,5 @@
 import * as Phaser from 'phaser';
-import { HEIGHT, HUD_HEIGHT, RES, WIDTH } from '@/config';
+import { HEIGHT, HUD_HEIGHT, RES, SOUL_RAGE, WIDTH } from '@/config';
 import { Fighter } from '@/gameplay/Fighter';
 import { rayAngles } from '@/gameplay/weapons';
 import { sfx } from '@/audio/sfx';
@@ -11,7 +11,7 @@ import type { BattleScene } from '@/scenes/BattleScene';
 
 /** The state and operations this system needs from the scene. No runtime scene dependency. */
 type PresentationEffectsContext = Phaser.Scene & Pick<BattleScene,
-  'add' | 'fighters' | 'fx' | 'lTop' | 'logs'
+  'arenaRect' | 'add' | 'fighters' | 'fx' | 'lTop' | 'logs'
   | 'map' | 'onSummonStart' | 'petals' | 'prevStates' | 'projectiles'
   | 'terrainAt' | 'time' | 'tweens' | 'weaponFx'
 >;
@@ -48,7 +48,7 @@ export function startAmbience(this: PresentationEffectsContext): void {
     },
   });
   const counts = { petals: 16, leaves: 16, snow: 40, fireflies: 24, embers: 30, dust: 30, mist: 10, wisps: 14, maple: 16, rain: 70, spores: 26 };
-  this.petals = new Petals(this, ARENA, Math.round(counts[this.map.particles] * S * S), 6, this.map.particles, this.lTop);
+  this.petals = new Petals(this, { x: this.arenaRect.x, y: this.arenaRect.y, w: this.arenaRect.width, h: this.arenaRect.height }, Math.round(counts[this.map.particles] * S * S), 6, this.map.particles, this.lTop);
 }
 
 /** Spot state changes (strike, death, revive, dash) to fire effects, and tick particles. */
@@ -71,11 +71,12 @@ export function updateFx(this: PresentationEffectsContext, dt: number): void {
     }
     this.prevStates[f.index] = now;
     if (f.alive && f.powered && Math.random() < 0.5) this.fx.ember(f.x, f.y);
+    if (f.alive && f.raging && Math.random() < 0.3 + f.rageLevel * 0.1) this.fx.sparks(f.x + (Math.random() - 0.5) * f.radius * 2, f.y - f.radius * 0.5, SOUL_RAGE.colors[f.rageLevel - 1]![0], 1);
+    if (f.alive && f.regenerating && Math.random() < 0.12) this.fx.leaf(f.x, f.y);
     if (f.state === 'channel' && Math.random() < 0.3) this.fx.leaf(f.x, f.y);
     if (f.alive && f.hp < f.maxHp && this.terrainAt(f.x, f.y) === 'spring' && Math.random() < 0.08) this.fx.leaf(f.x, f.y);
     if (f.alive && this.terrainAt(f.x, f.y) === 'poison' && Math.random() < 0.12) this.fx.sparks(f.x, f.y, 0x9aff6a, 1);
   }
-  for (const p of this.projectiles) if (p.effect.radius > 8) this.fx.fireTrail(p.x, p.y, p.effect.radius);
   this.fx.update(dt);
 }
 
@@ -116,6 +117,12 @@ export function weaponFx(this: PresentationEffectsContext, f: Fighter): void {
       break;
     case 'whip':
       if (s.kind === 'wave') this.fx.whipLash(() => ({ x: f.x, y: f.y }), f.facing, s);
+      break;
+    case 'windmill':
+      if (s.kind === 'pinwheel') this.fx.windmillSpin(() => ({ x: f.x, y: f.y }), f.facing, s);
+      break;
+    case 'spade':
+      if (s.kind === 'scoop') this.fx.spadeScoop(f.x, f.y, f.facing, s);
       break;
     case 'talisman':
       if (s.kind === 'cross') this.fx.lightningCross(f.x, f.y, f.facing, s.arm, s.width);
@@ -161,7 +168,9 @@ export function drawScarf(this: PresentationEffectsContext, g: Phaser.GameObject
   const back = speed > 20 ? Math.atan2(-f.vy, -f.vx) : f.facing + Math.PI;
   const kx = f.x + Math.cos(f.facing + Math.PI) * 6;
   const ky = f.y + Math.sin(f.facing + Math.PI) * 6;
-  const len = 14 + Math.min(14, speed * 0.05);
+  // 暴走: the tails burn in the level's fire colour and stream much longer.
+  const rage = f.raging ? SOUL_RAGE.colors[f.rageLevel - 1]! : null;
+  const len = (14 + Math.min(14, speed * 0.05)) * (rage ? 1.5 + f.rageLevel * 0.1 : 1);
   for (const side of [-1, 1]) {
     const pts: { x: number; y: number }[] = [];
     for (let k = 0; k <= 5; k++) {
@@ -173,7 +182,12 @@ export function drawScarf(this: PresentationEffectsContext, g: Phaser.GameObject
       });
     }
     g.lineStyle(4, 0x000000, 0.35).strokePoints(pts as Phaser.Math.Vector2[], false);
-    g.lineStyle(2.6, f.color, 1).strokePoints(pts as Phaser.Math.Vector2[], false);
+    g.lineStyle(rage ? 3.4 : 2.6, rage ? rage[0] : f.color, 1).strokePoints(pts as Phaser.Math.Vector2[], false);
+    if (rage) {
+      g.lineStyle(1.2, rage[1], 0.95).strokePoints(pts as Phaser.Math.Vector2[], false);
+      const tip = pts[pts.length - 1]!;
+      g.fillStyle(rage[1], 0.6 + 0.4 * Math.sin(now * 20 + side)).fillCircle(tip.x, tip.y, 2.2);
+    }
   }
 }
 

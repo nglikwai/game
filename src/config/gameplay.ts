@@ -42,27 +42,22 @@ export const MAX_HP = 100;
 
 export const MAX_PE = 100;
 
-export const PE_REGEN_PER_SEC = 18;
-
-/** PE regen multipliers: standing still to catch your breath vs moving. */
-export const PE_REGEN_STILL = 1.7;
-
-export const PE_REGEN_MOVING = 0.6;
+/** PE only pays for skills (weapons are free), and comes back at this one steady rate whatever you're doing. */
+export const PE_REGEN_PER_SEC = 12;
 
 /** Seconds after spending PE before regen resumes. */
 export const PE_REGEN_DELAY = 0.5;
 
 // Weapon balance budgets. Hit area uses a common baseline (shuriken +25%, flail +15%).
-// Damage / knockback / PE spent per second are equal when swinging nonstop.
-// Fast weapons therefore hit softly; slow weapons hit hard.
+// Swinging costs no PE. Knockback per second is equal for every weapon; damage per second is this base
+// times each weapon's `power` (weapons.ts). Fast weapons therefore hit softly; slow weapons hit hard.
 export const WEAPON_AREA = 9000;
 
 // px²
-export const DAMAGE_PER_SEC = 16;
+/** Lowered from 16 when swings became free, since nobody runs out of PE mid-fight any more. */
+export const DAMAGE_PER_SEC = 14;
 
 export const KNOCKBACK_PER_SEC = 700;
-
-export const PE_COST_PER_SEC = 35;
 
 export const HITSTUN_PER_CYCLE = 0.4;
 
@@ -105,6 +100,34 @@ export const SOUL_FROM_HURT = 0.4;
 export const SOUL_LEVELS = 4;
 
 /**
+ * 暴走 Berserk: spends every full 魂 level for a short super state. Each list is indexed by `level - 1`,
+ * so spending more 魂 lasts longer and buffs harder. PE refills at the start.
+ * - damage: weapon damage and knockback dealt ×; taken: damage taken ×; knockbackTaken: how far hits push you ×
+ * - speed: walking speed ×; swing: weapon swing time × (lower = faster); area: weapon hit area ×
+ * - cooldown: skill cooldowns run this many times faster; peRegen: PE regen ×
+ * - superArmorFrom: from this level, hits no longer interrupt you (no flinch / stun)
+ * - lifestealFrom / lifesteal: from this level, that share of weapon damage dealt heals you
+ */
+export const SOUL_RAGE = {
+  /** Seconds the next-item button must be held (with at least one full 魂 level) to trigger it. */
+  hold: 0.4,
+  duration: [8, 10, 12, 14],
+  damage: [1.15, 1.3, 1.45, 1.6],
+  taken: [0.85, 0.75, 0.65, 0.55],
+  knockbackTaken: [0.8, 0.6, 0.45, 0.3],
+  speed: [1.1, 1.17, 1.24, 1.32],
+  swing: [0.9, 0.82, 0.75, 0.68],
+  area: [1.2, 1.35, 1.5, 1.7],
+  cooldown: [1.25, 1.5, 1.75, 2],
+  peRegen: [1.5, 1.75, 2, 2.5],
+  superArmorFrom: 3,
+  lifestealFrom: 4,
+  lifesteal: 0.2,
+  /** The fire around a berserk player, [flame, hot core] per level: orange, crimson, violet, then blue (hottest). */
+  colors: [[0xff8a2a, 0xffd27a], [0xff2a3a, 0xffa07a], [0xb04aff, 0xeab8ff], [0x3ab8ff, 0xeafaff]] as [number, number][],
+};
+
+/**
  * Summon strikes: `hitChance[level - 1]` is each strike's chance to land, so spending more
  * soul makes every strike more likely to hit (as well as striking more enemies).
  * 天雷 Thunder: a hit deals minDamage–maxDamage and paralyses for `paralyze` seconds
@@ -120,10 +143,10 @@ export const SOUL_MISS_PARALYZE = 0.8;
 
 /**
  * 死神 Reaper: rarely lands. A hit ignores damage reduction. Under `executeBelow` HP the
- * target dies; otherwise they are left with `leaveHp`. `damage` is only the tree spell's
- * listed figure; the hit itself does not use it.
+ * target dies; otherwise they are left with `leaveHp`. A boss loses at most `bossMax` HP to one hit.
+ * `damage` is only the tree spell's listed figure; the hit itself does not use it.
  */
-export const SOUL_REAPER = { hitChance: [0.1, 0.15, 0.2, 0.25], damage: 80, executeBelow: 80, leaveHp: 20, paralyze: 2.5, stagger: 0.25 };
+export const SOUL_REAPER = { hitChance: [0.1, 0.15, 0.2, 0.25], damage: 80, executeBelow: 80, leaveHp: 20, bossMax: 200, paralyze: 2.5, stagger: 0.25 };
 
 /** 聖火 Holy Fire: almost always lands, but only a small burn. */
 export const SOUL_FIRE = { hitChance: [0.85, 0.9, 0.95, 1], minDamage: 5, maxDamage: 12, paralyze: 1.2, stagger: 0.12 };

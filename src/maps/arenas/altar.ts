@@ -1,3 +1,4 @@
+import { paintScenery } from '@/maps/art/renderedProps';
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, paintShadow, paintVignette,
@@ -112,6 +113,7 @@ function paintAltar(ctx: Ctx) {
 }
 
 function paintPillar(ctx: Ctx, o: Obstacle) {
+  if (paintScenery(ctx, o)) return;
   const r = o.w / 2;
   const g = ctx.createRadialGradient(o.x - r * 0.3, o.y - r * 0.3, 2, o.x, o.y, r);
   g.addColorStop(0, '#8a8098');
@@ -140,6 +142,7 @@ function paintStatue(ctx: Ctx, o: Obstacle) {
 }
 
 function paintRock(ctx: Ctx, o: Obstacle) {
+  if (paintScenery(ctx, o)) return;
   ctx.fillStyle = '#4a4454';
   ctx.beginPath();
   ctx.ellipse(o.x, o.y, o.w / 2, o.h / 2, 0.3, 0, Math.PI * 2);

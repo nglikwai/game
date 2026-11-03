@@ -276,7 +276,6 @@ function updateCharge(this: QuestWyvernContext, wy: Wyvern, dt: number, targets:
   const y = c.from.y + (c.to.y - c.from.y) * c.k;
   moveTo(tw, x, y);
   wy.stride += w.charge.speed * dt;
-  this.fx.fireTrail(x, y, tw.w * 0.4);
   const reach = (w.charge.width * S) / 2;
   for (const t of targets) {
     if (c.hit.includes(t) || Math.hypot(t.x - x, t.y - y) > reach + t.radius + tw.w * 0.2) continue;
@@ -334,26 +333,28 @@ function raise(this: QuestWyvernContext, wy: Wyvern): void {
   sfx.respawn();
 }
 
-/** While both wyverns stand, a fallen guard comes back beside one of them now and then. */
+/** While both wyverns stand, fallen guards return together beside them. */
 function callGuard(this: QuestWyvernContext, dt: number): void {
   const w = QUEST.wyverns;
   this.wyvernGuardT -= dt;
   if (this.wyvernGuardT > 0) return;
   this.wyvernGuardT = w.guardRespawn;
   const guards = this.fighters.filter((f) => f.team === WYVERN_TEAM && !f.boss);
-  const fallen = guards.find((f) => !f.alive);
-  if (!fallen || guards.filter((f) => f.alive).length >= w.maxGuards) return;
-  const from = this.wyverns[Math.floor(Math.random() * this.wyverns.length)]!;
-  const tw = from.tower;
-  const taken = this.fighters.filter((f) => f.alive).map((f) => ({ x: f.x, y: f.y }));
-  const spot = this.freeSpot({ x: tw.x + Math.cos(from.facing) * tw.w, y: tw.y + Math.sin(from.facing) * tw.w }, taken);
-  fallen.revive(spot.x, spot.y);
-  fallen.pocket.length = 0;
-  this.onRevived(fallen);
-  this.fx.respawnBeam(tw.x, tw.y, spot.x, spot.y, WYVERN_COLORS[from.kind]);
-  this.fx.smoke(spot.x, spot.y, 12, 1);
-  this.popText(spot.x, spot.y - 40, T().dragonGuardBack, toHex(WYVERN_COLORS[from.kind]));
-  sfx.respawn();
+  const room = w.maxGuards - guards.filter((f) => f.alive).length;
+  const fallen = guards.filter((f) => !f.alive).slice(0, Math.max(0, Math.min(QUEST.reinforcementBatch, room)));
+  for (const guard of fallen) {
+    const from = this.wyverns[Math.floor(Math.random() * this.wyverns.length)]!;
+    const tw = from.tower;
+    const taken = this.fighters.filter((f) => f.alive).map((f) => ({ x: f.x, y: f.y }));
+    const spot = this.freeSpot({ x: tw.x + Math.cos(from.facing) * tw.w, y: tw.y + Math.sin(from.facing) * tw.w }, taken);
+    guard.revive(spot.x, spot.y);
+    guard.pocket.length = 0;
+    this.onRevived(guard);
+    this.fx.respawnBeam(tw.x, tw.y, spot.x, spot.y, WYVERN_COLORS[from.kind]);
+    this.fx.smoke(spot.x, spot.y, 12, 1);
+    this.popText(spot.x, spot.y - 40, T().dragonGuardBack, toHex(WYVERN_COLORS[from.kind]));
+    sfx.respawn();
+  }
 }
 
 /** Spots about to be struck, so CPU fighters step off them: sun bomb marks and charge lanes. */
@@ -404,12 +405,11 @@ function mirrored(at: (f: number, sd: number) => Phaser.Math.Vector2, half: read
   return [...half.map(([f, sd]) => at(f * k, sd * k)), ...[...half].reverse().map(([f, sd]) => at(f * k, -sd * k))];
 }
 
-/** The chain between the wyverns, the frost rings, bursts, and the warnings: bomb marks and ring gaps. A charge shows no lane. */
+/** The chain between the wyverns, the frost rings, bursts, and falling sun bombs. Attack paths have no ground markers. */
 export function renderWyverns(this: QuestWyvernContext, now: number): void {
   if (this.quest?.stage !== QUEST.wyvernStage) return;
   const w = QUEST.wyverns;
   const glow = this.gGlow;
-  const floor = this.g;
   const standing = this.wyverns.filter((wy) => wy.tower.alive);
   if (standing.length === 2) {
     const [a, b] = standing.map((wy) => wy.tower) as [Tower, Tower];
@@ -454,20 +454,10 @@ export function renderWyverns(this: QuestWyvernContext, now: number): void {
       if (cast.kind === 'sunfall') {
         const r = w.sunfall.radius * S;
         for (const m of cast.marks) {
-          // A widening scorch mark, and the sun bomb dropping toward it.
-          floor.fillStyle(0xff7a2a, 0.12 + 0.22 * p).fillCircle(m.x, m.y, r * p);
-          floor.lineStyle(2, 0xffc46a, 0.6 + 0.4 * Math.sin(now * 20)).strokeCircle(m.x, m.y, r);
+          // The sun bomb drops without a ground marker.
           const drop = (1 - p) * 260;
           glow.fillStyle(WYVERN_COLORS.sun, 0.55).fillCircle(m.x, m.y - drop, 10 + 12 * p);
           glow.fillStyle(0xffffff, 0.85).fillCircle(m.x, m.y - drop, 4 + 5 * p);
-        }
-      } else if (cast.kind === 'ring') {
-        // Bright spokes show where the gaps will open.
-        for (const gap of cast.gaps) {
-          const at = frame(tw.x, tw.y, gap);
-          const half = w.ring.gapWidth / 2;
-          const wedge = [at(tw.w * 0.6, 0), vec(tw.x + Math.cos(gap - half) * tw.w * 2.2, tw.y + Math.sin(gap - half) * tw.w * 2.2), vec(tw.x + Math.cos(gap + half) * tw.w * 2.2, tw.y + Math.sin(gap + half) * tw.w * 2.2)];
-          floor.fillStyle(0xbfe6ff, 0.08 + 0.16 * p).fillPoints(wedge, true);
         }
       }
     }

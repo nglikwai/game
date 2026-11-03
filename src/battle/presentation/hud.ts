@@ -1,6 +1,6 @@
 import { skillAction } from '@/input/actions';
 import * as Phaser from 'phaser';
-import { SOUL_LEVELS, SOUL_PER_LEVEL, MAX_PLAYERS, QUEST, HUD_HEIGHT, PLAYER_COLORS, RES, WIDTH } from '@/config';
+import { SOUL_LEVELS, SOUL_PER_LEVEL, SOUL_RAGE, MAX_PLAYERS, QUEST, HUD_HEIGHT, PLAYER_COLORS, RES, WIDTH } from '@/config';
 import { Fighter } from '@/gameplay/Fighter';
 import { questSideOf } from '@/battle/quest/factions';
 import { POCKET_SIZE, type Item } from '@/gameplay/items';
@@ -12,7 +12,7 @@ import type { BattleScene } from '@/scenes/BattleScene';
 
 /** The state and operations this system needs from the scene. No runtime scene dependency. */
 type PresentationHudContext = Phaser.Scene & Pick<BattleScene,
-  'add' | 'bossTitle' | 'fighterLabel' | 'fighters' | 'hasHellPlayers'
+  'expedition' | 'add' | 'bossTitle' | 'fighterLabel' | 'fighters' | 'hasHellPlayers'
   | 'hud' | 'hudIcons' | 'hudNames' | 'hudPanel' | 'hudSkillGlyphs'
   | 'isMixedQuest' | 'keyLabels' | 'lobbySlots' | 'mode' | 'quest'
   | 'sideColor' | 'skillAt' | 'skillLayout' | 'slots'
@@ -55,7 +55,7 @@ export function hudPanel(this: PresentationHudContext, i: number): { x0: number;
   }
   const L = HUD;
   const pw = WIDTH / L.cols;
-  const ph = HUD_HEIGHT / Math.ceil(MAX_PLAYERS / L.cols);
+  const ph = this.expedition ? HUD_HEIGHT : HUD_HEIGHT / Math.ceil(MAX_PLAYERS / L.cols);
   return { x0: (i % L.cols) * pw, y0: Math.floor(i / L.cols) * ph, pw, ph };
 }
 
@@ -63,6 +63,7 @@ export function createHudText(this: PresentationHudContext): void {
   const L = HUD;
   const roleGlyph = (f: Fighter) => T().roleName(f.role)[0];
   this.slots.forEach((slot, i) => {
+    if (this.expedition && i >= 4) return;
     const { x0, y0 } = this.hudPanel(i);
     const f = this.fighters.find((ff) => ff.index === i);
     if (!f) {
@@ -75,7 +76,7 @@ export function createHudText(this: PresentationHudContext): void {
     this.hudNames[i] = name;
     this.hudSkillGlyphs[i] = [];
     if (this.mode !== 'ffa' && !this.quest) {
-      this.add.text(name.x + name.width + 5, y0 + 3, T().teamNames[f.team], {
+      this.add.text(name.x + name.width + 5, y0 + 3, this.expedition ? T().questSides.heroes : T().teamNames[f.team], {
         fontFamily: FONT, resolution: RES, fontSize: '9px', fontStyle: 'bold', color: '#ffffff', backgroundColor: toHex(this.sideColor(f.team)), padding: { x: 3, y: 0 },
       });
     }
@@ -102,7 +103,7 @@ export function renderHud(this: PresentationHudContext): void {
   h.clear();
   this.hudIcons.clear();
   h.fillStyle(0x0d0f14, 1).fillRect(0, 0, WIDTH, HUD_HEIGHT);
-  for (let i = 0; i < this.slots.length; i++) {
+  for (let i = 0; i < (this.expedition ? 4 : this.slots.length); i++) {
     const { x0, y0, pw, ph } = this.hudPanel(i);
     const f = this.fighters.find((ff) => ff.index === i);
     h.fillStyle(f ? 0x151e2b : 0x101722, 1).fillRoundedRect(x0 + 3, y0 + 2, pw - 6, ph - 4, 5);
@@ -120,7 +121,7 @@ export function renderHud(this: PresentationHudContext): void {
     h.fillStyle(0x2a1416, 1).fillRect(x0 + L.pad, y0 + 18, L.barW, 9);
     h.fillStyle(0xe5484d, alpha).fillRect(x0 + L.pad, y0 + 18, L.barW * (f.hp / f.maxHp), 9);
     h.fillStyle(0x2a2614, 1).fillRect(x0 + L.pad, y0 + 30, L.barW, 5);
-    const peColor = f.peDeniedT > 0 ? 0xffffff : f.resting && f.pe < f.maxPe ? 0xfff0a0 : 0xf2c94c;
+    const peColor = f.peDeniedT > 0 ? 0xffffff : 0xf2c94c;
     h.fillStyle(peColor, alpha).fillRect(x0 + L.pad, y0 + 30, L.barW * (f.pe / f.maxPe), 5);
     // Skill boxes with cooldown sweep. Large kits wrap so they stay clear of the bars.
     f.skills.forEach((s, k) => {
@@ -158,14 +159,22 @@ export function renderHud(this: PresentationHudContext): void {
       h.lineStyle(selected ? 2 : 1, selected ? 0xf2c94c : 0x2a2f3c, 1).strokeRoundedRect(px, py, pocketSize, pocketSize, 4);
       if (item) drawItemIcon(this.hudIcons, item.id, px + pocketSize / 2, py + pocketSize / 2, many ? 11 : 16);
     }
-    // 魂 Soul (only for Thunder users): four diamonds; full levels lit, the one filling shows its progress.
+    // 魂 Soul (players, and CPUs with a 魂 skill): four diamonds; full levels lit, the one filling shows its progress.
     for (let k = 0; k < (f.usesSoul ? SOUL_LEVELS : 0); k++) {
       const cx = x0 + pw - 50 + k * 12;
       const cy = y0 + 7;
       const fill = Phaser.Math.Clamp(f.soul / SOUL_PER_LEVEL - k, 0, 1);
       const pts = [{ x: cx, y: cy - 5 }, { x: cx + 4, y: cy }, { x: cx, y: cy + 5 }, { x: cx - 4, y: cy }] as Phaser.Math.Vector2[];
       h.fillStyle(0x24202e, 1).fillPoints(pts, true);
-      if (fill > 0) h.fillStyle(0xb57bff, fill >= 1 ? 1 : 0.25 + fill * 0.4).fillPoints(pts, true);
+      if (f.raging) {
+        // 暴走: the spent levels burn in its fire colour, going out as the time runs down.
+        const left = f.rageT / SOUL_RAGE.duration[f.rageLevel - 1]! * f.rageLevel - k;
+        if (left > 0) h.fillStyle(SOUL_RAGE.colors[f.rageLevel - 1]![0], left >= 1 ? 1 : 0.3 + left * 0.6).fillPoints(pts, true);
+      } else if (fill > 0) {
+        // A player's full levels glow in the colour of the 暴走 they would unleash.
+        const ready = f.canRage ? SOUL_RAGE.colors[f.soulLevel - 1]![0] : 0xb57bff;
+        h.fillStyle(fill >= 1 ? ready : 0xb57bff, fill >= 1 ? 1 : 0.25 + fill * 0.4).fillPoints(pts, true);
+      }
       // Blink red when a summon was just refused for lack of soul.
       const warn = f.soulDeniedT > 0 && Math.floor(f.soulDeniedT * 12) % 2 === 0;
       h.lineStyle(warn ? 2 : 1, warn ? 0xff4a5a : fill >= 1 ? 0xe2c8ff : 0x4a4058, 1).strokePoints(pts, true);

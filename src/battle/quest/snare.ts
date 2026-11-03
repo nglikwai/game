@@ -1,3 +1,4 @@
+import { renderCursedTree } from '@/rendering/mapProps';
 import { layoutPoint } from '@/maps/layout';
 import * as Phaser from 'phaser';
 import { SOUL_MISS_PARALYZE, QUEST, HEIGHT, HUD_HEIGHT, RES, WIDTH, type GroveIllusion, type GroveRole } from '@/config';
@@ -14,7 +15,7 @@ import type { BattleScene } from '@/scenes/BattleScene';
 
 /** The state and operations this system needs from the scene. No runtime scene dependency. */
 type QuestSnareContext = Phaser.Scene & Pick<BattleScene,
-  'map' |
+  'lFloor' | 'map' |
   'add' | 'applySnareHit' | 'countdown' | 'dealDamage' | 'fighters'
   | 'freeSpot' | 'fx' | 'g' | 'gGlow' | 'gOver'
   | 'isHell' | 'lTop' | 'obstacleRects' | 'over' | 'paintSnareVeil'
@@ -169,9 +170,6 @@ export function renderSnareCast(this: QuestSnareContext, now: number): void {
   const color = cast.spell.color;
   const progress = Math.min(1, cast.elapsed / cast.spell.warn);
   this.fx.summonCircle(this.g, this.gGlow, tree.x, tree.y, progress, color, now, cast.spell.kind);
-  this.fx.targetMark(this.gOver, cast.x, cast.y, progress, color, now, cast.spell.kind);
-  this.g.fillStyle(color, 0.1 + progress * 0.16).fillCircle(cast.x, cast.y, QUEST.snare.radius);
-  this.g.lineStyle(2, color, 0.7).strokeCircle(cast.x, cast.y, QUEST.snare.radius);
 }
 
 export function renderSnareTree(this: QuestSnareContext, g: Phaser.GameObjects.Graphics, over: Phaser.GameObjects.Graphics, tree: Tower, now: number): void {
@@ -179,6 +177,7 @@ export function renderSnareTree(this: QuestSnareContext, g: Phaser.GameObjects.G
   const y = tree.y;
   const tint = tree.grove === 'illusion' ? 0xe2c56a : 0x945bc2;
   const wood = tree.grove === 'illusion' ? 0x6e6240 : 0x554631;
+  const rendered = renderCursedTree(this, tree, x, y, true);
   if (!tree.alive) {
     g.fillStyle(0x24231f, 1).fillEllipse(x, y, 36, 24);
     g.lineStyle(3, 0x514536, 1).lineBetween(x - 16, y + 6, x + 14, y - 10);
@@ -186,12 +185,14 @@ export function renderSnareTree(this: QuestSnareContext, g: Phaser.GameObjects.G
   }
   g.fillStyle(tint, 0.08).fillCircle(x, y, tree.aura);
   g.lineStyle(2, tint, 0.45).strokeCircle(x, y, tree.aura);
-  for (let k = 0; k < 7; k++) {
-    const a = k * Math.PI * 2 / 7;
-    g.lineStyle(5, wood, 1).lineBetween(x, y, x + Math.cos(a) * 28, y + Math.sin(a) * 22);
+  if (!rendered) {
+    for (let k = 0; k < 7; k++) {
+      const a = k * Math.PI * 2 / 7;
+      g.lineStyle(5, wood, 1).lineBetween(x, y, x + Math.cos(a) * 28, y + Math.sin(a) * 22);
   }
   over.fillStyle(0x5a4534, 1).fillEllipse(x, y, 28, 40);
   over.lineStyle(2, tint, 1).strokeEllipse(x, y, 28, 40);
+  }
   over.fillStyle(tint, 0.9).fillCircle(x - 5, y - 4, 2.4).fillCircle(x + 5, y - 4, 2.4);
   if (tree.prisoner?.trapped) over.fillStyle(tree.prisoner.color, 1).fillCircle(x, y + 8, 6);
   const bw = tree.w;

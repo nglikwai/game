@@ -1,3 +1,4 @@
+import type { ExpeditionCheckpoint } from '@/battle/expedition/rules';
 import * as Phaser from 'phaser';
 import { type QuestMode, type QuestRule, type QuestSide, type GameMode, type GroveRole } from '@/config';
 import { Fighter } from '@/gameplay/Fighter';
@@ -26,10 +27,15 @@ export interface Projectile {
   /** Burst radius (design px) for an element shot, instead of its element's usual one. */
   blast?: number;
   dead: boolean;
+  /** 飛輪 on its way back to the thrower. */
+  back?: boolean;
+  /** Who a 飛輪 has already cut on this leg. */
+  hits?: Fighter[];
 }
 
 /** A team's watchtower: shoots enemies in range, buffs teammates in its aura, can be destroyed. */
 export interface Tower {
+  expeditionBanner?: boolean;
   team: number;
   /** A living tree uses main-tower HP, aura and respawns, but casts summons instead of arrows. */
   tree?: boolean;
@@ -109,6 +115,7 @@ export interface BattleStartData {
   mode: GameMode;
   mapId?: MapId | 'random';
   quest?: QuestState;
+  expedition?: ExpeditionCheckpoint;
 }
 
 /** Save the Princess: the breakable wall around her. */
@@ -181,7 +188,7 @@ export interface DragonCast {
   angle: number;
 }
 
-/** One head breathing along a gradually sweeping angle, with periodic damage. */
+/** One head breathing along a gradually sweeping angle. It hurts on contact, then again every `tick` s per fighter. */
 export interface DragonBeam {
   element: DragonElement;
   head: Tower;
@@ -189,7 +196,10 @@ export interface DragonBeam {
   angle: number;
   direction: number;
   elapsed: number;
-  tick: number;
+  /** When (in `elapsed` time) each fighter was last burned. */
+  hitAt?: Map<Fighter, number>;
+  /** Fighters the beam is touching this frame, for the contact flare. */
+  touching?: Fighter[];
 }
 
 /** A physical spirit collectible, separate from the fighter's summon-soul meter. */
@@ -205,6 +215,7 @@ export interface SpiritRelay {
   destination: { x: number; y: number; radius: number };
   spirits: WanderingSpirit[];
   delivered: number;
+  timeLeft: number;
   spawnT: number;
   nextSpawn: number;
   guardT: number;

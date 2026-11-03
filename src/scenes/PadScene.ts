@@ -4,11 +4,11 @@ import { HEIGHT, WIDTH } from '@/config';
 import { T, getLang } from '@/localization';
 import { MAX_PAD_SLOTS } from '@/input/controllerIds';
 import { configurable, connectJoyCons, hidKeys, hidPad, hidPads, hidState, hidSupported, isProPad, joyLabel, lastError, setHidMap, type HidMap, type JoyButtons } from '@/input/nintendoHid';
-import { padKind, padName, type PadSide } from '@/input/gamepads';
+import { type PadSide } from '@/input/gamepads';
 import {
-  PAD_GRIPS, PAD_MODES, getPadGrip, getPadMode, isSplit, readController, resetPadMaps, setPadGrip, setPadMap, setPadMode, type PadMap,
+  setPadMap, type PadMap,
 } from '@/input/padSettings';
-import { C, FocusNav, Petals, UIScene, addBackdrop, addButton, addMenuHeader, addSelector, drawFrame, toast, txt, type Modal } from '@/ui';
+import { C, FocusNav, Petals, UIScene, addBackdrop, addButton, addMenuHeader, drawFrame, toast, txt, type Modal } from '@/ui';
 import { drawControllerIcon } from '@/rendering/menuArt';
 
 /** Rows shown at once; more controllers than that go on further pages. */
@@ -22,9 +22,6 @@ const ACTIONS = ACTION_COUNT;
 /** Short names of the seven actions, for the live test line. */
 const actShort = () => (getLang() === 'zh' ? ['攻', '技1', '技2', '技3', '用', '換', '技4'] : ['Atk', 'S1', 'S2', 'S3', 'Use', 'Nxt', 'S4']);
 const actLine = (acts: boolean[]) => acts.slice(0, ACTIONS).map((on, n) => `${actShort()[n]}${on ? '●' : '○'}`).join(' ');
-
-/** One row of the page: a gamepad slot, or a Joy-Con connected directly. */
-type Entry = { kind: 'pad'; index: number } | { kind: 'hid'; n: number };
 
 /** Walking through "press the button for …" for one controller (or one half of it). */
 interface CalState {
@@ -47,9 +44,8 @@ interface CalState {
 }
 
 /**
- * Controller Setup: shows every controller the browser can see with live input, lets you
- * pick how each is used (one player, or a joined Joy-Con pair split into two players),
- * connect Joy-Cons directly (so SL / SR work), and set each one's buttons by pressing them.
+ * Controller Setup: lists directly connected Joy-Cons and Pro Controllers with live input,
+ * provides the direct-connect action, and lets each Joy-Con configure its buttons.
  */
 export class PadScene extends UIScene {
   private petals!: Petals;
@@ -98,8 +94,7 @@ export class PadScene extends UIScene {
   }
 
   private sig() {
-    const direct = hidPads().map((j) => `${isProPad(j) ? 'P' : j.side}${j.connected ? 1 : 0}`).join(',');
-    return this.pads().map((p) => (p ? `${p.id}|${getPadMode(p.id)}|${getPadGrip(p.id)}` : '-')).join('#') + `@${direct}`;
+    return hidPads().map((j) => `${isProPad(j) ? 'P' : j.side}${j.connected ? 1 : 0}`).join(',');
   }
 
   private build() {
@@ -108,34 +103,29 @@ export class PadScene extends UIScene {
     this.updaters = [];
     this.signature = this.sig();
 
-    // Every controller the browser reports (in whichever of its slots) and every Joy-Con connected directly,
-    // topped up with empty slots from the start so there is always something to read.
-    const all = this.pads();
-    const entries: Entry[] = [
-      ...all.map((p, i) => (p ? ({ kind: 'pad', index: i } as Entry) : null)).filter((e): e is Entry => !!e),
-      ...hidPads().filter((j) => j.connected).map((_, n) => ({ kind: 'hid', n: n + 1 }) as Entry),
-    ];
+    const entries = hidPads().filter(j => j.connected).map((_, n) => n + 1);
     const connectedCount = entries.length;
-    const shown: Entry[] = [...entries];
-    for (let i = 0; shown.length < ROWS && i < all.length; i++) if (!all[i]) shown.push({ kind: 'pad', index: i });
     const pages = Math.max(1, Math.ceil(connectedCount / ROWS));
     this.page = Math.min(this.page, pages - 1);
-    const ordered = connectedCount > ROWS ? entries.slice(this.page * ROWS, this.page * ROWS + ROWS) : shown.slice(0, ROWS);
+    const ordered = entries.slice(this.page * ROWS, (this.page + 1) * ROWS);
     this.foundText.setText(T().padFound(connectedCount));
 
-    ordered.forEach((e, row) => {
+    ordered.forEach((n, row) => {
       const y = ROW_Y + row * ROW_H;
       const g = this.add.graphics();
-      const live = e.kind === 'hid' ? !!hidPad(e.n) : !!all[e.index];
+      const live = !!hidPad(n);
       drawFrame(g, ROW_X, y, ROW_W, ROW_H - 10, { fill: 0x17202e, fillAlpha: 0.95, border: live ? 0x658b81 : C.border, radius: 12 });
       drawControllerIcon(g, ROW_X + 41, y + 51, 43, live ? 0x8bbd9e : 0x596c82);
       if (live) g.fillStyle(0x8bbd9e, 0.8).fillCircle(ROW_X + ROW_W - 12, y + 14, 3);
       this.layer.add(g);
       const glow = this.add.graphics();
       this.layer.add(glow);
-      if (e.kind === 'hid') this.buildHidRow(e.n, y, glow);
-      else this.buildPadRow(e.index, all[e.index], y, glow);
+      this.buildHidRow(n, y, glow);
     });
+
+    if (connectedCount === 0) {
+      this.layer.add(txt(this, WIDTH / 2, ROW_Y + 160, T().hidNone, 20, C.dim, { origin: 0.5 }));
+    }
 
     // Paging, then the direct-connect button.
     if (pages > 1) {
@@ -157,76 +147,6 @@ export class PadScene extends UIScene {
   }
 
   // ---------- rows ----------
-
-  private buildPadRow(i: number, pad: Gamepad | null, y: number, glow: Phaser.GameObjects.Graphics) {
-    this.layer.add(txt(this, ROW_X + 84, y + 16, T().padSlot(i + 1), 21, pad ? C.text : C.faint, { title: true, bold: true }));
-    if (!pad) {
-      this.layer.add(txt(this, ROW_X + 84, y + 52, T().padNotFound, 14, C.faint));
-      return;
-    }
-    const kind = padKind(pad.id);
-    const split = isSplit(pad);
-    this.layer.add(txt(this, ROW_X + 84, y + 48, padName(kind) + (split ? '  ✂' : ''), 14, C.text, { bold: true }));
-    this.layer.add(txt(this, ROW_X + 84, y + 70, pad.id, 9, C.faint, { wrap: 238 }));
-
-    // Live readout: raw numbers (to see what the browser reports), then what each half / the pad is doing.
-    const raw = txt(this, ROW_X + 340, y + 14, '', 12, C.dim);
-    this.layer.add(raw);
-    const targets: { side?: PadSide; label: string; text: Phaser.GameObjects.Text }[] = (split
-      ? [{ side: 'L' as PadSide, label: T().padHalfL }, { side: 'R' as PadSide, label: T().padHalfR }]
-      : [{ side: undefined, label: T().padWhole }]
-    ).map((t, n) => {
-      const text = txt(this, ROW_X + 340, y + 40 + n * 24, '', 14, C.text, { bold: true });
-      this.layer.add(text);
-      return { ...t, text };
-    });
-    this.updaters.push(() => {
-      const p = this.pads()[i];
-      if (!p) return;
-      const down = p.buttons.map((b, n) => (b.pressed || b.value > 0.5 ? n : -1)).filter((n) => n >= 0);
-      raw.setText(T().padRaw(down.length ? down.join(', ') : '–', p.axes.map((a) => a.toFixed(2)).join(' / ')));
-      targets.forEach((t) => {
-        const st = readController(p, t.side);
-        t.text.setText(T().padTest(t.label, actLine(st.actions), `${st.mx.toFixed(1)}, ${st.my.toFixed(1)}`));
-        t.text.setColor(st.actions.some(Boolean) || st.mx !== 0 || st.my !== 0 ? '#ffd27a' : C.text);
-      });
-      glow.clear();
-      if (down.length > 0 || p.axes.some((a, n) => Math.abs(a) > 0.5 && n !== 9)) glow.lineStyle(3, C.gold, 0.9).strokeRoundedRect(ROW_X, y, ROW_W, ROW_H - 10, 12);
-    });
-
-    // Mode, grip and button setup.
-    const mode = getPadMode(pad.id);
-    addSelector(this, this.layer, this.nav, {
-      id: `p${i}-mode`, x: ROW_X + 790, y: y + 6, w: 390, h: 30, labelW: 56, label: T().padMode, value: T().padModeNames[mode],
-      onAdjust: (d) => {
-        const n = PAD_MODES.length;
-        setPadMode(pad.id, PAD_MODES[(PAD_MODES.indexOf(mode) + d + n) % n]);
-        this.build();
-      },
-    });
-    if (split) {
-      const grip = getPadGrip(pad.id);
-      addSelector(this, this.layer, this.nav, {
-        id: `p${i}-grip`, x: ROW_X + 790, y: y + 40, w: 390, h: 30, labelW: 56, label: T().padGrip, value: T().padGripNames[grip],
-        onAdjust: () => {
-          setPadGrip(pad.id, PAD_GRIPS[(PAD_GRIPS.indexOf(grip) + 1) % PAD_GRIPS.length]);
-          this.build();
-        },
-      });
-    }
-    const buttons: { id: string; label: string; w: number; onPress: () => void }[] = split
-      ? [
-          { id: 'cl', label: T().padCalLeft, w: 120, onPress: () => this.openCalibrate('pad', i, 'L') },
-          { id: 'cr', label: T().padCalRight, w: 120, onPress: () => this.openCalibrate('pad', i, 'R') },
-        ]
-      : [{ id: 'c', label: T().padCalibrate, w: 150, onPress: () => this.openCalibrate('pad', i) }];
-    buttons.push({ id: 'rs', label: T().padReset, w: 90, onPress: () => { resetPadMaps(pad.id); this.build(); } });
-    let bx = ROW_X + 790 + 56;
-    buttons.forEach((b) => {
-      addButton(this, this.layer, this.nav, { id: `p${i}-${b.id}`, x: bx + b.w / 2, y: y + 88, w: b.w, h: 30, label: b.label, size: 15, onPress: b.onPress });
-      bx += b.w + 10;
-    });
-  }
 
   /** A Joy-Con or Pro Controller connected directly. */
   private buildHidRow(n: number, y: number, glow: Phaser.GameObjects.Graphics) {

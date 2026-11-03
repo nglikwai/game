@@ -42,7 +42,7 @@ test('the carrying trial is a random tactic with localized delivery goals and no
   for (const lang of ['en', 'zh']) {
     setLang(lang);
     assert.ok(T().questGoals[QUEST.beaconStage]); assert.ok(T().hellGoals[QUEST.beaconStage]);
-    assert.ok(T().spiritRelayProgress(0, 6).includes('6'));
+    assert.ok(T().spiritRelayProgress(0, QUEST.beacons.required, QUEST.beacons.timeLimit).includes(String(QUEST.beacons.required)));
   }
   scene.spiritRelay.sources.forEach((p, i) => {
     const at = layoutPoint(scene.map, QUEST.beacons.spots[i]);
@@ -93,33 +93,33 @@ test('defeat or trapping drops the carried spirit for a teammate instead of dele
   }
 });
 
-test('spirits replenish at free springs without exceeding the six required deliveries', () => {
+test('spirits replenish at free springs without exceeding the required deliveries', () => {
   const scene = battle(), relay = scene.spiritRelay;
   relay.spirits.splice(0, 1); relay.delivered = 1;
   scene.updateSpiritRelay(QUEST.beacons.spawnEvery - 0.01);
   assert.equal(relay.spirits.length, 2);
   scene.updateSpiritRelay(0.02); assert.equal(relay.spirits.length, 3);
-  relay.delivered = 5; relay.spirits.splice(1);
+  relay.delivered = QUEST.beacons.required - 1; relay.spirits.splice(1);
   scene.updateSpiritRelay(100);
   assert.equal(relay.spirits.length, 1);
-  assert.equal(relay.delivered + relay.spirits.length, 6);
+  assert.equal(relay.delivered + relay.spirits.length, QUEST.beacons.required);
 });
 
-test('guards return during collection; delivery six clears immediately while guards are still alive', () => {
+test('guards return during collection; the final delivery clears immediately while guards are still alive', () => {
   const scene = battle(), guard = scene.fighters[1], relay = scene.spiritRelay;
   guard.hp = 0; guard.state = 'dead';
-  scene.updateQuest(9.99); assert.equal(guard.alive, false); assert.equal(scene.cleared, undefined);
+  scene.updateQuest(QUEST.beacons.respawnEvery - .01); assert.equal(guard.alive, false); assert.equal(scene.cleared, undefined);
   scene.updateQuest(0.02); assert.equal(guard.alive, true);
-  const hero = scene.fighters[0]; relay.delivered = 5; relay.spirits.splice(1);
+  const hero = scene.fighters[0]; relay.delivered = QUEST.beacons.required - 1; relay.spirits.splice(1);
   relay.spirits[0].carrier = hero; place(hero, relay.destination);
   scene.updateQuest(0.01);
-  assert.equal(relay.delivered, 6); assert.equal(scene.cleared, true); assert.equal(guard.alive, true);
+  assert.equal(relay.delivered, QUEST.beacons.required); assert.equal(scene.cleared, true); assert.equal(guard.alive, true);
 });
 
 test('Hell wins by defeating the heroes and loses when the final spirit reaches the lantern', () => {
   const win = battle('hell'); win.fighters[0].state = 'dead'; win.updateQuest(0.01); assert.equal(win.cleared, true);
   const lose = battle('hell'), relay = lose.spiritRelay, hero = lose.fighters[0];
-  relay.delivered = 5; relay.spirits.splice(1); relay.spirits[0].carrier = hero; place(hero, relay.destination);
+  relay.delivered = QUEST.beacons.required - 1; relay.spirits.splice(1); relay.spirits[0].carrier = hero; place(hero, relay.destination);
   lose.updateQuest(0.01); assert.equal(lose.failed, true);
 });
 
@@ -145,12 +145,14 @@ test('collection and respawn freeze during pause, countdown and results; retry r
     place(scene.fighters[0], relay.spirits[0]); scene.fighters[1].state = 'dead';
     scene[stop] = stop === 'countdown' ? 5 : true; scene.updateSpiritRelay(30);
     assert.equal(relay.delivered, 0); assert.equal(relay.spirits[0].carrier, null);
-    assert.equal(scene.fighters[1].alive, false); assert.equal(relay.guardT, 10);
+    assert.equal(scene.fighters[1].alive, false); assert.equal(relay.guardT, QUEST.beacons.respawnEvery);
+    assert.equal(relay.timeLeft, QUEST.beacons.timeLimit);
   }
   const scene = battle(), before = scene.spiritRelay.destination;
   scene.spiritRelay.delivered = 3;
   scene.init({ mode: 'quest', slots: [], quest: { stage: QUEST.beaconStage, layoutSeed: 123 } });
   assert.equal(scene.spiritRelay.delivered, 0);
+  assert.equal(scene.spiritRelay.timeLeft, QUEST.beacons.timeLimit);
   assert.equal(scene.spiritRelay.spirits.length, 3);
   assert.ok(scene.spiritRelay.spirits.every((s) => s.carrier === null));
   assert.deepEqual(scene.spiritRelay.destination, before);
@@ -167,4 +169,89 @@ test('the relay renders spirits, carried souls and its destination without drawi
   scene.renderSpiritRelay(1);
   assert.ok(calls.some((c) => c.method === 'fillTriangle'));
   assert.equal(calls.some((c) => c.method === 'strokeCircle'), false);
+});
+
+test('the carrying trial requires twenty deliveries, fields four interceptors, and explains its deadline in both languages', () => {
+  assert.equal(QUEST.beacons.required, 20);
+  const scene = battle();
+  const { questSlots } = load('@/battle/quest/roster.ts');
+  const slots = questSlots(Array.from({ length: 8 }, () => ({ control: 'cpu', role: 'ronin' })), QUEST.beaconStage);
+  assert.equal(slots.filter(s => s.team === 1 && s.control !== 'off').length, 4);
+  for (const lang of ['en', 'zh']) {
+    setLang(lang);
+    assert.ok(T().questGoals[QUEST.beaconStage].includes('20'));
+    assert.ok(T().questGoals[QUEST.beaconStage].includes('5'));
+    const label = T().spiritRelayProgress(2, 20, 179.2);
+    assert.ok(label.includes('2/20')); assert.ok(label.includes('180'));
+    assert.ok(T().spiritRelayTimeout);
+    assert.ok(T().hellGoals[QUEST.beaconStage].includes('20'));
+  }
+  assert.equal(scene.spiritRelay.timeLeft, 300);
+});
+
+test('farming the nearest spring stops replenishing until another spring is collected', () => {
+  const scene = battle(), relay = scene.spiritRelay, hero = scene.fighters[0];
+  const deliver = spirit => {
+    spirit.carrier = hero; place(hero, relay.destination); scene.updateSpiritRelay(.01);
+  };
+  const first = relay.spirits[0]; deliver(first); scene.updateSpiritRelay(QUEST.beacons.spawnEvery);
+  const refilled = relay.spirits.find(s => s.x === relay.sources[0].x && s.y === relay.sources[0].y);
+  assert.ok(refilled); assert.equal(relay.nextSpawn, 1);
+  deliver(refilled); scene.updateSpiritRelay(QUEST.beacons.spawnEvery * 2);
+  assert.equal(relay.spirits.length, 2, 'occupied middle spring blocks another near-lantern refill');
+  assert.equal(relay.nextSpawn, 1);
+  const middle = relay.spirits.find(s => s.x === relay.sources[1].x && s.y === relay.sources[1].y);
+  deliver(middle); scene.updateSpiritRelay(QUEST.beacons.spawnEvery);
+  assert.ok(relay.spirits.some(s => s.x === relay.sources[1].x && s.y === relay.sources[1].y));
+  assert.equal(relay.nextSpawn, 2);
+});
+
+test('the deadline defeats heroes, rewards Hell defenders, and rejects a last delivery after time runs out', () => {
+  for (const side of ['heroes', 'hell']) {
+    const scene = battle(side), relay = scene.spiritRelay, hero = scene.fighters[0];
+    relay.timeLeft = .1; relay.delivered = QUEST.beacons.required - 1;
+    relay.spirits.splice(1); relay.spirits[0].carrier = hero; place(hero, relay.destination);
+    scene.updateQuest(.2);
+    assert.equal(relay.timeLeft, 0); assert.equal(relay.delivered, QUEST.beacons.required - 1);
+    assert.equal(side === 'hell' ? scene.cleared : scene.failed, true);
+    assert.equal(side === 'hell' ? scene.failed : scene.cleared, undefined);
+  }
+});
+
+test('an on-time final delivery wins and freezes the relay clock on subsequent updates', () => {
+  const scene = battle(), relay = scene.spiritRelay, hero = scene.fighters[0];
+  relay.timeLeft = .2; relay.delivered = QUEST.beacons.required - 1;
+  relay.spirits.splice(1); relay.spirits[0].carrier = hero; place(hero, relay.destination);
+  scene.updateQuest(.1);
+  assert.equal(scene.cleared, true); assert.equal(scene.failed, undefined);
+  const remaining = relay.timeLeft;
+  scene.updateSpiritRelay(30); assert.equal(relay.timeLeft, remaining);
+});
+
+test('returning guards flank closer to couriers with safe separation, and return faster as progress grows', () => {
+  const intervals = [];
+  for (const delivered of [0, QUEST.beacons.required / 2, QUEST.beacons.required - 1]) {
+    const scene = battle(), relay = scene.spiritRelay, hero = scene.fighters[0], guard = scene.fighters[1];
+    place(hero, relay.destination); relay.delivered = delivered; relay.guardT = 0;
+    guard.state = 'dead'; guard.hp = 0;
+    scene.updateSpiritRelay(.01);
+    assert.equal(guard.alive, true);
+    assert.ok(Math.hypot(guard.x - hero.x, guard.y - hero.y) >= QUEST.beacons.guardSpawnDistance * MAP_SCALE + hero.radius);
+    assert.ok(Math.hypot(guard.x - hero.x, guard.y - hero.y) < Math.hypot(scene.spawns[guard.index].x - hero.x, scene.spawns[guard.index].y - hero.y));
+    intervals.push(relay.guardT);
+  }
+  assert.ok(intervals[0] > intervals[1] && intervals[1] > intervals[2]);
+  assert.ok(intervals[2] >= QUEST.beacons.minRespawnEvery);
+});
+
+test('spirit collection returns two guards per wave, increasing to three after half the deliveries', () => {
+  for (const delivered of [0, QUEST.beacons.required / 2]) {
+    const scene = battle(), relay = scene.spiritRelay;
+    const guards = [scene.fighters[1], ...[5, 6, 7].map(i => fighter(i, 1))];
+    scene.fighters.push(...guards.slice(1));
+    guards.forEach(f => { f.state = 'dead'; scene.spawns[f.index] = { x: 1400, y: 500 }; });
+    relay.delivered = delivered; relay.guardT = 0;
+    scene.updateSpiritRelay(0.01);
+    assert.equal(guards.filter(f => f.alive).length, delivered ? 3 : 2);
+  }
 });

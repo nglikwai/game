@@ -15,6 +15,8 @@ export interface SpiritLantern {
   /** Pushed all the way back to the party side. */
   lost: boolean;
   moving: boolean;
+  /** Nobody is inside, so it is drifting back toward the party side. */
+  drifting: boolean;
   /** 1 toward the enemy side, -1 back toward the party, 0 stopped. */
   push: -1 | 0 | 1;
   /** 0 on the party side, 0.5 at the center, 1 on the enemy side. */
@@ -35,7 +37,7 @@ export function createLantern(partySize: number, scale: number, hudHeight: numbe
   const progress = span > 0 ? (start.x - path[0].x) / span : 0.5;
   return {
     ...start, team: 0, w: 40 * scale, h: 48 * scale, radius: QUEST.escort.radius * scale,
-    hp, maxHp: hp, alive: true, arrived: false, lost: false, moving: false, push: 0,
+    hp, maxHp: hp, alive: true, arrived: false, lost: false, moving: false, drifting: false, push: 0,
     progress: Math.abs(progress - 0.5) < 1e-9 ? 0.5 : progress, distance: 0,
     speed: QUEST.escort.speed * scale, left: path[0].x, right: path[2].x, path,
   };
@@ -43,11 +45,13 @@ export function createLantern(partySize: number, scale: number, hudHeight: numbe
 
 /**
  * Two living allies and no enemies push toward the enemy side. Enemies alone push
- * backward. Both sides inside the circle, or fewer than two allies with nobody
- * opposing them, leaves the lantern where it is.
+ * backward. Both sides inside the circle, or one ally alone, leaves the lantern where
+ * it is. Left empty, it drifts slowly back toward the party side, but stops there:
+ * only enemies can push it to a loss.
  */
 export function advanceLantern(lantern: SpiritLantern, fighters: { x: number; y: number; team: number; alive: boolean }[], dt: number): void {
   lantern.moving = false;
+  lantern.drifting = false;
   lantern.push = 0;
   if (!lantern.alive || lantern.arrived || lantern.lost || dt <= 0) return;
   const inside = (f: { x: number; y: number; alive: boolean }) => f.alive && Math.hypot(f.x - lantern.x, f.y - lantern.y) <= lantern.radius;
@@ -56,7 +60,10 @@ export function advanceLantern(lantern: SpiritLantern, fighters: { x: number; y:
   const push: -1 | 0 | 1 = allies > 0 && foes > 0 ? 0 : foes > 0 ? -1 : allies >= QUEST.escort.allies ? 1 : 0;
   lantern.push = push;
   lantern.moving = push !== 0;
-  if (!push) return;
+  if (!push) {
+    if (allies === 0 && foes === 0) drift(lantern, dt);
+    return;
+  }
   const step = lantern.speed * dt;
   const next = lantern.x + push * step;
   const reached = push > 0 ? next >= lantern.right - 1e-4 : next <= lantern.left + 1e-4;
@@ -72,6 +79,19 @@ export function advanceLantern(lantern: SpiritLantern, fighters: { x: number; y:
   }
   lantern.x = next;
   lantern.distance += step;
+  const span = lantern.right - lantern.left;
+  const progress = span > 0 ? (lantern.x - lantern.left) / span : 0.5;
+  lantern.progress = Math.abs(progress - 0.5) < 1e-9 ? 0.5 : progress;
+}
+
+/** Unattended: slide back toward the party side at a fraction of the usual speed, stopping at the end. */
+function drift(lantern: SpiritLantern, dt: number): void {
+  const next = Math.max(lantern.left, lantern.x - lantern.speed * QUEST.escort.drift * dt);
+  if (next >= lantern.x) return;
+  lantern.distance += lantern.x - next;
+  lantern.x = next;
+  lantern.drifting = true;
+  lantern.moving = true;
   const span = lantern.right - lantern.left;
   const progress = span > 0 ? (lantern.x - lantern.left) / span : 0.5;
   lantern.progress = Math.abs(progress - 0.5) < 1e-9 ? 0.5 : progress;

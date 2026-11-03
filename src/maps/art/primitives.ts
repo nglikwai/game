@@ -1,5 +1,7 @@
+import { paintWaterSurface } from '@/maps/art/water';
+import { paintScenery } from '@/maps/art/renderedProps';
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
-import { ARENA, WALL, blob, paintShadow, stoneBlock, type Ctx, type Obstacle, type TerrainZone } from '@/maps/common';
+import { ARENA, WALL, blob, mulberry32, paintShadow, stoneBlock, type Ctx, type Obstacle, type TerrainZone } from '@/maps/common';
 
 /** Shared materials; each arena supplies its own layout and landmarks. */
 export function paintTiles(ctx: Ctx, rand: () => number, base: string, grout: string, tile = 48) {
@@ -37,6 +39,7 @@ export function paintRim(ctx: Ctx, base: string, trim: string) {
 }
 
 export function paintSlab(ctx: Ctx, o: Obstacle, base: string, trim: string) {
+  if (paintScenery(ctx, o)) return;
   paintShadow(ctx, o);
   stoneBlock(ctx, o.x - o.w / 2, o.y - o.h / 2, o.w, o.h, base, trim, '#151921');
   ctx.strokeStyle = trim;
@@ -49,6 +52,7 @@ export function paintPool(ctx: Ctx, z: TerrainZone, base: string, ripple: string
   ctx.fillRect(z.x - z.w / 2 - 5, z.y - z.h / 2 - 5, z.w + 10, z.h + 10);
   ctx.fillStyle = base;
   ctx.fillRect(z.x - z.w / 2, z.y - z.h / 2, z.w, z.h);
+  paintWaterSurface(ctx, z, 'rect', 'pond', mulberry32(Math.round(z.x * 97 + z.y * 13)));
   ctx.strokeStyle = ripple;
   ctx.lineWidth = 1.5;
   for (let y = z.y - z.h / 2 + 12; y < z.y + z.h / 2 - 5; y += 16) {

@@ -45,8 +45,8 @@ test('boss fills reserve slots by paying HP, keeps the initial solo enemy count 
   scene.updateBossReinforcements(9.99);
   assert.equal(boss.hp, hp);
   scene.updateBossReinforcements(0.01);
-  assert.equal(boss.hp, hp - 36);
-  assert.equal(scene.fighters.filter((f) => f.team === 1 && f.alive).length, 3);
+  assert.equal(boss.hp, hp - 72);
+  assert.equal(scene.fighters.filter((f) => f.team === 1 && f.alive).length, 4);
   scene.updateBossReinforcements(10);
   assert.equal(boss.hp, hp - 72);
   assert.equal(scene.fighters.filter((f) => f.team === 1 && f.alive).length, 4);
@@ -66,7 +66,9 @@ test('fallen guards respawn before unused reserves, clear their pockets and keep
   assert.equal(guard.hp, guard.maxHp * 0.75);
   assert.equal(guard.pocket.length, 0);
   assert.equal(guard.soul, 25);
-  assert.equal(scene.bossReserves.size, 2);
+  assert.equal(scene.bossReserves.size, 1);
+  assert.equal(guards[1].alive, true);
+  assert.equal(guards[2].alive, false);
   assert.equal(scene.deathTime.has(guard), false);
   assert.equal(scene.respawnTimers.has(guard), false);
 });
@@ -319,4 +321,12 @@ test('all four boss summons gain ten percentage points without changing ordinary
       assert.equal(hits, 0, `${method}: ordinary caster should miss`);
     } finally { Math.random = random; }
   }
+});
+
+test('a boss wave stops when there is only enough HP to pay for one guard', () => {
+  const { scene, boss, guards } = battle();
+  guards.forEach(f => { f.state = 'dead'; }); boss.hp = 37;
+  scene.updateBossReinforcements(10);
+  assert.equal(guards.filter(f => f.alive).length, 1);
+  assert.equal(boss.hp, 1);
 });

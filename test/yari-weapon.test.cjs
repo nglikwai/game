@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
 const { FIRE_KUNAI, THUNDER_FAN, WEAPONS, rollOniWeapon, shapeArea, shapeReach, shapeHits, shapeHitsRect } = load('src/gameplay/weapons.ts');
-const { WEAPON_AREA, DAMAGE_PER_SEC, PE_COST_PER_SEC, KNOCKBACK_PER_SEC } = load('src/config/index.ts');
+const { WEAPON_AREA, DAMAGE_PER_SEC, KNOCKBACK_PER_SEC } = load('src/config/index.ts');
 const { randomCpuLoadout } = load('src/ai/loadouts.ts');
 const { BattleScene } = load('src/scenes/BattleScene.ts');
 const { Fx } = load('src/rendering/effects.ts');
@@ -12,11 +12,12 @@ const yari = WEAPONS.find((w) => w.id === 'yari');
 
 test('Yari appends a bilingual option while preserving saved weapon indices and balance', () => {
   assert.deepEqual(Array.from(WEAPONS, (w) => w.id), [
-    'fan', 'shuriken', 'hammer', 'daggers', 'flail', 'kusarigama', 'bomb', 'ninjato', 'talisman', 'staff', 'kunai', 'yari', 'nunchaku', 'whip',
+    'fan', 'shuriken', 'hammer', 'daggers', 'flail', 'kusarigama', 'bomb', 'ninjato', 'talisman', 'staff', 'kunai', 'yari', 'nunchaku', 'whip', 'windmill', 'spade',
   ]);
   assert.ok(Math.abs(shapeArea(yari.shape) - WEAPON_AREA) < 1e-6);
-  assert.equal(yari.damage / yari.cycle, DAMAGE_PER_SEC);
-  assert.equal(yari.peCost / yari.cycle, PE_COST_PER_SEC);
+  assert.ok(Math.abs(yari.damage / yari.cycle - DAMAGE_PER_SEC * yari.power) < 1e-9);
+  assert.ok(yari.power < 1, 'a long, safe reach hits softer');
+  assert.equal(yari.peCost, undefined);
   assert.equal(yari.knockback / yari.cycle, KNOCKBACK_PER_SEC);
   assert.ok(yari.windup + yari.active < yari.cycle);
   assert.ok(shapeReach(yari.shape) > shapeReach(WEAPONS[1].shape));

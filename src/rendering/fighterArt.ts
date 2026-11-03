@@ -1,3 +1,6 @@
+import { foldingFan, warHammer } from '@/rendering/weaponArt';
+import { paintRoleOutfit } from '@/rendering/characterArt';
+import type { RoleId } from '@/gameplay/roles';
 import * as Phaser from 'phaser';
 import { RES } from '@/config';
 import type { WeaponId } from '@/gameplay/weapons';
@@ -9,6 +12,8 @@ import type { WeaponId } from '@/gameplay/weapons';
 
 /** Size of the ninja texture in game units (the body circle has radius 18). */
 export const NINJA_SIZE = 56;
+/** Battle artwork only; hit geometry and menu icon bounds are independent. */
+export const SHURIKEN_BATTLE_SCALE = 3;
 
 const hex = (c: number) => '#' + c.toString(16).padStart(6, '0');
 
@@ -20,8 +25,8 @@ function shade(c: number, f: number) {
 }
 
 /** Paints (once) and returns the texture key of a ninja wearing `color`. */
-export function ninjaTexture(scene: Phaser.Scene, color: number): string {
-  const key = `ninja-${color.toString(16)}`;
+export function ninjaTexture(scene: Phaser.Scene, color: number, role: RoleId = 'shinobi'): string {
+  const key = `ninja-v2-${role}-${color.toString(16)}`;
   if (scene.textures.exists(key)) return key;
   const px = Math.round(NINJA_SIZE * RES);
   const tex = scene.textures.createCanvas(key, px, px)!;
@@ -108,6 +113,7 @@ export function ninjaTexture(scene: Phaser.Scene, color: number): string {
   ctx.arc(-6, 0, 2.4, 0, Math.PI * 2);
   ctx.fill();
 
+  paintRoleOutfit(ctx, color, role);
   tex.refresh();
   return key;
 }
@@ -159,7 +165,16 @@ export function drawShurikenStar(g: Phaser.GameObjects.Graphics, x: number, y: n
   }
   g.fillStyle(0xcfd5df, alpha).fillPoints(pts as Phaser.Math.Vector2[], true);
   g.lineStyle(1, 0x4a505c, alpha).strokePoints(pts as Phaser.Math.Vector2[], true);
-  g.fillStyle(0x2a2e36, alpha).fillCircle(x, y, r * 0.18);
+  // Each forged blade has a dark facet and a bright cutting edge.
+  for (let k = 0; k < 4; k++) {
+    const a = rot + k * Math.PI / 2;
+    const tip = { x: x + Math.cos(a) * r, y: y + Math.sin(a) * r };
+    const shoulder = { x: x + Math.cos(a + Math.PI / 4) * r * .32, y: y + Math.sin(a + Math.PI / 4) * r * .32 };
+    g.fillStyle(0x7c8fa4, alpha).fillTriangle(x, y, tip.x, tip.y, shoulder.x, shoulder.y);
+    g.lineStyle(Math.max(.5, r * .07), 0xf4fbff, alpha * .9).lineBetween(x, y, tip.x, tip.y);
+  }
+  g.fillStyle(0x283442, alpha).fillCircle(x, y, r * .2);
+  g.lineStyle(Math.max(.5, r * .06), 0xa5b5c9, alpha).strokeCircle(x, y, r * .2);
 }
 
 export function kunai(g: Phaser.GameObjects.Graphics, x: number, y: number, angle: number, len: number) {
@@ -172,13 +187,19 @@ export function kunai(g: Phaser.GameObjects.Graphics, x: number, y: number, angl
   const g0 = at(-len * 0.4, 0);
   const g1 = at(0, 0);
   g.lineStyle(2.6, 0x3a2a1c, 1).lineBetween(g0.x, g0.y, g1.x, g1.y);
+  // Diagonal silk bindings catch the light on the grip.
+  for (let k = 1; k < 4; k++) {
+    const a = at(-len * .4 + k * len * .1, -1), b = at(-len * .34 + k * len * .1, 1);
+    g.lineStyle(.7, 0xad9277, .8).lineBetween(a.x, a.y, b.x, b.y);
+  }
   // Leaf-shaped blade.
   g.fillStyle(0xd3d8e2, 1).fillPoints([at(0, 2.6), at(len * 0.35, 3.2), at(len, 0), at(len * 0.35, -3.2), at(0, -2.6)] as Phaser.Math.Vector2[], true);
-  g.lineStyle(1, 0x5d6370, 1).lineBetween(at(0, 0).x, at(0, 0).y, at(len, 0).x, at(len, 0).y);
+  g.fillStyle(0x7d91a7, 1).fillPoints([at(0, 0), at(len * .35, 3.2), at(len, 0)] as Phaser.Math.Vector2[], true);
+  g.lineStyle(.8, 0xf4fcff, 1).lineBetween(at(0, -1).x, at(0, -1).y, at(len, 0).x, at(len, 0).y);
 }
 
 /** A lacquered polearm with a leaf-shaped steel head and a red tassel. */
-function spear(g: Phaser.GameObjects.Graphics, x: number, y: number, angle: number, length: number, color: number) {
+export function spear(g: Phaser.GameObjects.Graphics, x: number, y: number, angle: number, length: number, color: number) {
   const c = Math.cos(angle), s = Math.sin(angle);
   const at = (f: number, side = 0) => ({ x: x + (c * f - s * side) * length, y: y + (s * f + c * side) * length });
   const rear = at(-0.5), neck = at(0.23), tip = at(0.5);
@@ -224,6 +245,34 @@ function whipChain(g: Phaser.GameObjects.Graphics, pts: readonly { x: number; y:
   g.fillStyle(0xb8383e, 1).fillCircle(end.x, end.y, bead * 0.9);
 }
 
+/** A three-bladed windmill wheel at (x, y), `r` across its blades, turned to `rot`. */
+export function windmillWheel(g: Phaser.GameObjects.Graphics, x: number, y: number, r: number, rot: number) {
+  for (let k = 0; k < 3; k++) {
+    const a = rot + (k * Math.PI * 2) / 3;
+    // A curved blade: out from the hub, sweeping back at the tip.
+    const p = (f: number, bend: number) => ({ x: x + Math.cos(a + bend) * r * f, y: y + Math.sin(a + bend) * r * f });
+    const blade = [p(0.2, -0.5), p(0.6, -0.15), p(1, 0.45), p(0.75, 0.55), p(0.35, 0.3)];
+    g.fillStyle(0xd7e3dc, 1).fillPoints(blade as Phaser.Math.Vector2[], true);
+    g.lineStyle(Math.max(1, r * 0.06), 0x55665e, 1).strokePoints(blade as Phaser.Math.Vector2[], true);
+  }
+  g.fillStyle(0x2f6b52, 1).fillCircle(x, y, r * 0.26);
+  g.fillStyle(0xd9ae4a, 1).fillCircle(x, y, r * 0.11);
+}
+
+/** A monk's spade: a staff with a crescent blade at the front end and a small flat spade at the back. */
+export function crescentSpade(g: Phaser.GameObjects.Graphics, x: number, y: number, angle: number, length: number) {
+  const c = Math.cos(angle), s = Math.sin(angle);
+  const at = (f: number, side = 0) => ({ x: x + (c * f - s * side) * length, y: y + (s * f + c * side) * length });
+  const back = at(-0.45), front = at(0.4);
+  g.lineStyle(length * 0.055, 0x6b4a2e, 1).lineBetween(back.x, back.y, front.x, front.y);
+  // The crescent: horns curling forward round the end of the staff.
+  const moon = [at(0.36, -0.16), at(0.47, -0.2), at(0.42, -0.08), at(0.44, 0), at(0.42, 0.08), at(0.47, 0.2), at(0.36, 0.16), at(0.4, 0)];
+  g.fillStyle(0xe6e9ee, 1).fillPoints(moon as Phaser.Math.Vector2[], true);
+  g.lineStyle(length * 0.014, 0x5b6470, 1).strokePoints(moon as Phaser.Math.Vector2[], true);
+  const spade = [at(-0.45, -0.05), at(-0.55, -0.06), at(-0.58, 0), at(-0.55, 0.06), at(-0.45, 0.05)];
+  g.fillStyle(0xb8c0cc, 1).fillPoints(spade as Phaser.Math.Vector2[], true);
+}
+
 /** The weapon in the ninja's hands, posed for the current swing phase. */
 export function drawHeldWeapon(g: Phaser.GameObjects.Graphics, id: WeaponId, p: Pose) {
   const wind = windAmount(p);
@@ -238,24 +287,7 @@ export function drawHeldWeapon(g: Phaser.GameObjects.Graphics, id: WeaponId, p: 
       const dir = p.facing + lerp(0.25, 1.5, back / 1.2) - (p.phase === 'strike' ? 0.25 : 0);
       const spread = lerp(0.12, 1.9, open);
       const r = 17;
-      g.fillStyle(0xb8322a, 1);
-      g.beginPath();
-      g.slice(h.x, h.y, r, dir - spread / 2, dir + spread / 2, false);
-      g.fillPath();
-      // Ribs and gold rim.
-      g.lineStyle(1, 0x2a1210, 0.8);
-      for (let i = 0; i <= 6; i++) {
-        const a = dir - spread / 2 + (spread * i) / 6;
-        g.lineBetween(h.x, h.y, h.x + Math.cos(a) * r, h.y + Math.sin(a) * r);
-      }
-      g.lineStyle(2, 0xd9ae4a, 1);
-      g.beginPath();
-      g.arc(h.x, h.y, r, dir - spread / 2, dir + spread / 2, false);
-      g.strokePath();
-      if (open > 0.5) {
-        // A painted flame on the open fan.
-        g.fillStyle(0xffb03a, 0.9).fillCircle(h.x + Math.cos(dir) * r * 0.62, h.y + Math.sin(dir) * r * 0.62, 3);
-      }
+      foldingFan(g, h.x, h.y, r, dir, spread);
       hand(g, p, 7, -10);
       break;
     }
@@ -267,28 +299,7 @@ export function drawHeldWeapon(g: Phaser.GameObjects.Graphics, id: WeaponId, p: 
       const dir = p.facing + lerp(0.25, 1.5, back / 1.2) - (p.phase === 'strike' ? 0.25 : 0);
       const spread = lerp(0.2, 2.15, open);
       const r = 26;
-      g.fillStyle(0x1d4f86, 1);
-      g.beginPath();
-      g.slice(h.x, h.y, r, dir - spread / 2, dir + spread / 2, false);
-      g.fillPath();
-      g.lineStyle(1.4, 0x071422, 0.8);
-      for (let i = 0; i <= 8; i++) {
-        const a = dir - spread / 2 + (spread * i) / 8;
-        g.lineBetween(h.x, h.y, h.x + Math.cos(a) * r, h.y + Math.sin(a) * r);
-      }
-      g.lineStyle(2, 0xe7f6ff, 1);
-      g.beginPath();
-      g.arc(h.x, h.y, r, dir - spread / 2, dir + spread / 2, false);
-      g.strokePath();
-      if (open > 0.4) {
-        const tip = { x: h.x + Math.cos(dir) * r * 0.72, y: h.y + Math.sin(dir) * r * 0.72 };
-        g.lineStyle(2, 0xfff6c2, 1);
-        g.beginPath();
-        g.moveTo(h.x + Math.cos(dir) * 6, h.y + Math.sin(dir) * 6);
-        g.lineTo(tip.x - Math.sin(dir) * 5, tip.y + Math.cos(dir) * 5);
-        g.lineTo(tip.x, tip.y);
-        g.strokePath();
-      }
+      foldingFan(g, h.x, h.y, r, dir, spread, true);
       hand(g, p, 7, -10);
       break;
     }
@@ -297,7 +308,7 @@ export function drawHeldWeapon(g: Phaser.GameObjects.Graphics, id: WeaponId, p: 
       const hx = p.phase === 'strike' ? lerp(17, 9, p.t) : lerp(9, -3, wind);
       const hy = p.phase === 'strike' ? lerp(5, 11, p.t) : lerp(11, 15, wind);
       const h = hand(g, p, hx, hy);
-      if (!thrown) drawShurikenStar(g, h.x + Math.cos(p.facing) * 3, h.y + Math.sin(p.facing) * 3, 8, p.time * (p.phase === 'windup' ? 14 : 2));
+      if (!thrown) drawShurikenStar(g, h.x + Math.cos(p.facing) * 3, h.y + Math.sin(p.facing) * 3, 8 * SHURIKEN_BATTLE_SCALE, p.time * (p.phase === 'windup' ? 14 : 2));
       hand(g, p, 7, -10);
       break;
     }
@@ -309,15 +320,7 @@ export function drawHeldWeapon(g: Phaser.GameObjects.Graphics, id: WeaponId, p: 
       const base = toWorld(p, 6, 0);
       const a = p.facing + ang;
       const len = p.phase === 'strike' && p.t < 0.4 ? 34 : 26;
-      const head = { x: base.x + Math.cos(a) * len, y: base.y + Math.sin(a) * len };
-      g.lineStyle(4, 0x5a3a1e, 1).lineBetween(base.x, base.y, head.x, head.y);
-      // Iron head: a rotated box with bands.
-      const c = Math.cos(a);
-      const s = Math.sin(a);
-      const box = (fx: number, fy: number) => ({ x: head.x + c * fx - s * fy, y: head.y + s * fx + c * fy });
-      g.fillStyle(0x4b505b, 1).fillPoints([box(-5, -9), box(6, -9), box(6, 9), box(-5, 9)] as Phaser.Math.Vector2[], true);
-      g.lineStyle(1.5, 0x22252b, 1).strokePoints([box(-5, -9), box(6, -9), box(6, 9), box(-5, 9)] as Phaser.Math.Vector2[], true);
-      g.lineStyle(2, 0xd9ae4a, 1).lineBetween(box(-1, -9).x, box(-1, -9).y, box(-1, 9).x, box(-1, 9).y);
+      warHammer(g, base.x, base.y, a, len);
       hand(g, p, 8, 6);
       hand(g, p, 5, -4);
       break;
@@ -392,6 +395,25 @@ export function drawHeldWeapon(g: Phaser.GameObjects.Graphics, id: WeaponId, p: 
       g.lineStyle(1.2, 0x9aa0ab, 1).lineBetween(end.x, end.y, link.x, link.y);
       nunchakuStick(g, link.x, link.y, swing, 11);
       hand(g, p, 7, -10);
+      break;
+    }
+    case 'windmill': {
+      // The wheel held up beside you, spinning faster through the windup; it whirls round you on the strike.
+      const h = hand(g, p, lerp(10, 6, wind), lerp(12, 15, wind));
+      if (!(p.phase === 'strike' && p.t < 0.45)) {
+        const spin = p.phase === 'windup' ? p.time * (6 + p.t * 20) : p.time * 1.5;
+        windmillWheel(g, h.x + Math.cos(p.facing) * 6, h.y + Math.sin(p.facing) * 6, 11, spin);
+      }
+      hand(g, p, 7, -10);
+      break;
+    }
+    case 'spade': {
+      // Two hands on the staff: drawn back through the windup, then scooped forward and up.
+      const scoop = p.phase === 'strike' ? Math.max(0, 1 - p.t * 1.5) : 0;
+      const centre = toWorld(p, 10 - wind * 8 + scoop * 12, 6 * (1 - scoop));
+      crescentSpade(g, centre.x, centre.y, p.facing + lerp(lerp(0.15, 0.7, wind), -0.25, scoop), 62);
+      hand(g, p, 10 - wind * 6 + scoop * 8, 6);
+      hand(g, p, -4 - wind * 6 + scoop * 8, -3);
       break;
     }
     case 'whip': {
@@ -503,13 +525,19 @@ function sickle(g: Phaser.GameObjects.Graphics, x: number, y: number, angle: num
 }
 
 /** Straight ninja sword: dark wrapped grip, square guard, blade. */
-function ninjato(g: Phaser.GameObjects.Graphics, x: number, y: number, angle: number, len: number) {
+export function ninjato(g: Phaser.GameObjects.Graphics, x: number, y: number, angle: number, len: number) {
   const c = Math.cos(angle);
   const s = Math.sin(angle);
   const at = (f: number, side: number) => ({ x: x + c * f - s * side, y: y + s * f + c * side });
   g.lineStyle(3, 0x1e1e22, 1).lineBetween(at(-len * 0.3, 0).x, at(-len * 0.3, 0).y, at(0, 0).x, at(0, 0).y);
   g.fillStyle(0xd9ae4a, 1).fillPoints([at(-1, -3.5), at(1.5, -3.5), at(1.5, 3.5), at(-1, 3.5)] as Phaser.Math.Vector2[], true);
   g.fillStyle(0xdfe4ee, 1).fillPoints([at(1.5, -1.6), at(len, -1.2), at(len + 3, 0), at(len, 1.2), at(1.5, 1.6)] as Phaser.Math.Vector2[], true);
+  g.fillStyle(0x8297af, 1).fillPoints([at(1.5, 0), at(len + 3, 0), at(len, 1.2), at(1.5, 1.6)] as Phaser.Math.Vector2[], true);
+  g.lineStyle(.8, 0xf5fcff, 1).lineBetween(at(2, -1.2).x, at(2, -1.2).y, at(len, -.8).x, at(len, -.8).y);
+  for (let k = 1; k < 4; k++) {
+    const from = at(-len * .3 + k * len * .07, -1.4), to = at(-len * .25 + k * len * .07, 1.4);
+    g.lineStyle(.7, 0x9b8270, .9).lineBetween(from.x, from.y, to.x, to.y);
+  }
 }
 
 /** Paper talisman (お札) with a red lightning mark, held between the fingers. */
@@ -545,63 +573,18 @@ function bombBall(g: Phaser.GameObjects.Graphics, x: number, y: number, r: numbe
 export function drawWeaponIcon(g: Phaser.GameObjects.Graphics, id: WeaponId, x: number, y: number, size: number, color: number) {
   const s = size / 40;
   switch (id) {
-    case 'fan': {
-      // Open fan, pivot at the bottom centre so it stays inside its box.
-      const px = x;
-      const py = y + 14 * s;
-      const r = 26 * s;
-      const a0 = -Math.PI * 0.85;
-      const a1 = -Math.PI * 0.15;
-      g.fillStyle(0xb8322a, 1);
-      g.beginPath();
-      g.slice(px, py, r, a0, a1, false);
-      g.fillPath();
-      g.lineStyle(1, 0x2a1210, 0.8);
-      for (let i = 0; i <= 6; i++) {
-        const a = a0 + ((a1 - a0) * i) / 6;
-        g.lineBetween(px, py, px + Math.cos(a) * r, py + Math.sin(a) * r);
-      }
-      g.lineStyle(2, 0xd9ae4a, 1);
-      g.beginPath();
-      g.arc(px, py, r, a0, a1, false);
-      g.strokePath();
-      g.fillStyle(0xffb03a, 1).fillCircle(px, py - r * 0.6, 4 * s);
+    case 'fan':
+      foldingFan(g, x, y + 12 * s, 26 * s, -Math.PI / 2, Math.PI * .7);
       break;
-    }
-    case 'thunder-fan': {
-      const px = x;
-      const py = y + 16 * s;
-      const r = 32 * s;
-      const a0 = -Math.PI * 0.9;
-      const a1 = -Math.PI * 0.1;
-      g.fillStyle(0x1d4f86, 1);
-      g.beginPath();
-      g.slice(px, py, r, a0, a1, false);
-      g.fillPath();
-      g.lineStyle(1, 0x071422, 0.8);
-      for (let i = 0; i <= 8; i++) {
-        const a = a0 + ((a1 - a0) * i) / 8;
-        g.lineBetween(px, py, px + Math.cos(a) * r, py + Math.sin(a) * r);
-      }
-      g.lineStyle(2, 0xe7f6ff, 1);
-      g.beginPath();
-      g.arc(px, py, r, a0, a1, false);
-      g.strokePath();
-      g.lineStyle(2, 0xfff6c2, 1).lineBetween(px, py - 4 * s, px - 4 * s, py - r * 0.45).lineBetween(px - 4 * s, py - r * 0.45, px + 2 * s, py - r * 0.85);
+    case 'thunder-fan':
+      foldingFan(g, x, y + 13 * s, 29 * s, -Math.PI / 2, Math.PI * .8, true);
       break;
-    }
     case 'shuriken':
       drawShurikenStar(g, x, y, 20 * s, 0.3);
       break;
-    case 'hammer': {
-      g.lineStyle(5 * s, 0x5a3a1e, 1).lineBetween(x - 14 * s, y + 14 * s, x + 6 * s, y - 6 * s);
-      const pts = [
-        { x: x + 2 * s, y: y - 18 * s }, { x: x + 18 * s, y: y - 2 * s }, { x: x + 10 * s, y: y + 6 * s }, { x: x - 6 * s, y: y - 10 * s },
-      ];
-      g.fillStyle(0x4b505b, 1).fillPoints(pts as Phaser.Math.Vector2[], true);
-      g.lineStyle(1.5, 0x22252b, 1).strokePoints(pts as Phaser.Math.Vector2[], true);
+    case 'hammer':
+      warHammer(g, x - 12 * s, y + 13 * s, -Math.PI / 4, 26 * s, 1.15 * s);
       break;
-    }
     case 'daggers':
       kunai(g, x - 4 * s, y + 6 * s, -Math.PI / 4, 22 * s);
       kunai(g, x + 4 * s, y + 6 * s, (-3 * Math.PI) / 4, 22 * s);
@@ -638,6 +621,12 @@ export function drawWeaponIcon(g: Phaser.GameObjects.Graphics, id: WeaponId, x: 
       nunchakuStick(g, r.x, r.y, Math.PI * 0.3, 26 * s);
       break;
     }
+    case 'windmill':
+      windmillWheel(g, x, y, 21 * s, -0.3);
+      break;
+    case 'spade':
+      crescentSpade(g, x, y, -Math.PI / 4, 48 * s);
+      break;
     case 'whip': {
       // The chain in an S, from the handle at the bottom left to the dart at the top right.
       const pts = Array.from({ length: 10 }, (_, k) => {

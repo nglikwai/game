@@ -131,14 +131,6 @@ export function updateFlames(this: EnvironmentHazardsContext, dt: number): void 
 }
 
 export function renderFlames(this: EnvironmentHazardsContext, now: number): void {
-  const warn = this.map.flames?.warn ?? 1.2;
-  for (const m of this.flameMarks) {
-    const k = Math.min(1, m.t / warn);
-    const pulse = 0.5 + 0.5 * Math.sin(now * (12 + k * 28));
-    this.g.fillStyle(0xff5a1a, 0.1 + 0.24 * k).fillCircle(m.x, m.y, m.r * (0.4 + 0.6 * k));
-    this.g.lineStyle(3, 0xffb03a, 0.4 + 0.5 * pulse).strokeCircle(m.x, m.y, m.r);
-    if (Math.random() < 0.3) this.fx.ember(m.x + (Math.random() - 0.5) * 20, m.y + (Math.random() - 0.5) * 20);
-  }
   for (const p of this.flamePatches) {
     const fade = Math.max(0.35, 1 - p.t / p.life);
     const flick = 0.8 + 0.2 * Math.sin(now * 9 + p.x);
@@ -164,13 +156,7 @@ export function renderVents(this: EnvironmentHazardsContext, now: number): void 
     const flick = 0.5 + 0.5 * Math.sin(now * 5 + p.x);
     this.gGlow.fillStyle(0xff6a1a, 0.12 + 0.08 * flick).fillCircle(p.x, p.y, 16);
   }
-  for (const m of this.ventMarks) {
-    const k = m.t / V.warn;
-    const pulse = 0.5 + 0.5 * Math.sin(now * (12 + k * 30));
-    this.g.fillStyle(0xff5a1a, 0.12 + 0.28 * k).fillCircle(m.x, m.y, V.radius * k);
-    this.g.lineStyle(3, 0xffb03a, 0.4 + 0.5 * pulse).strokeCircle(m.x, m.y, V.radius);
-    if (Math.random() < 0.3) this.fx.ember(m.x + (Math.random() - 0.5) * 20, m.y + (Math.random() - 0.5) * 20);
-  }
+
 }
 
 /** Portals: step into one, come out of its partner (once you step off, you can use it again). */
@@ -262,17 +248,6 @@ export function updateRollers(this: EnvironmentHazardsContext, dt: number): void
 export function renderRollers(this: EnvironmentHazardsContext, now: number): void {
   const R = this.map.rollers;
   if (!R) return;
-  const w = this.rollWarn;
-  if (w) {
-    // The lane lights up, with arrows racing the way the boulder will come.
-    const pulse = 0.5 + 0.5 * Math.sin(now * 16);
-    this.g.fillStyle(0xff5a3a, 0.08 + 0.1 * pulse).fillRect(ARENA.x, w.y - R.radius, ARENA.w, R.radius * 2);
-    for (let k = 0; k < 8; k++) {
-      const x = ARENA.x + (((k / 8 + now * 0.8 * w.dir) % 1) + 1) % 1 * ARENA.w;
-      this.gOver.lineStyle(4, 0xffd0a0, 0.5 + 0.4 * pulse);
-      this.gOver.lineBetween(x - w.dir * 14, w.y - 12, x, w.y).lineBetween(x, w.y, x - w.dir * 14, w.y + 12);
-    }
-  }
   for (const b of this.boulders) {
     this.g.fillStyle(0x000000, 0.35).fillEllipse(b.x + 6, b.y + R.radius * 0.7, R.radius * 2.2, R.radius * 0.9);
     this.gOver.fillStyle(0x7a6a5a, 1).fillCircle(b.x, b.y, R.radius);

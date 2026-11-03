@@ -1,3 +1,4 @@
+import { paintScenery } from '@/maps/art/renderedProps';
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, paintShadow, paintVignette,
@@ -92,6 +93,7 @@ function paintWetRock(ctx: Ctx, rand: () => number) {
 }
 
 function paintSummitShrine(ctx: Ctx, o: Obstacle) {
+  if (paintScenery(ctx, o)) return;
   const l = o.x - o.w / 2;
   const t = o.y - o.h / 2;
   ctx.fillStyle = '#2a2a30';
@@ -141,6 +143,7 @@ function paintRod(ctx: Ctx, o: Obstacle) {
 }
 
 function paintBoulder(ctx: Ctx, o: Obstacle, rand: () => number) {
+  if (paintScenery(ctx, o)) return;
   const g = ctx.createRadialGradient(o.x - 6, o.y - 6, 2, o.x, o.y, o.w * 0.6);
   g.addColorStop(0, '#8a909a');
   g.addColorStop(1, '#3a3e46');

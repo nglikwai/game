@@ -44,11 +44,11 @@ export class ModeScene extends UIScene {
       const icon = this.add.graphics();
       drawModeIcon(icon, mode, cx, CARD_Y + 115);
       layer.add(icon);
-      const name = txt(this, cx, CARD_Y + 253, T().modeNames(mode), 25, C.text, { title: true, bold: true, origin: 0.5 });
+      const name = txt(this, cx, CARD_Y + 253, T().modeNames(mode), 22, C.text, { title: true, bold: true, origin: 0.5 });
       name.setScale(Math.min(1, (CARD_W - 28) / name.width));
       layer.add(name);
-      const desc = txt(this, cx, CARD_Y + 285, T().modeDesc(mode), 13, C.dim, { origin: [0.5, 0], wrap: CARD_W - 34, align: 'center' });
-      desc.setScale(Math.min(1, 108 / Math.max(1, desc.height)));
+      const desc = txt(this, cx, CARD_Y + 285, T().modeDesc(mode), 13, C.dim, { origin: [0.5, 0], wrap: CARD_W - 26, align: 'center' });
+      desc.setScale(Math.min(1, 115 / Math.max(1, desc.height)));
       layer.add(desc);
       layer.add(txt(this, cx, CARD_Y + CARD_H - 26, '›', 21, toHex(tint), { origin: 0.5 }));
       nav.add({
@@ -119,7 +119,7 @@ function drawModeIcon(g: Phaser.GameObjects.Graphics, mode: GameMode, cx: number
     g.lineStyle(3, 0x6b3f1f, 1).lineBetween(cx - 60, cy - 70, cx - 60, cy + 66).lineBetween(cx + 60, cy - 70, cx + 60, cy + 66);
     g.fillStyle(TEAM_COLORS[0], 1).fillTriangle(cx - 60, cy - 70, cx - 60, cy - 40, cx - 30, cy - 55);
     g.fillStyle(TEAM_COLORS[1], 1).fillTriangle(cx + 60, cy - 70, cx + 60, cy - 40, cx + 30, cy - 55);
-  } else if (mode === 'quest') {
+  } else if (mode === 'quest' || mode === 'expedition') {
     // A torii gate, six stage lanterns, and the boss's horned mask beyond it.
     g.fillStyle(0x8a1a14, 1).fillRect(cx - 62, cy - 48, 124, 12);
     g.fillStyle(0x1e1e22, 1).fillRect(cx - 72, cy - 60, 144, 10);

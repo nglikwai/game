@@ -13,7 +13,7 @@ import type { BattleScene } from '@/scenes/BattleScene';
 
 /** The state and operations this system needs from the scene. No runtime scene dependency. */
 type PresentationResultsContext = Phaser.Scene & Pick<BattleScene,
-  'add' | 'enterRound' | 'fighterLabel' | 'fighters' | 'isMixedQuest'
+  'expedition' | 'add' | 'enterRound' | 'fighterLabel' | 'fighters' | 'isMixedQuest'
   | 'lobbySlots' | 'mapChoice' | 'mode' | 'openModal' | 'openResults'
   | 'over' | 'quest' | 'questTeam' | 'scene' | 'showEndBanner'
   | 'sideColor' | 'stats' | 'time' | 'tweens' | 'winningTeam'
@@ -21,10 +21,10 @@ type PresentationResultsContext = Phaser.Scene & Pick<BattleScene,
 
 export function openResults(this: PresentationResultsContext, msg: string, color: string): void {
   // Extra column: wall damage (Save the Princess) or tower damage (Siege).
-  const objective = this.mode === 'princess' || this.mode === 'siege' || isQuestMode(this.mode);
+  const objective = !!this.expedition || this.mode === 'princess' || this.mode === 'siege' || isQuestMode(this.mode);
   // In Quest only the party is listed.
-  const listed = this.quest && !this.isMixedQuest ? this.fighters.filter((f) => f.team === this.questTeam) : this.fighters;
-  const awards = selectMatchAwards(listed, this.winningTeam, !!this.quest && !this.isMixedQuest);
+  const listed = this.expedition ? this.fighters.filter((f) => f.team === 0) : this.quest && !this.isMixedQuest ? this.fighters.filter((f) => f.team === this.questTeam) : this.fighters;
+  const awards = selectMatchAwards(listed, this.winningTeam, !!this.expedition || !!this.quest && !this.isMixedQuest);
   this.openModal({
     w: 1160,
     // Grows with the number of fighters (up to 8 rows).
@@ -66,7 +66,7 @@ export function openResults(this: PresentationResultsContext, msg: string, color
         { label: T().skillsUsed, key: 'skills' },
         { label: T().itemsUsed, key: 'items' },
         { label: T().revives, key: 'revives' },
-        ...(objective ? [{ label: this.quest ? T().objectiveDmg : this.mode === 'princess' ? T().wallDmg : T().towerDmg, key: 'wall' as const }] : []),
+        ...(objective ? [{ label: this.quest || this.expedition ? T().objectiveDmg : this.mode === 'princess' ? T().wallDmg : T().towerDmg, key: 'wall' as const }] : []),
       ];
       const colW = (m.w - 64 - playerW) / columns.length;
       const colX = (n: number) => left + playerW + (n + 0.5) * colW;

@@ -1,3 +1,4 @@
+import { paintWaterSurface } from '@/maps/art/water';
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, paintLantern, paintLanternGlow, paintShadow, paintVignette,
@@ -95,6 +96,7 @@ function paintPond(ctx: Ctx, o: Obstacle, rand: () => number) {
   ctx.beginPath();
   ctx.ellipse(o.x, o.y, o.w / 2, o.h / 2, 0, 0, Math.PI * 2);
   ctx.fill();
+  paintWaterSurface(ctx, o, 'ellipse', 'pond', rand);
   for (let i = 0; i < 3; i++) {
     const x = o.x + (rand() - 0.5) * o.w * 0.6;
     const y = o.y + (rand() - 0.5) * o.h * 0.5;

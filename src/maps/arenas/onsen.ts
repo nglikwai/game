@@ -1,3 +1,5 @@
+import { paintWaterSurface } from '@/maps/art/water';
+import { paintScenery } from '@/maps/art/renderedProps';
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, mirrored, paintLantern, paintLanternGlow, paintShadow, paintVignette,
@@ -115,6 +117,7 @@ function paintPool(ctx: Ctx, p: TerrainZone, rand: () => number) {
   ctx.beginPath();
   ctx.ellipse(p.x, p.y, p.w / 2, p.h / 2, 0, 0, Math.PI * 2);
   ctx.fill();
+  paintWaterSurface(ctx, p, 'ellipse', 'spring', rand);
   ctx.save();
   ctx.beginPath();
   ctx.ellipse(p.x, p.y, p.w / 2, p.h / 2, 0, 0, Math.PI * 2);
@@ -124,6 +127,7 @@ function paintPool(ctx: Ctx, p: TerrainZone, rand: () => number) {
 }
 
 function paintRock(ctx: Ctx, o: Obstacle) {
+  if (paintScenery(ctx, o)) return;
   const g = ctx.createRadialGradient(o.x - 6, o.y - 6, 2, o.x, o.y, o.w * 0.6);
   g.addColorStop(0, '#9a958a');
   g.addColorStop(1, '#55524c');

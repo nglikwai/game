@@ -52,7 +52,7 @@ function lair(partyControls = ['keys', 'off', 'off', 'off']) {
   scene.countdown = 0;
   scene.showBanner = () => {};
   scene.popText = () => {};
-  scene.fx = { ember() {}, summonPulse() {}, frostBurst() {}, sparks() {}, hitSpark() {}, smoke() {}, bombBlast() {}, skyBolt() {}, respawnBeam() {} };
+  scene.fx = { ember() {}, summonPulse() {}, frostBurst() {}, sparks() {}, hitSpark() {}, smoke() {}, bombBlast() {}, skyBolt() {}, respawnBeam() {}, fireTrail() {} };
   scene.physics = { add: { body: () => box(), staticBody: () => box(), collider: () => ({ destroy() {} }) } };
   scene.dealDamage = (_from, to, dmg) => { to.hp -= dmg; if (to.hp <= 0) to.state = 'dead'; };
   return scene;
@@ -284,7 +284,7 @@ test('the dragon turns, the short way and at a limited rate, until its heads fac
   for (const h of scene.dragonHeads) assert.ok(h.x > scene.dragonBody.x, 'heads are now on its right');
 });
 
-test('while any head lives, fallen guards come back one at a time up to three; after that they stay down', () => {
+test('while any head lives, fallen guards come back in waves up to three; after that they stay down', () => {
   const scene = lair();
   const hero = fighter(0, 0);
   const guards = [4, 5, 6, 7].map((i) => fighter(i, 1));
@@ -398,6 +398,33 @@ test('breath damages on timed ticks, spares allies and protected fighters, and s
   assert.ok(Math.abs(chestPath.endX - (head.x - 180)) < 1e-8);
 });
 
+test('a sweeping beam burns a fighter the moment it crosses them, with a contact flare', () => {
+  const scene = lair();
+  const hero = fighter(0, 0);
+  scene.fighters = [hero];
+  scene.placeDragon(1);
+  const head = scene.dragonHeads.find((h) => h.dragon === 'fire');
+  place(hero, head.x - 300, head.y);
+  let flames = 0;
+  scene.fx = { ...scene.fx, fireTrail: () => flames++, hitSpark() {}, sparks() {} };
+  // Starts aimed well above the hero and sweeps down across them; the old shared tick fired only at the start.
+  scene.dragonBeam = { element: 'fire', head, startAngle: Math.PI + 0.3, angle: Math.PI + 0.3, direction: -1, elapsed: 0 };
+  updateDragonBeam.call(scene, 0.01);
+  assert.equal(hero.hp, hero.maxHp);
+  let hitWhile = null;
+  for (let k = 0; k < 120 && hitWhile === null; k++) {
+    updateDragonBeam.call(scene, 1 / 60);
+    if (hero.hp < hero.maxHp) hitWhile = scene.dragonBeam.touching.includes(hero);
+  }
+  assert.equal(hitWhile, true);
+  assert.ok(flames > 0);
+  const calls = [];
+  const graphics = new Proxy({}, { get: (_, key) => (...args) => { calls.push({ key, args }); return graphics; } });
+  scene.gGlow = graphics;
+  renderDragonBeam.call(scene, 1);
+  assert.ok(calls.some((c) => c.key === 'fillCircle' && Math.abs(c.args[0] - hero.x) < 1e-6 && Math.abs(c.args[1] - hero.y) < 1e-6));
+});
+
 test('ice and lightning breath preserve their elements without long repeated control or lightning chains', () => {
   for (const element of ['ice', 'thunder']) {
     const scene = lair();
@@ -451,4 +478,41 @@ test('each beam draws a colored stream with an element-specific core and no warn
     renderDragonBeam.call(scene, 2);
     assert.equal(calls.length, 0);
   }
+});
+
+test('beam sound starts on emission and sustains at a bounded cadence until the head dies or the beam ends', () => {
+  const sounds = [];
+  const audioLoad = require('./load-source.cjs')({ sfx: { dragonBeam: element => sounds.push(element) } });
+  const { startDragonBeam: start, updateDragonBeam: update } = audioLoad('src/battle/quest/dragonBeams.ts');
+  for (const element of ['fire', 'ice', 'thunder']) {
+    sounds.length = 0;
+    const head = { x: 900, y: 500, w: 50, team: 1, alive: true };
+    const scene = { dragonBeam: null, shotBlockers: [], chests: [], fighters: [] };
+    start.call(scene, { head, element, angle: Math.PI });
+    assert.deepEqual(sounds, [element]);
+    for (let i = 0; i < 24; i++) update.call(scene, 0.01);
+    assert.equal(sounds.length, 1, 'no sound retrigger on every frame');
+    update.call(scene, 0.02);
+    assert.deepEqual(sounds, [element, element]);
+    head.alive = false;
+    update.call(scene, 0.25);
+    assert.equal(scene.dragonBeam, null);
+    assert.equal(sounds.length, 2);
+    head.alive = true;
+    start.call(scene, { head, element, angle: Math.PI });
+    scene.dragonBeam.elapsed = QUEST.dragon.beam.duration - 0.01;
+    update.call(scene, 0.02);
+    assert.equal(scene.dragonBeam, null);
+    assert.equal(sounds.length, 3, 'expiry emits no further pulse');
+  }
+});
+
+test('the dragon restores two fallen guards per wave without exceeding its cap', () => {
+  const scene = lair(), guards = [4, 5, 6].map(i => fighter(i, 1));
+  scene.fighters = [fighter(0, 0), ...guards]; scene.placeDragon(1);
+  guards.forEach(f => { f.state = 'dead'; }); scene.dragonT = 999;
+  scene.updateDragon(QUEST.dragon.guardRespawn);
+  assert.equal(guards.filter(f => f.alive).length, 2);
+  scene.updateDragon(QUEST.dragon.guardRespawn);
+  assert.equal(guards.filter(f => f.alive).length, 3);
 });

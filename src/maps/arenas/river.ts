@@ -1,3 +1,5 @@
+import { paintWaterSurface } from '@/maps/art/water';
+import { paintScenery } from '@/maps/art/renderedProps';
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, CORNERS, WALL, blob, cornerPile, mirrored, paintShadow, paintVignette,
@@ -137,6 +139,7 @@ function paintRiver(ctx: Ctx, rand: () => number) {
   g.addColorStop(1, '#24526a');
   ctx.fillStyle = g;
   ctx.fillRect(RX0, HUD_HEIGHT, RX1 - RX0, HEIGHT - HUD_HEIGHT);
+  paintWaterSurface(ctx, { x: (RX0 + RX1) / 2, y: (HUD_HEIGHT + HEIGHT) / 2, w: RX1 - RX0, h: HEIGHT - HUD_HEIGHT }, 'rect', 'river', rand);
   // Ripples.
   ctx.strokeStyle = 'rgba(220,240,255,0.25)';
   ctx.lineWidth = 1.2;
@@ -189,6 +192,7 @@ function paintBridge(ctx: Ctx, y: number) {
 }
 
 function paintBamboo(ctx: Ctx, o: Obstacle, rand: () => number) {
+  if (paintScenery(ctx, o)) return;
   // Leafy canopy, then the stalks seen from above.
   for (let i = 0; i < 26; i++) {
     const a = rand() * Math.PI * 2;
@@ -223,6 +227,7 @@ function paintBamboo(ctx: Ctx, o: Obstacle, rand: () => number) {
 }
 
 function paintRock(ctx: Ctx, o: Obstacle) {
+  if (paintScenery(ctx, o)) return;
   const pts = [[-0.5, -0.1], [-0.3, -0.5], [0.15, -0.5], [0.5, -0.2], [0.45, 0.35], [0.05, 0.5], [-0.4, 0.4]];
   const g = ctx.createRadialGradient(o.x - 8, o.y - 8, 2, o.x, o.y, o.w * 0.6);
   g.addColorStop(0, '#a8a497');

@@ -134,19 +134,6 @@ export function renderTide(this: EnvironmentTerrainContext, now: number): void {
   }
 }
 
-/** Warning marks on the ground: a ring that tightens and a fill that grows until the strike. */
-export function renderStorm(this: EnvironmentTerrainContext, now: number): void {
-  const L = this.map.lightning;
-  if (!L) return;
-  for (const m of this.stormMarks) {
-    const k = m.t / L.warn;
-    const pulse = 0.5 + 0.5 * Math.sin(now * (10 + k * 30));
-    this.g.fillStyle(0x9fb8ff, 0.1 + 0.25 * k).fillCircle(m.x, m.y, L.radius * k);
-    this.g.lineStyle(2.5, 0xdfe8ff, 0.4 + 0.5 * pulse).strokeCircle(m.x, m.y, L.radius);
-    this.gGlow.lineStyle(2, 0x8fb4ff, 0.3 * pulse).strokeCircle(m.x, m.y, L.radius * (1.4 - 0.4 * k));
-  }
-}
-
 /** Streaks blowing through wind zones, so you can see which way they push. */
 export function renderWind(this: EnvironmentTerrainContext, now: number): void {
   for (const [zi, z] of (this.map.zones ?? []).entries()) {

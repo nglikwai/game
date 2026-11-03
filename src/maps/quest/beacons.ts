@@ -5,8 +5,8 @@ import { paintRim, paintSlab, paintTiles } from '@/maps/art/primitives';
 /** A moonlit road with three spirit springs and a guiding lantern at the western entrance. */
 export const BEACONS: GameMap = {
   id: 'beacons', name: 'Spirit Lantern Path', zh: '引魂古道',
-  desc: 'Collect six wandering spirits and carry them back to the green lantern on the left. Each hero carries one; defeat drops it. Guards keep returning to intercept the couriers.',
-  descZh: '收集六隻遊魂並帶回左方綠色引魂燈。每人一次帶一隻，倒下時遊魂會掉落。守衛會不斷重生攔截運魂者。',
+  desc: `Carry ${QUEST.beacons.required} blue wandering spirits to the green lantern in ${QUEST.beacons.timeLimit / 60} minutes. Each hero carries one and drops it on defeat. Springs refill in rotation; guards flank the route and return faster as deliveries increase.`,
+  descZh: `${QUEST.beacons.timeLimit / 60}分鐘內將${QUEST.beacons.required}隻藍色遊魂送回左方綠色引魂燈。每人一次帶一隻，倒下會掉落。靈泉輪流補充，守衛會從側翼攔截，重生隨進度加快。`,
   obstacles: [
     { kind: 'ruin', x: 440, y: MID - 20, w: 36, h: 42 },
     { kind: 'ruin', x: 840, y: MID - 20, w: 36, h: 42 },

@@ -1,3 +1,4 @@
+import { paintScenery } from '@/maps/art/renderedProps';
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, paintLantern, paintLanternGlow, paintShadow, paintVignette,
@@ -106,6 +107,7 @@ function paintRuneCircle(ctx: Ctx, p: { x: number; y: number }, color: number) {
 }
 
 function paintShrine(ctx: Ctx, o: Obstacle) {
+  if (paintScenery(ctx, o)) return;
   const l = o.x - o.w / 2;
   const t = o.y - o.h / 2;
   ctx.fillStyle = '#8a2a1e';

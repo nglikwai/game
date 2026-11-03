@@ -15,6 +15,8 @@ export interface Intent {
   /** Use the selected pocket item / move the selection to the next item (edge-triggered). */
   useItem: boolean;
   nextItem: boolean;
+  /** The next-item button is being held down (holding it with 魂 triggers 暴走). */
+  nextItemHeld?: boolean;
   /** CPU only: use this pocket slot directly. */
   useItemAt?: number;
 }
@@ -65,7 +67,20 @@ export interface Controller {
   labels: Labels;
   /** Gamepads only: false while the controller is not connected (asleep, out of range). */
   readonly connected?: boolean;
+  /** A computer-controlled fighter (some powers, like 暴走, are for human players only). */
+  readonly cpu?: boolean;
+  /** Gamepads only: vibrate at `strength` (0–1) for `ms` milliseconds, if the controller can. */
+  rumble?(strength: number, ms: number, tone?: RumbleTone): void;
+  /** Directly connected Switch pads: show player `slot` (0–7) on the side lights, steady or flashing. */
+  setLights?(slot: number, flash: boolean): void;
+  /** Directly connected Switch pads with a HOME button: its light ring. */
+  setHomeLight?(mode: HomeLight): void;
 }
+
+/** Rumble feel: a low thud, the plain buzz, or a high crisp kick (Switch HD rumble; others vary the motor mix). */
+export type RumbleTone = 'deep' | 'normal' | 'sharp';
+
+export type HomeLight = 'off' | 'glow' | 'pulse';
 
 export type PadSlot = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 

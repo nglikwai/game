@@ -48,23 +48,25 @@ test('stage 2 guards wait 10 seconds initially and each completed respawn deduct
   assert.equal(home.hp, 450); // the cost is paid once, not every update
 });
 
-test('late-stage enemy respawn waits cap at 35 seconds and queued enemies return one at a time', () => {
+test('late-stage enemies return in pairs every 35 seconds, each paying the tower HP cost', () => {
   const { scene, enemy, makeFighter, home } = battle();
-  const second = makeFighter(5, 1); second.state = 'dead';
-  scene.fighters.push(second); scene.elapsed = 1000;
-  scene.deathTime.set(enemy, 2); scene.deathTime.set(second, 3);
+  const second = makeFighter(5, 1), third = makeFighter(6, 1);
+  second.state = third.state = 'dead';
+  scene.fighters.push(second, third); scene.elapsed = 1000;
+  [enemy, second, third].forEach((f, i) => scene.deathTime.set(f, i + 2));
   scene.updateTeamRespawns(0);
   assert.equal(scene.respawnTimers.get(enemy), 35);
-  assert.equal(scene.respawnTimers.get(second), Infinity);
+  assert.equal(scene.respawnTimers.get(second), 35);
+  assert.equal(scene.respawnTimers.get(third), Infinity);
   scene.updateTeamRespawns(35);
-  assert.equal(enemy.alive, true); assert.equal(second.alive, false);
-  assert.equal(home.hp, 450);
+  assert.equal(enemy.alive, true); assert.equal(second.alive, true); assert.equal(third.alive, false);
+  assert.equal(home.hp, 400);
   assert.equal(scene.teamRespawnT[1], 35);
   scene.updateTeamRespawns(34);
-  assert.equal(second.alive, false);
+  assert.equal(third.alive, false);
   scene.updateTeamRespawns(1);
-  assert.equal(second.alive, true);
-  assert.equal(home.hp, 400);
+  assert.equal(third.alive, true);
+  assert.equal(home.hp, 350);
 });
 
 test('a guard respawn can exhaust its tower, and later respawns use the surviving enemy tower', () => {
@@ -97,11 +99,22 @@ test('exhausting the last enemy tower clears stage 2 and leaves no source for fu
 });
 
 test('normal team respawns retain their original wait and one-HP tower floor', () => {
-  const { scene, enemy, home } = battle('team');
+  const { scene, enemy, home, makeFighter } = battle('team');
+  scene.fighters.push(makeFighter(5, 1)); // An ally must still be standing.
   home.hp = 20;
   scene.updateTeamRespawns(0);
   assert.equal(scene.respawnTimers.get(enemy), 4);
   scene.updateTeamRespawns(4);
   assert.equal(enemy.alive, true);
   assert.equal(home.hp, 1); assert.equal(home.alive, true);
+});
+
+test('a surviving tower cannot revive a team after all its fighters are defeated', () => {
+  const { scene, enemy, home } = battle('team');
+  scene.teamRespawnT[1] = 0;
+  scene.updateTeamRespawns(100);
+  assert.equal(enemy.alive, false);
+  assert.equal(home.alive, true);
+  assert.equal(home.hp, 500);
+  assert.equal(scene.teamRespawnT[1], -1);
 });

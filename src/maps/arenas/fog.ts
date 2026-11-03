@@ -1,3 +1,4 @@
+import { paintScenery } from '@/maps/art/renderedProps';
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, paintShadow, paintVignette,
@@ -80,6 +81,7 @@ function paintForestFloor(ctx: Ctx, rand: () => number) {
 
 /** A big old tree seen from above: dark canopy, lighter clumps. */
 function paintTree(ctx: Ctx, o: Obstacle, rand: () => number) {
+  if (paintScenery(ctx, o)) return;
   const r = o.w * 0.75;
   ctx.fillStyle = '#1a2e1c';
   ctx.beginPath();
@@ -93,6 +95,7 @@ function paintTree(ctx: Ctx, o: Obstacle, rand: () => number) {
 }
 
 function paintMossRock(ctx: Ctx, o: Obstacle) {
+  if (paintScenery(ctx, o)) return;
   ctx.fillStyle = '#4a4e44';
   ctx.beginPath();
   ctx.ellipse(o.x, o.y, o.w / 2, o.h / 2, 0.2, 0, Math.PI * 2);

@@ -1,6 +1,8 @@
+import { paintWaterSurface } from '@/maps/art/water';
+import { paintScenery } from '@/maps/art/renderedProps';
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
-  ARENA, ARENA_MID_Y, WALL, blob, paintVignette,
+  ARENA, ARENA_MID_Y, WALL, blob, mulberry32, paintVignette,
   type ChestSpot, type Ctx, type GameMap, type Obstacle, type TerrainZone,
 } from '@/maps/common';
 
@@ -115,9 +117,11 @@ function paintPool(ctx: Ctx, o: Obstacle) {
   ctx.beginPath();
   ctx.ellipse(o.x, o.y, o.w / 2, o.h / 2, 0, 0, Math.PI * 2);
   ctx.fill();
+  paintWaterSurface(ctx, o, 'ellipse', 'pond', mulberry32(182));
 }
 
 function paintRock(ctx: Ctx, o: Obstacle) {
+  if (paintScenery(ctx, o)) return;
   ctx.fillStyle = '#5a5a54';
   ctx.beginPath();
   ctx.ellipse(o.x, o.y, o.w / 2, o.h / 2, 0.3, 0, Math.PI * 2);

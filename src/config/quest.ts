@@ -13,6 +13,8 @@ export type GroveIllusion = 'sand' | 'heat' | 'ice';
 export const QUEST = {
   /** Lobby slots that make up the party. */
   partySlots: 4,
+  /** Fallen quest enemies return together in reinforcement waves. Stage population caps still apply. */
+  reinforcementBatch: 2,
   /** The party fights with this much more max HP than usual. */
   partyHp: 1.2,
   /** Natural PE recovery is 10% faster for the party, including CPU allies; enemies use normal rates. */
@@ -36,7 +38,7 @@ export const QUEST = {
   dirgeStage: 10,
   /** 第一程: three guards and a three-headed dragon (fire, ice, thunder). Kill them all to pass. */
   dragonStage: 11,
-  /** A tactical trial: carry six wandering spirits back to the guiding lantern. */
+  /** A tactical trial: carry wandering spirits back to the guiding lantern before time runs out. */
   beaconStage: 12,
   /** Opening enemy fight: heroes start in the center, enemies attack from both flanks. */
   ambushStage: 13,
@@ -50,17 +52,23 @@ export const QUEST = {
       { x: WIDTH / 2 + 32, y: (HUD_HEIGHT + HEIGHT) / 2 - 48 },
       { x: WIDTH / 2 - 32, y: (HUD_HEIGHT + HEIGHT) / 2 + 48 },
     ],
+    // On the scorched rock between the pits at each side wall.
     enemies: [
-      { x: 220, y: (HUD_HEIGHT + HEIGHT) / 2 - 90 },
-      { x: WIDTH - 220, y: (HUD_HEIGHT + HEIGHT) / 2 + 90 },
-      { x: 220, y: (HUD_HEIGHT + HEIGHT) / 2 + 90 },
-      { x: WIDTH - 220, y: (HUD_HEIGHT + HEIGHT) / 2 - 90 },
+      { x: 60, y: (HUD_HEIGHT + HEIGHT) / 2 - 40 },
+      { x: WIDTH - 60, y: (HUD_HEIGHT + HEIGHT) / 2 + 40 },
+      { x: 60, y: (HUD_HEIGHT + HEIGHT) / 2 + 40 },
+      { x: WIDTH - 60, y: (HUD_HEIGHT + HEIGHT) / 2 - 40 },
     ],
   },
   beacons: {
-    required: 6, maxSpirits: 3, spawnEvery: 8, pickupRadius: 22,
+    required: 20, maxSpirits: 3, spawnEvery: 6, pickupRadius: 22,
+    /** Active battle time only; loading, countdown and pause do not consume it. */
+    timeLimit: 300,
     destination: { x: 190, y: (HUD_HEIGHT + HEIGHT) / 2, radius: 52 },
-    respawnEvery: 10, enemies: 3, guardHp: 1.2,
+    respawnEvery: 7, minRespawnEvery: 4, enemies: 4, guardHp: 1.2,
+    lateReinforcementBatch: 3,
+    /** Reinforcements can flank from a spring, but never appear on top of a hero. */
+    guardSpawnDistance: 150,
     spots: [
       { x: 330, y: HUD_HEIGHT + 180 },
       { x: WIDTH / 2, y: HEIGHT - 185 },
@@ -89,7 +97,7 @@ export const QUEST = {
     held: 2,
     enemies: 4,
     tree: {
-      x: WIDTH - 150, y: (HUD_HEIGHT + HEIGHT) / 2, initialDelay: 3, interval: 5,
+      x: WIDTH - 150, y: (HUD_HEIGHT + HEIGHT) / 2, initialDelay: 3, interval: 3.5,
       lightWarn: 0.8, thunderWarn: 1.1, warn: 1.6, radius: 120, damage: 1.25,
       /** Prison-tree warnings close this much sooner than the shared summon timing. */
       warnScale: 0.75,
@@ -133,7 +141,7 @@ export const QUEST = {
   seals: {
     allies: [1, 2, 3] as const,
     chargeTime: 40, radius: 68,
-    /** A fallen guard returns this many seconds later, one at a time, until every altar is broken. */
+    /** Up to two fallen guards return on each interval until every altar is broken. */
     respawnEvery: 16, enemies: 4, guardHp: 1.6,
     spots: [
       { x: WIDTH / 2, y: HUD_HEIGHT + 140 },
@@ -145,12 +153,13 @@ export const QUEST = {
    * Quest 2 stage 3: a tug-of-war lantern. It starts at the center of a straight lane.
    * Two allies and no enemies push it to the enemy side (clear). Enemies alone push it
    * back to the party side (fail). Anyone from both sides inside the circle stops it.
-   * The lantern cannot be broken.
+   * Left empty, it drifts back toward the party side at `drift` × speed, stopping at the end.
+   * The lantern cannot be broken, and enemies don't attack it.
    */
   escort: {
-    hpBase: 600, hpPerPlayer: 180, radius: 100, speed: 5,
-    /** A fallen guard returns this many seconds later, one at a time, ahead of the lantern. */
-    respawnEvery: 16, allies: 2, enemies: 4, guardHp: 1.6,
+    hpBase: 600, hpPerPlayer: 180, radius: 100, speed: 6,
+    /** Up to two fallen guards return together ahead of the lantern on each interval. */
+    respawnEvery: 16, allies: 2, enemies: 4, guardHp: 1.6, drift: 0.5,
     path: [
       { x: 180, y: 406 }, { x: 645, y: 406 }, { x: 1110, y: 406 },
     ],
@@ -223,10 +232,10 @@ export const QUEST = {
     enemies: 3,
     /** The three guards are cave cultists: less HP and softer hits than a normal enemy. */
     guardHp: 0.7, guardDamage: 0.85,
-    /** While any head lives, a fallen guard comes back beside the dragon every `guardRespawn` s, up to `maxGuards` standing. */
+    /** While any head lives, up to two fallen guards return beside the dragon every `guardRespawn` s, up to `maxGuards` standing. */
     guardRespawn: 12, maxGuards: 3,
     /** Each head's HP = hpBase + hpPerPlayer × party size (each player adds about the same damage). */
-    hpBase: 120, hpPerPlayer: 650,
+    hpBase: 90, hpPerPlayer: 450,
     /** Where it starts, how big its body is, and how its heads sit on the front of it (design px). */
     start: { x: WIDTH - 200, y: (HUD_HEIGHT + HEIGHT) / 2 },
     body: { w: 150, h: 110 },
@@ -280,10 +289,10 @@ export const QUEST = {
    */
   wyverns: {
     enemies: 2,
-    /** The two guards are gorge bandits: less HP and softer hits. While both wyverns stand, a fallen guard returns. */
+    /** The two guards are gorge bandits: less HP and softer hits. While both wyverns stand, fallen guards return together. */
     guardHp: 0.8, guardDamage: 0.85, guardRespawn: 18, maxGuards: 2,
     /** Each wyvern's HP = hpBase + hpPerPlayer × party size. */
-    hpBase: 250, hpPerPlayer: 900,
+    hpBase: 200, hpPerPlayer: 700,
     reviveAfter: 15, reviveHp: 0.5,
     /** Attack speed-up while its partner is down. */
     enrage: 1.6,

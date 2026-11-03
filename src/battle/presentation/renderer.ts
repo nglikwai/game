@@ -1,8 +1,10 @@
+import { drawCharacterSteps } from '@/rendering/characterArt';
+import { drawProjectile } from '@/rendering/projectileArt';
 import * as Phaser from 'phaser';
-import { summonStrikeCount } from '@/gameplay/skills';
-import { drawShape } from '@/gameplay/weapons';
+import { RES, SOUL_RAGE } from '@/config';
+import type { Fighter } from '@/gameplay/Fighter';
 import { T } from '@/localization';
-import { drawHeldWeapon, drawLog, kunai } from '@/rendering/fighterArt';
+import { drawHeldWeapon, drawLog } from '@/rendering/fighterArt';
 import type { BattleScene } from '@/scenes/BattleScene';
 
 /** The state and operations this system needs from the scene. No runtime scene dependency. */
@@ -14,7 +16,7 @@ type PresentationRendererContext = Phaser.Scene & Pick<BattleScene,
   | 'renderDoors' | 'renderFlames' | 'renderFog' | 'renderGroveCast' | 'renderHerbs'
   | 'renderKegs' | 'renderLantern' | 'renderNight' | 'renderPads' | 'renderPortals'
   | 'renderQuestTree' | 'renderRescueGate' | 'renderRollers' | 'renderSeals' | 'renderSnareCast'
-  | 'renderSpikes' | 'renderStorm' | 'renderTide' | 'renderTower' | 'renderVents'
+  | 'renderSpikes' | 'renderTide' | 'renderTower' | 'renderVents'
   | 'renderSpiritRelay'
   | 'renderSandPits'
   | 'renderVortex' | 'renderWallAndPrincess' | 'renderWardenBond' | 'renderWind' | 'respawnTimers'
@@ -48,7 +50,6 @@ export function render(this: PresentationRendererContext): void {
   this.renderFog(now);
   this.renderSpikes(now);
   this.renderPortals(now);
-  this.renderStorm(now);
   this.renderVents(now);
   this.renderFlames(now);
   this.renderRollers(now);
@@ -74,7 +75,6 @@ export function render(this: PresentationRendererContext): void {
   for (const c of this.caltrops) {
     // Fade in quickly, fade out over the last second.
     const a = Math.min(1, c.t * 6, c.life - c.t);
-    g.fillStyle(0x000000, 0.12 * a).fillCircle(c.x, c.y, c.r);
     for (const sp of c.spikes) {
       g.lineStyle(2, 0x8a93a3, a);
       for (let k = 0; k < 2; k++) {
@@ -84,31 +84,7 @@ export function render(this: PresentationRendererContext): void {
     }
   }
 
-  for (const p of this.projectiles) {
-    const e = p.effect;
-    const a = Math.atan2(p.vy, p.vx);
-    if (p.element === 'ice') {
-      // An ice shard: a pale spike with a frosty trail.
-      const c = Math.cos(a), s = Math.sin(a);
-      this.gGlow.lineStyle(6, 0x8fd8ff, 0.35).lineBetween(p.x - c * 34, p.y - s * 34, p.x, p.y);
-      over.fillStyle(0xe8fbff, 1).fillTriangle(p.x + c * 14, p.y + s * 14, p.x - c * 8 - s * 6, p.y - s * 8 + c * 6, p.x - c * 8 + s * 6, p.y - s * 8 - c * 6);
-    } else if (p.element === 'thunder') {
-      // A crackling bolt: a jagged streak behind a bright core.
-      const c = Math.cos(a), s = Math.sin(a);
-      const pts = [0, 1, 2, 3, 4].map((k) => new Phaser.Math.Vector2(p.x - c * k * 12 + (k % 2 ? -s : s) * 6, p.y - s * k * 12 + (k % 2 ? c : -c) * 6));
-      this.gGlow.lineStyle(5, 0xb08aff, 0.6).strokePoints(pts, false);
-      this.gGlow.lineStyle(2, 0xffffff, 0.9).strokePoints(pts, false);
-      this.gGlow.fillStyle(0xe8dcff, 1).fillCircle(p.x, p.y, e.radius * 0.7);
-    } else if (e.radius > 8) {
-      // Fire jutsu: hot core over the flame trail.
-      this.gGlow.fillStyle(0xff7a2a, 0.5).fillCircle(p.x, p.y, e.radius * 1.4);
-      this.gGlow.fillStyle(0xffe08a, 0.9).fillCircle(p.x, p.y, e.radius * 0.7);
-    } else {
-      // Thrown kunai with a faint streak.
-      over.lineStyle(2, 0xffffff, 0.35).lineBetween(p.x - Math.cos(a) * 26, p.y - Math.sin(a) * 26, p.x, p.y);
-      kunai(over, p.x - Math.cos(a) * 6, p.y - Math.sin(a) * 6, a, 14);
-    }
-  }
+  for (const p of this.projectiles) drawProjectile(over, this.gGlow, p, now, this.fx);
 
   for (const f of this.fighters) {
     const sprite = this.sprites[f.index];
@@ -159,43 +135,85 @@ export function render(this: PresentationRendererContext): void {
       g.fillStyle(0x8a1020, 0.16 + pulse * 0.1).fillCircle(f.x, f.y, f.radius + 16 + pulse * 4);
       g.lineStyle(2, 0xff4a4a, 0.5 + pulse * 0.3).strokeCircle(f.x, f.y, f.radius + 12);
     }
-    if (f.state === 'windup') {
-      // Faint telegraph of the hit area, so opponents can react.
-      drawShape(g, f.weapon.shape, f.x, f.y, f.facing, f.color, 0.05 + 0.13 * f.stateProgress);
+    if (f.countering) {
+      // 見切: a raised steel arc in front, ready to parry.
+      over.lineStyle(4, 0xcfe3ff, 0.85);
+      over.beginPath();
+      over.arc(f.x, f.y, f.radius + 10, f.facing - 1.1, f.facing + 1.1, false);
+      over.strokePath();
+      over.lineStyle(1.5, 0xffffff, 0.9);
+      over.beginPath();
+      over.arc(f.x, f.y, f.radius + 13, f.facing - 0.8, f.facing + 0.8, false);
+      over.strokePath();
+    }
+    if (f.rageCharge > 0) {
+      // Holding for 暴走: a ring of the coming fire closes around the player.
+      const [flame] = SOUL_RAGE.colors[Math.max(1, f.soulLevel) - 1]!;
+      over.lineStyle(4, flame, 0.9);
+      over.beginPath();
+      over.arc(f.x, f.y, f.radius + 14, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * f.rageCharge, false);
+      over.strokePath();
+      this.gGlow.fillStyle(flame, 0.12 + 0.2 * f.rageCharge).fillCircle(f.x, f.y, f.radius + 10);
+    }
+    if (f.raging) {
+      // 暴走: flames all round the player, coloured by the 魂 level spent, plus a ring that burns down with the time left.
+      const level = f.rageLevel, [flame, core] = SOUL_RAGE.colors[level - 1]!;
+      const pulse = 0.5 + 0.5 * Math.sin(now * 9);
+      g.fillStyle(flame, 0.16 + pulse * 0.08).fillCircle(f.x, f.y, f.radius + 12 + level * 2);
+      const count = 10 + level * 2;
+      for (let k = 0; k < count; k++) {
+        const a = (k / count) * Math.PI * 2 + now * 0.8;
+        const height = (9 + level * 3) * (0.65 + 0.35 * Math.sin(now * 15 + k * 1.7));
+        const r = f.radius + 1;
+        const bx = f.x + Math.cos(a) * r, by = f.y + Math.sin(a) * r;
+        // Tongues lick outward and lean upward, like fire.
+        const tx = bx + Math.cos(a) * height, ty = by + Math.sin(a) * height - height * 0.55;
+        const side = 0.32;
+        g.fillStyle(flame, 0.6).fillTriangle(
+          f.x + Math.cos(a - side) * r, f.y + Math.sin(a - side) * r, f.x + Math.cos(a + side) * r, f.y + Math.sin(a + side) * r, tx, ty);
+        g.fillStyle(core, 0.75).fillTriangle(
+          f.x + Math.cos(a - side / 2) * r, f.y + Math.sin(a - side / 2) * r, f.x + Math.cos(a + side / 2) * r, f.y + Math.sin(a + side / 2) * r,
+          (bx + tx) / 2, (by + ty) / 2);
+      }
+      const left = f.rageT / SOUL_RAGE.duration[level - 1]!;
+      over.lineStyle(3, flame, 0.9);
+      over.beginPath();
+      over.arc(f.x, f.y, f.radius + 18 + level * 2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * left, false);
+      over.strokePath();
+    }
+    if (f.lifestealing) {
+      // 噬血: a dark red ring that beats like a heart.
+      const beat = Math.max(0, Math.sin(now * 7)) ** 4;
+      g.lineStyle(3, 0xc0182c, 0.4 + beat * 0.4).strokeCircle(f.x, f.y, f.radius + 7 + beat * 4);
     }
     if (f.powered) {
       const pulse = 0.5 + 0.5 * Math.sin(now * 11);
       g.fillStyle(0xff7a1a, 0.14 + pulse * 0.1).fillCircle(f.x, f.y, f.radius + 9 + pulse * 3);
     }
-    if (f.sprinting || f.state === 'dash') {
-      // Afterimages.
-      for (const k of [1, 2]) {
-        g.fillStyle(f.color, 0.14 / k).fillCircle(f.x - f.vx * 0.05 * k, f.y - f.vy * 0.05 * k, f.radius * 0.95);
-      }
-    }
+    drawCharacterSteps(g, f, now);
     this.drawScarf(g, f, now);
 
     // --- the ninja ---
     sprite.setVisible(true).setPosition(f.x, f.y).setRotation(f.facing);
+    // 暴走 grows the ninja a little with each 魂 level.
+    sprite.setScale(f.radius / 18 / RES * (f.raging ? 1 + 0.04 * f.rageLevel : 1));
     const stunned = f.state === 'stun';
     sprite.setAlpha(stunned && Math.floor(now * 20) % 2 === 0 ? 0.55 : 1);
     if (f.flashT > 0) sprite.setTint(0xffffff).setTintMode(Phaser.TintModes.FILL);
     else if (f.burnT > 0 && Math.floor(now * 8) % 2 === 0) sprite.setTint(0xffa070).setTintMode(Phaser.TintModes.MULTIPLY);
     else if (f.chillT > 0) sprite.setTint(0xa8dcff).setTintMode(Phaser.TintModes.MULTIPLY);
     else if (f.paralyzed) sprite.setTint(0x9fc0ff).setTintMode(Phaser.TintModes.MULTIPLY);
+    else if (f.raging) sprite.setTint(SOUL_RAGE.colors[f.rageLevel - 1]![1]).setTintMode(Phaser.TintModes.MULTIPLY);
     else sprite.clearTint().setTintMode(Phaser.TintModes.MULTIPLY);
     const summon = f.summoning;
     if (summon) {
       const color = this.summonColor(f);
       this.fx.summonCircle(g, this.gGlow, f.x, f.y, f.stateProgress, color, now, summon.kind);
-      for (const t of this.summonTargets(f, summonStrikeCount(summon.kind, summon.level, f.boss))) this.fx.targetMark(over, t.x, t.y, f.stateProgress, color, now, summon.kind);
     }
     const charge = f.sacrificeCharge;
     if (charge) {
-      // 捨身 telegraph: the blast area on the ground, filling up as the charge builds.
+      // The charge glows on the caster without painting its blast radius.
       const pulse = 0.5 + 0.5 * Math.sin(now * (8 + charge.t * 20));
-      g.fillStyle(0xff2a2a, 0.08 + 0.12 * charge.t).fillCircle(f.x, f.y, charge.radius * charge.t);
-      g.lineStyle(3, 0xff4a3a, 0.5 + 0.4 * pulse).strokeCircle(f.x, f.y, charge.radius);
       this.gGlow.fillStyle(0xff3a2a, 0.25 + 0.3 * pulse * charge.t).fillCircle(f.x, f.y, f.radius + 8 + charge.t * 8);
     }
     if (f.casting) {
@@ -216,6 +234,7 @@ export function render(this: PresentationRendererContext): void {
     }
 
     // --- on top ---
+    if (f.raging) drawRageForm(over, this.gGlow, f, now);
     drawHeldWeapon(over, f.weapon.id, this.poseOf(f));
     if (f.usesSoul && f.soulLevel > 0) {
       // One purple orb circling per soul level.
@@ -257,11 +276,31 @@ export function render(this: PresentationRendererContext): void {
     const by = f.y - f.radius - 14;
     over.fillStyle(0x000000, 0.6).fillRect(bx - 1, by - 1, bw + 2, 8);
     over.fillStyle(0xe5484d, 1).fillRect(bx, by, bw * (f.hp / f.maxHp), 3);
-    // PE bar glows a little while resting (recovering at the boosted rate).
-    const peColor = f.peDeniedT > 0 ? 0xffffff : f.resting && f.pe < f.maxPe ? 0xfff0a0 : 0xf2c94c;
+    const peColor = f.peDeniedT > 0 ? 0xffffff : 0xf2c94c;
     over.fillStyle(peColor, 1).fillRect(bx, by + 4, bw * (f.pe / f.maxPe), 2);
     tag.setPosition(f.x, by - 2).setAlpha(1);
   }
 
   this.fx.draw(g, over, this.gGlow);
+}
+
+/** 暴走 demon form: oni horns sweeping back from the head (longer each level) and glowing eyes. */
+function drawRageForm(over: Phaser.GameObjects.Graphics, glow: Phaser.GameObjects.Graphics, f: Fighter, now: number): void {
+  const level = f.rageLevel, [flame, core] = SOUL_RAGE.colors[level - 1]!;
+  const r = f.radius * (1 + 0.04 * level);
+  const at = (a: number, d: number) => ({ x: f.x + Math.cos(f.facing + a) * d, y: f.y + Math.sin(f.facing + a) * d });
+  for (const side of [-1, 1]) {
+    // Each horn: a curved wedge from the side of the head, out and back.
+    const root1 = at(side * 1.25, r * 0.5), root2 = at(side * 1.75, r * 0.5);
+    const bend = at(side * 1.85, r * (0.95 + level * 0.05));
+    const tip = at(side * 2.35, r * (1.25 + level * 0.12));
+    over.fillStyle(0x1a0c0c, 1).fillTriangle(root1.x, root1.y, root2.x, root2.y, bend.x, bend.y);
+    over.fillTriangle(root2.x, root2.y, bend.x, bend.y, tip.x, tip.y);
+    over.lineStyle(1.5, flame, 0.95).lineBetween(root1.x, root1.y, bend.x, bend.y).lineBetween(bend.x, bend.y, tip.x, tip.y);
+    glow.fillStyle(core, 0.7).fillCircle(tip.x, tip.y, 1.8);
+    // Eyes: bright points just forward of centre.
+    const eye = at(side * 0.42, r * 0.58);
+    glow.fillStyle(flame, 0.55 + 0.3 * Math.sin(now * 12)).fillCircle(eye.x, eye.y, 3.6);
+    over.fillStyle(core, 1).fillCircle(eye.x, eye.y, 1.7);
+  }
 }

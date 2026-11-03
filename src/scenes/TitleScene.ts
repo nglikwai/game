@@ -1,3 +1,4 @@
+import { preloadMapProps } from '@/rendering/mapProps';
 import { HEIGHT, WIDTH } from '@/config';
 import { T, getLang, setLang } from '@/localization';
 import { isMuted, toggleMute } from '@/audio/sfx';
@@ -11,6 +12,8 @@ export class TitleScene extends UIScene {
   constructor() {
     super('Title');
   }
+
+  preload() { preloadMapProps(this); }
 
   create(data: { openSettings?: boolean }) {
     this.setupUI();

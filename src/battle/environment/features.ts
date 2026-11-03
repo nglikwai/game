@@ -6,6 +6,8 @@ import { ARENA_MID_Y as SCREEN_MID_Y } from '@/maps';
 import { S, toWorld, toWorldRect } from '@/battle/coordinates';
 import type { BattleScene } from '@/scenes/BattleScene';
 
+import { RUMBLE, rumbleBlast } from '@/input/rumble';
+
 /** The state and operations this system needs from the scene. No runtime scene dependency. */
 type EnvironmentFeaturesContext = Phaser.Scene & Pick<BattleScene,
   'barrierAnnounced' | 'barrierCircle' | 'barrierTick' | 'bellT' | 'countdown'
@@ -108,6 +110,8 @@ export function explodeKeg(this: EnvironmentFeaturesContext, k: (EnvironmentFeat
     const dy = f.y - k.y;
     const d = Math.hypot(dx, dy);
     if (d < K.radius + f.radius) this.dealDamage(undefined, f, K.damage, dx / (d || 1), dy / (d || 1), 600, 0.45);
+    // Everyone nearby feels the blast, fading with distance.
+    if (f.alive) rumbleBlast(f.controller, 1 - d / (K.radius * RUMBLE.blast.reach));
   }
   // Chain reaction.
   for (const o of this.kegs) if (o.alive && Math.hypot(o.x - k.x, o.y - k.y) < K.radius * 1.3) this.time.delayedCall(160, () => this.explodeKeg(o));
@@ -168,15 +172,9 @@ export function renderBell(this: EnvironmentFeaturesContext, now: number): void 
   if (!B) return;
   const c = toWorld(B);
   if (this.countdown <= 0 && this.bellT < B.warn) {
-    // Rings closing in on the bell as it winds up.
+    // The bell itself glows, without previewing its damage area.
     const k = 1 - this.bellT / B.warn;
-    for (let i = 0; i < 3; i++) {
-      const r = B.radius * (1 - ((k + i / 3) % 1));
-      this.gGlow.lineStyle(3, 0xffd27a, 0.15 + 0.5 * k).strokeCircle(c.x, c.y, r);
-    }
     this.gGlow.fillStyle(0xffd27a, 0.15 + 0.25 * k * (0.5 + 0.5 * Math.sin(now * 20))).fillCircle(c.x, c.y, 40);
-  } else {
-    this.g.lineStyle(1.5, 0xd9ae4a, 0.25).strokeCircle(c.x, c.y, B.radius);
   }
 }
 

@@ -99,3 +99,27 @@ test('reading the Pro Controller directly replaces the browser pad that never de
   assert.equal(sources[0].st.my, -1);
   assert.equal(sources[0].st.mx, 0);
 });
+
+test('lobby controller choices list direct connections without duplicate browser pads or split halves', () => {
+  const load = sourceLoader({ navigator: { getGamepads: () => [
+    { id: 'Joy-Con (L+R)', index: 0, connected: true },
+    { id: 'Nintendo Switch Pro Controller', index: 1, connected: true },
+  ] } });
+  load('src/input/nintendoHid.ts').hidPads().push({ connected: true }, { connected: false }, { connected: true });
+  const { controlOptions } = load('src/scenes/LobbyScene.ts');
+  for (const current of ['off', 'pad1', 'pad1R']) {
+    assert.deepEqual(Array.from(controlOptions(current)), ['off', 'kb1', 'kb2', 'kb3', 'kb4', 'hid1', 'hid2', 'cpu']);
+  }
+  assert.ok(controlOptions('hid4').includes('hid4'), 'a selected direct controller remains visible after disconnect');
+});
+
+test('old browser controller seats can be reassigned in the direct-only lobby without losing their loadout', () => {
+  const load = sourceLoader();
+  const settings = load('src/state/gameSettings.ts').getSettings();
+  settings.mode = 'team'; settings.slots[0].control = 'pad1L'; settings.slots[1].control = 'hid2';
+  const loadout = JSON.stringify({ weapon: settings.slots[0].weapon, skills: settings.slots[0].skills, binds: settings.slots[0].binds });
+  const { LobbyScene } = load('src/scenes/LobbyScene.ts');
+  new LobbyScene().init();
+  assert.equal(settings.slots[0].control, 'off'); assert.equal(settings.slots[1].control, 'hid2');
+  assert.equal(JSON.stringify({ weapon: settings.slots[0].weapon, skills: settings.slots[0].skills, binds: settings.slots[0].binds }), loadout);
+});

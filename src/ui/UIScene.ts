@@ -1,7 +1,7 @@
 import * as Phaser from 'phaser';
 import { HEIGHT, WIDTH } from '@/config';
 import { playMusic, type Track } from '@/audio/music';
-import { menuPadSources, type MenuPadKey } from '@/input/menuInput';
+import { menuDirection, menuPadSources, type MenuPadKey } from '@/input/menuInput';
 import { C, txt, drawFrame } from '@/ui/theme';
 import { setupCamera } from '@/ui/backdrop';
 import { FocusNav } from '@/ui/FocusNav';
@@ -49,15 +49,13 @@ export class UIScene extends Phaser.Scene {
     let confirm = false, back = false, start = false;
     const press = (keyCode: number) => this.routeKey({ keyCode, preventDefault() {} } as KeyboardEvent, 'gamepad');
     for (const { key, control, st } of sources) {
-      const dir = Math.abs(st.mx) > 0.6 || Math.abs(st.my) > 0.6
-        ? Math.abs(st.mx) > Math.abs(st.my) ? (st.mx > 0 ? 'R' : 'L') : st.my > 0 ? 'D' : 'U'
-        : '';
       const prev = this.padPrev.get(key) ?? { dir: '', confirm: false, back: false, start: false, actions: [], repeatAt: 0 };
+      const dir = menuDirection(st.mx, st.my, prev.dir);
       const actionEdges = st.actions.map((on, i) => on && !prev.actions[i]);
       const consumed = inMenu && this.onMenuPadAction(control, actionEdges);
       if (inMenu && !consumed) {
         // A new direction moves at once; holding it repeats after a short pause.
-        if (dir && (dir !== prev.dir || now >= prev.repeatAt)) {
+        if (dir && !st.confirm && !st.back && !st.start && (dir !== prev.dir || now >= prev.repeatAt)) {
           press({ L: K.LEFT, R: K.RIGHT, U: K.UP, D: K.DOWN }[dir]!);
           prev.repeatAt = now + (dir !== prev.dir ? 380 : 120);
         }

@@ -1,3 +1,4 @@
+import { paintScenery } from '@/maps/art/renderedProps';
 import type { MapLayout } from '@/maps/layout';
 import { HEIGHT, HUD_HEIGHT, WIDTH, type GameMode } from '@/config';
 
@@ -66,7 +67,7 @@ export type MapId = 'courtyard' | 'river' | 'snow' | 'town' | 'lava' | 'garden' 
   | 'doors' | 'powder' | 'bell' | 'barrier' | 'whirlpool' | 'herbs'
   | 'tea' | 'storm' | 'sunken' | 'frostfire' | 'orchard' | 'astral'
   /** 闖關 Quest stages only. */
-  | 'sanzu' | 'yama' | 'prison' | 'grove' | 'seals' | 'lantern' | 'onihall' | 'wardens' | 'snare' | 'night' | 'dirge' | 'dragon' | 'beacons' | 'ambush' | 'eclipse';
+  | 'sanzu' | 'yama' | 'prison' | 'grove' | 'seals' | 'lantern' | 'onihall' | 'wardens' | 'snare' | 'night' | 'dirge' | 'dragon' | 'beacons' | 'ambush' | 'eclipse' | 'expedition-forest';
 
 export interface GameMap {
   /** Seeded Quest variation; source maps and menu thumbnails have no layout. */
@@ -148,8 +149,10 @@ export interface TerrainZone {
   pull?: number;
   /** Sand-pit damage per second. */
   dps?: number;
-  /** Fatal core size as a fraction of the pit's elliptical radii (0–1). */
+  /** Fatal core radius as a fraction of the pit's shorter radius (0–1); the core is a circle. */
   core?: number;
+  /** Sand pit: CPUs keep out of this fraction of the pit around the core (0–1). */
+  avoid?: number;
   /** Centre and size. */
   x: number;
   y: number;
@@ -293,7 +296,9 @@ export function paintShadow(ctx: Ctx, o: Obstacle) {
   ctx.shadowOffsetX = 7;
   ctx.shadowOffsetY = 9;
   ctx.fillStyle = 'rgba(0,0,0,0.35)';
-  ctx.fillRect(o.x - o.w / 2, o.y - o.h / 2, o.w, o.h);
+  if (['pine', 'sakura', 'bamboo', 'rock', 'obsidian', 'deadtree', 'barrel', 'lantern'].includes(o.kind)) {
+    ctx.beginPath(); ctx.ellipse(o.x, o.y + o.h * .12, o.w * .56, o.h * .43, 0, 0, Math.PI * 2); ctx.fill();
+  } else ctx.fillRect(o.x - o.w / 2, o.y - o.h / 2, o.w, o.h);
   ctx.restore();
 }
 
@@ -324,6 +329,7 @@ export function paintLanternGlow(ctx: Ctx, o: Obstacle) {
 }
 
 export function paintLantern(ctx: Ctx, o: Obstacle) {
+  if (paintScenery(ctx, o)) return;
   const l = o.x - o.w / 2;
   const t = o.y - o.h / 2;
   stoneBlock(ctx, l, t, o.w, o.h, '#7d786d', '#9b968a', '#524e46');

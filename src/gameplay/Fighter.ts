@@ -1,11 +1,13 @@
 import * as Phaser from 'phaser';
-import { ELEMENT, QUEST, PARALYZED_DAMAGE_TAKEN, BODY_RADIUS, ICE_GRIP, MOVE_SPEED, SPRING, SAND_SPEED, SHALLOWS_SPEED, BOOST_SPEED, POISON, STEALTH_SPEED, SOUL_CAST_TIME, SOUL_LEVELS, SOUL_PER_LEVEL, SOUL_REAPER, TOWER_AURA_DAMAGE_TAKEN, TOWER_AURA_PE_REGEN, MUD_SPEED, PE_REGEN_DELAY, PE_REGEN_MOVING, PE_REGEN_PER_SEC, PE_REGEN_STILL } from '@/config';
-import type { Controller, Intent } from '@/input/contracts';
+import { ELEMENT, QUEST, PARALYZED_DAMAGE_TAKEN, BODY_RADIUS, ICE_GRIP, MOVE_SPEED, SPRING, SAND_SPEED, SHALLOWS_SPEED, BOOST_SPEED, POISON, STEALTH_SPEED, SOUL_CAST_TIME, SOUL_LEVELS, SOUL_PER_LEVEL, SOUL_REAPER, TOWER_AURA_DAMAGE_TAKEN, TOWER_AURA_PE_REGEN, MUD_SPEED, PE_REGEN_DELAY, PE_REGEN_PER_SEC, SOUL_RAGE } from '@/config';
+import type { Controller, HomeLight, Intent } from '@/input/contracts';
+import { RUMBLE, rumbleHurt, rumbleKO, rumbleLowHp, rumbleRage, rumbleRevive, rumbleSkill, rumbleSoulLevel, rumbleSummon } from '@/input/rumble';
 import { sfx } from '@/audio/sfx';
+import { T } from '@/localization';
 import { POCKET_SIZE, type Item, type ItemEffect } from '@/gameplay/items';
 import type { Role } from '@/gameplay/roles';
-import { isSummon, skillCooldownFor, type Skill, type SkillEffect, type SummonKind } from '@/gameplay/skills';
-import type { Weapon } from '@/gameplay/weapons';
+import { isSummon, skillCooldownFor, spendsSoul, type Skill, type SkillEffect, type SummonKind } from '@/gameplay/skills';
+import { rageWeapon, type Weapon } from '@/gameplay/weapons';
 import type { TerrainKind } from '@/maps/common';
 import { createMatchStats } from '@/battle/results/stats';
 
@@ -38,6 +40,12 @@ export interface Arena {
   onSubstitute(f: Fighter, dirx: number, diry: number): void;
   /** Body Flicker: move `f` to a random spot far from enemies. */
   teleportSafe(f: Fighter): void;
+  /** 影步: the enemy `f` would blink behind (the nearest within `range`), if any. */
+  shadowStepTarget(f: Fighter, range: number): Fighter | null;
+  /** 影步: blink `f` to just behind the nearest enemy within `range`. */
+  shadowStep(f: Fighter, range: number): void;
+  /** 換影: trade places with the nearest enemy within `range`. */
+  swapPlaces(f: Fighter, range: number): void;
   /** Soul skill: lightning on the `count` nearest enemies of `f`. */
   thunderStrike(f: Fighter, count: number): void;
   /** Soul skill: the reaper visits the `count` nearest enemies of `f`. */
@@ -103,7 +111,23 @@ export class Fighter {
   private speedMult = 1;
   private channelHealRate = 0;
   private powerT = 0;
+  private lifestealT = 0;
+  private counterT = 0;
+  private regenT = 0;
+  private regenRate = 0;
+  /** The 見切 stance in effect, while `countering`. */
+  counterSpec: Extract<SkillEffect, { kind: 'counter' }> | null = null;
+  /** Share of the damage you deal that heals you while 噬血 lasts. */
+  lifestealShare = 0;
   private powerMult = 1;
+  /** 暴走: seconds left, the 魂 level spent on it (0 = not raging), and the weapon to go back to afterwards. */
+  rageT = 0;
+  rageLevel = 0;
+  /** How long the next-item button has been held towards triggering 暴走. */
+  private rageHoldT = 0;
+  /** The "hold … for 暴走" tip has been shown this battle. */
+  private rageHinted = false;
+  private baseWeapon: Weapon | null = null;
   private guardT = 0;
   private stealthT = 0;
   /** A summoning skill being called: what lands when the call finishes. */
@@ -129,8 +153,6 @@ export class Fighter {
   soulDeniedT = 0;
   /** Sealed inside a snare tree until that tree is destroyed. */
   trapped = false;
-  /** Standing still, so PE is recovering at the boosted rate. */
-  resting = false;
   /** Inside a friendly watchtower's aura (faster PE, less damage taken). */
   inAura = false;
   /** 魂: filled by damage dealt to enemy fighters, up to SOUL_LEVELS × SOUL_PER_LEVEL. */
@@ -166,6 +188,10 @@ export class Fighter {
     this.speedMult = 1;
     this.powerT = 0;
     this.powerMult = 1;
+    this.endRage();
+    this.lifestealT = 0;
+    this.counterT = 0;
+    this.regenT = 0;
     this.guardT = 0;
     this.guardMult = 1;
     this.stealthT = 0;
@@ -208,16 +234,95 @@ export class Fighter {
   get stateProgress() { return this.stateDur > 0 ? Math.min(1, this.stateT / this.stateDur) : 0; }
   get sprinting() { return this.speedBuffT > 0; }
   /** Fury: multiplier on weapon damage and knockback. */
-  get damageMult() { return this.powerMult * this.damageScale * this.role.attack; }
+  get damageMult() { return this.powerMult * this.damageScale * this.role.attack * this.rage('damage'); }
+  get raging() { return this.rageLevel > 0; }
+  /** This fighter's current 暴走 multiplier for one SOUL_RAGE stat (1 when not raging). */
+  rage(stat: 'damage' | 'taken' | 'knockbackTaken' | 'speed' | 'cooldown' | 'peRegen'): number {
+    return this.rageLevel > 0 ? SOUL_RAGE[stat][this.rageLevel - 1]! : 1;
+  }
+  /** 暴走 at a high enough level: share of weapon damage dealt that heals you. */
+  get rageLifesteal() { return this.rageLevel >= SOUL_RAGE.lifestealFrom ? SOUL_RAGE.lifesteal : 0; }
+
+  /** 暴走 is for human players only; CPUs and bosses never enter it. */
+  get canRage() { return !this.raging && this.soulLevel > 0 && !this.controller?.cpu && !this.boss && !this.paralyzed && this.state !== 'casting'; }
+  /** 0→1 while the button is held, for the charge ring; 0 when not charging. */
+  get rageCharge() { return this.rageHoldT > 0 ? Math.min(1, this.rageHoldT / SOUL_RAGE.hold) : 0; }
+
+  /** Spend every full 魂 level on 暴走. */
+  private triggerRage() {
+    const level = this.soulLevel;
+    this.soul -= level * SOUL_PER_LEVEL;
+    this.startRage(level);
+    sfx.powerUp();
+    rumbleRage(this.controller, level);
+    this.arena.popText(this.x, this.y - 40, `暴走 ${'魂'.repeat(level)}`, '#' + SOUL_RAGE.colors[level - 1]![0].toString(16).padStart(6, '0'));
+  }
+
+  /** Enter 暴走 at `level`: PE refills, and the weapon swings faster over a wider area until it wears off. */
+  private startRage(level: number) {
+    this.baseWeapon ??= this.weapon;
+    this.weapon = rageWeapon(this.baseWeapon, level);
+    this.rageLevel = level;
+    this.rageT = SOUL_RAGE.duration[level - 1]!;
+    this.pe = this.maxPe;
+  }
+
+  endRage() {
+    if (this.baseWeapon) this.weapon = this.baseWeapon;
+    this.baseWeapon = null;
+    this.rageLevel = 0;
+    this.rageT = 0;
+  }
   get powered() { return this.powerT > 0; }
+  get lifestealing() { return this.lifestealT > 0; }
+  get countering() { return this.counterT > 0; }
+  get regenerating() { return this.regenT > 0; }
+  /** The 見切 stance is used up by the hit it blocks. */
+  endCounter() { this.counterT = 0; }
   get guarded() { return this.guardT > 0; }
   /** Has the Thunder skill equipped (so the soul meter matters). */
-  get usesSoul() { return this.skills.some((s) => isSummon(s?.effect.kind)); }
+  /** Has a 魂 skill equipped, or is a human player (who can always spend 魂 on 暴走), so the soul meter matters. */
+  get usesSoul() { return this.skills.some((s) => spendsSoul(s?.effect.kind)) || (!this.controller?.cpu && !this.boss); }
   /** Full soul levels available (0–4). */
   get soulLevel() { return Math.floor(this.soul / SOUL_PER_LEVEL); }
+  /** Whether the low-HP heartbeat has already been felt (until HP recovers). */
+  private lowHpFelt = false;
+  /** What the Joy-Con lights last showed, so they're only re-sent on a change. */
+  private padLights: { flash: boolean; home: HomeLight } | null = null;
+
+  /**
+   * Directly connected Joy-Con / Pro Controller lights: the player number on the side lights (flashing while HP is
+   * low or knocked out), and the HOME ring glowing while a 魂 summon is ready, pulsing when the meter is full.
+   */
+  syncPadLights() {
+    const c = this.controller;
+    if (!c?.setLights && !c?.setHomeLight) return;
+    const flash = !this.alive || this.hp < this.maxHp * RUMBLE.lowHp.below;
+    const home: HomeLight = !this.alive || !this.usesSoul || this.soulLevel === 0 ? 'off' : this.soulLevel >= SOUL_LEVELS ? 'pulse' : 'glow';
+    const last = this.padLights;
+    if (last?.flash !== flash) c.setLights?.(this.index, flash);
+    if (last?.home !== home) c.setHomeLight?.(home);
+    this.padLights = { flash, home };
+  }
+
+  resetPadLights() {
+    this.controller?.setLights?.(this.index, false);
+    this.controller?.setHomeLight?.('off');
+    this.padLights = null;
+  }
 
   addSoul(damage: number) {
+    // 暴走 can't refill itself: no 魂 is gained while it lasts.
+    if (this.raging) return;
+    const before = this.soulLevel;
     this.soul = Math.min(SOUL_LEVELS * SOUL_PER_LEVEL, this.soul + damage * this.soulGainScale);
+    // Each new 魂 level buzzes the player's controller, once per level reached.
+    if (this.usesSoul && this.soulLevel > before) rumbleSoulLevel(this.controller, this.soulLevel);
+    // The first time a player has 魂 to spend, say how to unleash it.
+    if (before === 0 && this.soulLevel > 0 && !this.rageHinted && this.canRage) {
+      this.rageHinted = true;
+      this.arena.popText(this.x, this.y - 46, T().rageReady(this.controller.labels[5] ?? ''), '#ffb070');
+    }
   }
   /** Vanish: nearly invisible, and CPU enemies ignore you. */
   get stealthed() { return this.stealthT > 0; }
@@ -231,19 +336,29 @@ export class Fighter {
 
   canUseSkill(slot: number) {
     const skill = this.skills[slot];
-    if (isSummon(skill?.effect.kind) && this.soulLevel === 0) return false;
+    if (spendsSoul(skill?.effect.kind) && this.soulLevel === 0) return false;
     return !!skill && this.state === 'idle' && this.cooldowns[slot] <= 0 && this.pe >= skill.peCost;
   }
 
   update(dt: number, intent: Intent) {
+    this.syncPadLights();
     if (!this.alive) return;
+    // Heartbeat once when HP first drops low; healing back above the line re-arms it.
+    const low = this.hp < this.maxHp * RUMBLE.lowHp.below;
+    if (low && !this.lowHpFelt) rumbleLowHp(this.controller);
+    this.lowHpFelt = low;
     if (this.trapped) {
       this.body.velocity.x = 0;
       this.body.velocity.y = 0;
       return;
     }
 
-    for (let i = 0; i < this.cooldowns.length; i++) this.cooldowns[i] = Math.max(0, this.cooldowns[i] - dt);
+    const cooling = dt * this.rage('cooldown');
+    for (let i = 0; i < this.cooldowns.length; i++) this.cooldowns[i] = Math.max(0, this.cooldowns[i] - cooling);
+    if (this.rageT > 0) {
+      this.rageT = Math.max(0, this.rageT - dt);
+      if (this.rageT === 0) this.endRage();
+    }
     this.flashT = Math.max(0, this.flashT - dt);
     this.chillT = Math.max(0, this.chillT - dt);
     this.frostT = Math.max(0, this.frostT - dt);
@@ -259,23 +374,36 @@ export class Fighter {
     if (this.speedBuffT === 0) this.speedMult = 1;
     this.powerT = Math.max(0, this.powerT - dt);
     if (this.powerT === 0) this.powerMult = 1;
+    this.lifestealT = Math.max(0, this.lifestealT - dt);
+    this.counterT = Math.max(0, this.counterT - dt);
+    if (this.regenT > 0 && this.alive) {
+      // 甘露: a little healing every frame until it runs out.
+      this.heal(this.regenRate * Math.min(dt, this.regenT));
+      this.regenT = Math.max(0, this.regenT - dt);
+    }
     this.guardT = Math.max(0, this.guardT - dt);
     if (this.guardT === 0) this.guardMult = 1;
     this.stealthT = Math.max(0, this.stealthT - dt);
     this.substituteT = Math.max(0, this.substituteT - dt);
     const mlen = Math.hypot(intent.mx, intent.my);
 
-    // PE comes back fastest when you stand still to catch your breath, slowest on the move.
+    // PE comes back at a steady rate (faster for a Mystic, or inside a friendly tower's aura).
     this.peDelay -= dt;
-    const idle = this.state === 'idle';
-    this.resting = idle && mlen < 0.2;
-    const regen = this.resting ? PE_REGEN_STILL : idle ? PE_REGEN_MOVING : 1;
     this.inAura = this.arena.inTowerAura(this);
     const aura = this.inAura ? TOWER_AURA_PE_REGEN : 1;
-    if (this.peDelay <= 0) this.pe = Math.min(this.maxPe, this.pe + PE_REGEN_PER_SEC * regen * this.role.peRegen * aura * dt);
+    if (this.peDelay <= 0) this.pe = Math.min(this.maxPe, this.pe + PE_REGEN_PER_SEC * this.role.peRegen * aura * this.rage('peRegen') * dt);
 
     const mx = mlen > 0 ? intent.mx / Math.max(1, mlen) : 0;
     const my = mlen > 0 ? intent.my / Math.max(1, mlen) : 0;
+
+    // 暴走: hold the next-item button with 魂 (a tap still just switches items).
+    if (intent.nextItemHeld && this.canRage) {
+      this.rageHoldT += dt;
+      if (this.rageHoldT >= SOUL_RAGE.hold - 1e-6) {
+        this.rageHoldT = 0;
+        this.triggerRage();
+      }
+    } else this.rageHoldT = 0;
 
     // Switching the selected item works in any state.
     if (intent.nextItem && this.pocket.length > 0) {
@@ -320,6 +448,7 @@ export class Fighter {
           const s = this.summon;
           this.summon = null;
           this.setState('idle', 0);
+          if (s) rumbleSummon(this.controller, s.level);
           if (s?.kind === 'soulThunder') this.arena.thunderStrike(this, s.level);
           else if (s?.kind === 'soulFire') this.arena.holyFireStrike(this, s.level);
           else if (s?.kind === 'soulTree') this.arena.treeStrike(this, s.level);
@@ -350,7 +479,7 @@ export class Fighter {
     const terrain = this.arena.terrainAt(this.x, this.y);
     const GROUND: Partial<Record<TerrainKind, number>> = { mud: MUD_SPEED, spring: SPRING.speed, sand: SAND_SPEED, sandpit: SAND_SPEED, shallows: SHALLOWS_SPEED, poison: POISON.speed, boost: BOOST_SPEED };
     const ground = (terrain && GROUND[terrain]) ?? 1;
-    const speed = MOVE_SPEED * this.role.speed * this.speedMult * (this.stealthed ? STEALTH_SPEED : 1) * moveFactor[this.state] * ground * this.arena.hazardSlow(this) * (this.frostT > 0 ? ELEMENT.frost.speed : 1);
+    const speed = MOVE_SPEED * this.role.speed * this.speedMult * this.rage('speed') * (this.stealthed ? STEALTH_SPEED : 1) * moveFactor[this.state] * ground * this.arena.hazardSlow(this) * (this.frostT > 0 ? ELEMENT.frost.speed : 1);
     // Hot springs heal you slowly while you stand in them.
     if (terrain === 'spring') this.heal(SPRING.healPerSec * dt);
     // Poison bog saps HP, but never finishes anyone off.
@@ -404,8 +533,8 @@ export class Fighter {
     return true;
   }
 
+  /** Swinging is free; PE only pays for skills. */
   private tryAttack() {
-    if (!this.spend(this.weapon.peCost)) return;
     this.stealthT = 0; // attacking reveals you
     // Frostbite makes every swing slower to come out.
     this.setState('windup', this.weapon.windup * (this.frostT > 0 ? ELEMENT.frost.swing : 1));
@@ -418,6 +547,7 @@ export class Fighter {
 
   /** Revive effects need a fallen teammate (and, when splitting HP, HP to share); Thunder needs soul. */
   private canApply(e: ItemEffect) {
+    if (e.kind === 'soulRage') return this.canRage;
     if (isSummon(e.kind)) {
       // Summons need a full soul level and someone to hit; say which is missing.
       if (this.soulLevel === 0) {
@@ -431,6 +561,7 @@ export class Fighter {
       }
       return true;
     }
+    if (e.kind === 'shadowStep' || e.kind === 'swap') return !!this.arena.shadowStepTarget(this, e.range);
     if (e.kind !== 'revive') return true;
     return !!this.arena.findReviveTarget(this) && (e.fixedHp !== undefined || this.hp >= 2);
   }
@@ -440,11 +571,12 @@ export class Fighter {
     if (!skill || this.cooldowns[slot] > 0) return;
     if (!this.canApply(skill.effect)) return this.deny();
     // Shinobi pay less for movement skills.
-    const mobility = ['speedBuff', 'dash', 'teleport', 'stealth'].includes(skill.effect.kind);
+    const mobility = ['speedBuff', 'dash', 'teleport', 'shadowStep', 'swap', 'stealth'].includes(skill.effect.kind);
     if (!this.spend(skill.peCost * (mobility ? this.role.mobilityCost : 1))) return;
     this.cooldowns[slot] = skillCooldownFor(skill, this.role);
     this.stats.skills++;
     this.arena.onSkillCast?.(this, skill.effect, mx, my);
+    rumbleSkill(this.controller);
     this.applyEffect(skill.effect, mx, my);
   }
 
@@ -561,6 +693,36 @@ export class Fighter {
         this.powerMult = e.multiplier;
         this.powerT = e.duration;
         break;
+      case 'shadowStep':
+        sfx.vanish();
+        this.stealthT = 0;
+        this.kbx = this.kby = 0;
+        this.arena.shadowStep(this, e.range);
+        break;
+      case 'regen':
+        sfx.heal();
+        this.regenRate = e.heal / e.duration;
+        this.regenT = e.duration;
+        break;
+      case 'swap':
+        sfx.vanish();
+        this.stealthT = 0;
+        this.kbx = this.kby = 0;
+        this.arena.swapPlaces(this, e.range);
+        break;
+      case 'counter':
+        sfx.guard();
+        this.counterSpec = e;
+        this.counterT = e.window;
+        break;
+      case 'lifesteal':
+        sfx.powerUp();
+        this.lifestealShare = e.share;
+        this.lifestealT = e.duration;
+        break;
+      case 'soulRage':
+        this.triggerRage();
+        break;
       case 'soulThunder':
       case 'soulReaper':
       case 'soulFire':
@@ -629,7 +791,7 @@ export class Fighter {
 
   /** Share of incoming damage actually taken: guard, a tower's aura and paralysis all stack. */
   get damageTaken() {
-    return this.guardMult * (this.inAura ? TOWER_AURA_DAMAGE_TAKEN : 1) * (this.paralyzed ? PARALYZED_DAMAGE_TAKEN : 1);
+    return this.guardMult * this.rage('taken') * (this.inAura ? TOWER_AURA_DAMAGE_TAKEN : 1) * (this.paralyzed ? PARALYZED_DAMAGE_TAKEN : 1);
   }
 
   /**
@@ -649,8 +811,10 @@ export class Fighter {
     }
     this.stealthT = 0;
     const before = this.hp;
-    const kill = before < SOUL_REAPER.executeBelow;
-    const next = kill ? 0 : SOUL_REAPER.leaveHp;
+    let next = before < SOUL_REAPER.executeBelow ? 0 : SOUL_REAPER.leaveHp;
+    // A boss loses at most `bossMax` to one scythe.
+    if (this.boss) next = Math.max(next, before - SOUL_REAPER.bossMax);
+    const kill = next <= 0;
     this.stats.taken += before - next;
     this.hp = next;
     this.flashT = 0.12;
@@ -743,6 +907,7 @@ export class Fighter {
       this.kbx = this.kby = 0;
       this.body.setVelocity(0, 0);
       this.setState('casting', 1);
+      rumbleRevive(this.controller);
       this.arena.onPillRevived(this);
       return;
     }
@@ -750,6 +915,8 @@ export class Fighter {
     this.stats.deaths++;
     this.pendingSacrifice = null;
     this.setState('dead', 0);
+    this.endRage();
+    rumbleKO(this.controller);
     sfx.death();
     sfx.scream(this.voice * (0.94 + Math.random() * 0.12));
     this.body.setVelocity(0, 0);
@@ -775,8 +942,9 @@ export class Fighter {
     knockback *= this.guardMult;
     this.hp -= damage;
     sfx.hit(Phaser.Math.Clamp(damage / 25, 0, 1));
+    if (this.hp > 0) rumbleHurt(this.controller, damage);
     this.flashT = 0.12;
-    knockback *= this.role.knockbackTaken;
+    knockback *= this.role.knockbackTaken * this.rage('knockbackTaken');
     if (!frozen) {
       this.kbx += dirx * knockback;
       this.kby += diry * knockback;
@@ -793,6 +961,8 @@ export class Fighter {
     // interrupt you. Without this, fast weapons could stun-lock slow ones forever.
     const swinging = this.state === 'windup' || this.state === 'active';
     if (swinging && damage < this.weapon.damage * this.role.poise) return;
+    // 暴走 at a high level: super armour, hits never interrupt you.
+    if (this.rageLevel >= SOUL_RAGE.superArmorFrom) return;
     // Otherwise a hit interrupts anything, including a heal channel.
     this.setState('stun', hitstun);
   }

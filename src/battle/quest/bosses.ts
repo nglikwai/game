@@ -105,7 +105,7 @@ export function prepareBossReserve(this: QuestBossesContext, f: Fighter, partySi
   f.body.enable = false;
 }
 
-/** The boss trades its own HP for one guard, up to four living enemies including itself. */
+/** The boss trades its own HP for up to two guards, up to four living enemies including itself. */
 export function updateBossReinforcements(this: QuestBossesContext, dt: number): void {
   if (this.quest?.stage !== QUEST.bossStage || this.over || this.paused || this.countdown > 0) return;
   const boss = this.fighters.find((f) => f.boss && f.alive);
@@ -120,28 +120,30 @@ export function updateBossReinforcements(this: QuestBossesContext, dt: number): 
   this.bossRespawnT = Math.max(0, this.bossRespawnT - dt);
   if (this.bossRespawnT > 0) return;
   const cost = Math.max(1, Math.round(boss.maxHp * QUEST.boss.respawnHpCost));
-  if (boss.hp <= cost) return;
-  const guard = fallen[0];
-  const spot = this.freeSpot({ x: boss.x - 80, y: boss.y + (guard.index % 2 ? -60 : 60) }, this.fighters.filter((f) => f.alive).map((f) => ({ x: f.x, y: f.y })));
-  boss.hp -= cost;
-  boss.flashT = 0.15;
-  if (!this.hasHellPlayers || this.slots[guard.index].control === 'cpu') {
-    const gear = randomCpuEquipment('quest', guard.role.id, QUEST_ENEMY_BANNED, CPU_ENEMY_SKILLS);
-    guard.weapon = WEAPONS[gear.weapon];
-    guard.skills.splice(0, guard.skills.length, ...gear.skills.map(skillById));
-    guard.cooldowns.length = guard.skills.length;
-    this.refreshHudLoadout(guard);
+  const room = QUEST.boss.maxEnemies - enemies.filter((f) => f.alive).length;
+  for (const guard of fallen.slice(0, Math.min(QUEST.reinforcementBatch, room))) {
+    if (boss.hp <= cost) break;
+    const spot = this.freeSpot({ x: boss.x - 80, y: boss.y + (guard.index % 2 ? -60 : 60) }, this.fighters.filter((f) => f.alive).map((f) => ({ x: f.x, y: f.y })));
+    boss.hp -= cost;
+    boss.flashT = 0.15;
+    if (!this.hasHellPlayers || this.slots[guard.index].control === 'cpu') {
+      const gear = randomCpuEquipment('quest', guard.role.id, QUEST_ENEMY_BANNED, CPU_ENEMY_SKILLS);
+      guard.weapon = WEAPONS[gear.weapon];
+      guard.skills.splice(0, guard.skills.length, ...gear.skills.map(skillById));
+      guard.cooldowns.length = guard.skills.length;
+      this.refreshHudLoadout(guard);
+    }
+    guard.revive(spot.x, spot.y, guard.maxHp * TOWER_RESPAWN_HP);
+    guard.pocket.length = 0;
+    guard.selectedItem = 0;
+    guard.soul *= TOWER_RESPAWN_SOUL_KEEP;
+    this.bossReserves.delete(guard);
+    this.nameTags[guard.index]?.setVisible(true);
+    this.onRevived(guard);
+    this.popText(boss.x, boss.y - boss.radius - 16, `-${cost} HP`, '#ff8a8a');
+    this.showBanner(T().bossReinforcement, BOSS_COLOR);
+    this.fx.respawnBeam(boss.x, boss.y, spot.x, spot.y, BOSS_COLOR);
+    sfx.respawn();
   }
-  guard.revive(spot.x, spot.y, guard.maxHp * TOWER_RESPAWN_HP);
-  guard.pocket.length = 0;
-  guard.selectedItem = 0;
-  guard.soul *= TOWER_RESPAWN_SOUL_KEEP;
-  this.bossReserves.delete(guard);
-  this.nameTags[guard.index]?.setVisible(true);
-  this.onRevived(guard);
-  this.popText(boss.x, boss.y - boss.radius - 16, `-${cost} HP`, '#ff8a8a');
-  this.showBanner(T().bossReinforcement, BOSS_COLOR);
-  this.fx.respawnBeam(boss.x, boss.y, spot.x, spot.y, BOSS_COLOR);
-  sfx.respawn();
   this.bossRespawnT = QUEST.boss.respawnInterval;
 }

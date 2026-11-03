@@ -1,3 +1,4 @@
+import { paintScenery } from '@/maps/art/renderedProps';
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, paintShadow, paintVignette,
@@ -179,6 +180,7 @@ function paintReeds(ctx: Ctx, o: Obstacle, rand: () => number) {
 }
 
 function paintMossRock(ctx: Ctx, o: Obstacle) {
+  if (paintScenery(ctx, o)) return;
   ctx.fillStyle = '#4a4e44';
   ctx.beginPath();
   ctx.ellipse(o.x, o.y, o.w / 2, o.h / 2, 0.2, 0, Math.PI * 2);

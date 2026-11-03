@@ -1,3 +1,4 @@
+import { paintScenery } from '@/maps/art/renderedProps';
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, paintShadow, paintVignette,
@@ -144,6 +145,7 @@ function paintRopeBridge(ctx: Ctx, x: number, y: number) {
 }
 
 function paintPine(ctx: Ctx, o: Obstacle, rand: () => number) {
+  if (paintScenery(ctx, o)) return;
   for (let k = 3; k >= 0; k--) {
     ctx.fillStyle = ['#1e3a1e', '#2a4a24', '#36602e', '#4a7a3a'][k];
     ctx.beginPath();
@@ -157,6 +159,7 @@ function paintPine(ctx: Ctx, o: Obstacle, rand: () => number) {
 }
 
 function paintRock(ctx: Ctx, o: Obstacle) {
+  if (paintScenery(ctx, o)) return;
   const g = ctx.createRadialGradient(o.x - 6, o.y - 6, 2, o.x, o.y, o.w * 0.6);
   g.addColorStop(0, '#a8a090');
   g.addColorStop(1, '#5a5448');

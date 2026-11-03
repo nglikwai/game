@@ -36,8 +36,8 @@ export class LoadingScene extends Phaser.Scene {
     const factions = questFactions(this.battle.slots, this.battle.quest?.side);
     const goals = factions.side === 'hell' ? T().hellGoals : T().questGoals;
     const map = prepared ? getMap(QUEST.maps[prepared.stage]) : null;
-    txt(this, WIDTH / 2, HEIGHT / 2 + 4, map ? T().mapName(map) : T().loadingBattle, 30, C.text, { title: true, bold: true, origin: 0.5 });
-    const hint = prepared ? T().questStageTitle(questStageNumber(prepared.route, prepared.stage), `${factions.mixed ? `${T().questVersus} · ` : ''}${goals[prepared.stage]}`) : T().loadingBattleHint;
+    txt(this, WIDTH / 2, HEIGHT / 2 + 4, this.battle.mode === 'expedition' ? T().expeditionStage : map ? T().mapName(map) : T().loadingBattle, 30, C.text, { title: true, bold: true, origin: 0.5 });
+    const hint = this.battle.mode === 'expedition' ? T().expeditionGoal : prepared ? T().questStageTitle(questStageNumber(prepared.route, prepared.stage), `${factions.mixed ? `${T().questVersus} · ` : ''}${goals[prepared.stage]}`) : T().loadingBattleHint;
     txt(this, WIDTH / 2, HEIGHT / 2 + 46, hint, 16, C.dim, { origin: 0.5, wrap: 880, align: 'center' });
     this.add.graphics().fillStyle(0x243245, 1).fillRoundedRect(WIDTH / 2 - 170, HEIGHT / 2 + 90, 340, 5, 2);
     this.bar = this.add.graphics();

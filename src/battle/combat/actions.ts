@@ -7,12 +7,13 @@ import { type SkillEffect } from '@/gameplay/skills';
 import { shapeHits, shapeHitsRect } from '@/gameplay/weapons';
 import { T } from '@/localization';
 import { sfx } from '@/audio/sfx';
-import { S, ARENA } from '@/battle/coordinates';
+import { rumbleCounter, rumbleHit } from '@/input/rumble';
+import { S } from '@/battle/coordinates';
 import type { BattleScene } from '@/scenes/BattleScene';
 
 /** The state and operations this system needs from the scene. No runtime scene dependency. */
 type CombatActionsContext = Phaser.Scene & Pick<BattleScene,
-  'breakWall' | 'chests' | 'damageTower' | 'dealDamage'
+  'arenaRect' | 'expedition' | 'breakWall' | 'chests' | 'damageTower' | 'dealDamage'
   | 'deathTime' | 'explodeKeg' | 'fighters' | 'fx' | 'kegs'
   | 'lantern' | 'nightCandles' | 'obstacleRects' | 'openChest' | 'over'
   | 'popText' | 'projectiles' | 'quest' | 'questTeam' | 'respawnTimers'
@@ -22,6 +23,7 @@ type CombatActionsContext = Phaser.Scene & Pick<BattleScene,
 // ---------- Arena interface ----------
 export function onSwingActive(this: CombatActionsContext, f: Fighter): void {
   const w = f.weapon;
+  let landed = false;
   for (const t of this.fighters) {
     if (!f.isEnemy(t) || !t.alive || t.untouchable || f.swingHits.has(t)) continue;
     if (!shapeHits(w.shape, f.x, f.y, f.facing, t.x, t.y, t.radius)) continue;
@@ -31,7 +33,10 @@ export function onSwingActive(this: CombatActionsContext, f: Fighter): void {
     const d = Math.hypot(dx, dy) || 1;
     const taken = t.stats.taken;
     this.dealDamage(f, t, w.damage * f.damageMult, dx / d, dy / d, w.knockback * f.damageMult, w.hitstun);
-    if (t.stats.taken > taken) this.fx.weaponImpact(w.id, t.x - dx / d * t.radius * 0.5, t.y - dy / d * t.radius * 0.5, f.facing, f.color);
+    if (t.stats.taken > taken) {
+      landed = true;
+      this.fx.weaponImpact(w.id, t.x - dx / d * t.radius * 0.5, t.y - dy / d * t.radius * 0.5, f.facing, f.color);
+    }
     if (w.id === 'staff') {
       // The Ice Staff leaves its victim frosted.
       this.fx.frostBurst(t.x, t.y);
@@ -39,6 +44,8 @@ export function onSwingActive(this: CombatActionsContext, f: Fighter): void {
       t.chillT = 0.9;
     }
   }
+  // The attacker's controller kicks on a landed hit: heavier weapons kick harder and longer.
+  if (landed) rumbleHit(f.controller, w.damage * f.damageMult);
 
   for (const k of this.kegs) {
     if (!k.alive || f.swingHits.has(k) || !shapeHitsRect(w.shape, f.x, f.y, f.facing, k.x, k.y, k.size, k.size)) continue;
@@ -122,6 +129,21 @@ export function onSkillCast(this: CombatActionsContext, f: Fighter, e: SkillEffe
 /** Apply a hit and record it in the round stats. */
 export function dealDamage(this: CombatActionsContext, from: Fighter | undefined, to: Fighter, dmg: number, dx: number, dy: number, knockback: number, hitstun: number, soulGain = true): void {
   if (to.trapped) return;
+  if (to.countering && to.alive && !to.untouchable && to.counterSpec) {
+    // 見切: the hit is blocked outright, and an attacker in reach is struck back.
+    const spec = to.counterSpec;
+    to.endCounter();
+    rumbleCounter(to.controller);
+    sfx.guard();
+    this.fx.counterFlash(to.x, to.y);
+    this.popText(to.x, to.y - 34, T().countered, '#cfe3ff');
+    if (from && from !== to && from.alive && Math.hypot(from.x - to.x, from.y - to.y) <= spec.reach + from.radius) {
+      const d = Math.hypot(from.x - to.x, from.y - to.y) || 1;
+      to.facing = Math.atan2(from.y - to.y, from.x - to.x);
+      this.dealDamage(to, from, spec.damage * to.role.attack, (from.x - to.x) / d, (from.y - to.y) / d, spec.knockback, spec.stun);
+    }
+    return;
+  }
   const before = to.hp;
   const taken = to.stats.taken;
   to.takeHit(dmg, dx, dy, knockback, hitstun);
@@ -129,6 +151,10 @@ export function dealDamage(this: CombatActionsContext, from: Fighter | undefined
   const actual = to.stats.taken - taken;
   this.fx.hitSpark(to.x - dx * to.radius * 0.6, to.y - dy * to.radius * 0.6, from?.color ?? 0xffffff);
   if (!from) return; // tower arrows don't count towards anyone's stats
+  // 噬血: a share of the damage dealt heals the attacker.
+  // 暴走 at level 4 also drinks a share of what it deals; the stronger of the two applies.
+  const drink = Math.max(from.lifestealing ? from.lifestealShare : 0, from.rageLifesteal);
+  if (drink > 0 && from.alive && actual > 0 && from.heal(actual * drink) > 0) this.fx.sparks(from.x, from.y - 6, 0xff4a5a, 3);
   // Hurting enemies fills your soul (lightning itself doesn't, so it can't chain); being hurt fills a little too.
   if (soulGain) {
     from.addSoul(actual);
@@ -150,7 +176,7 @@ export function reviveSpot(this: CombatActionsContext, f: Fighter): { x: number;
     const a = f.facing + Math.PI + (i % 2 ? 1 : -1) * Math.ceil(i / 2) * (Math.PI / 4);
     const x = f.x + Math.cos(a) * d;
     const y = f.y + Math.sin(a) * d;
-    const inside = x > ARENA.x + r && x < ARENA.x + ARENA.w - r && y > ARENA.y + r && y < ARENA.y + ARENA.h - r;
+    const inside = x > this.arenaRect.x + r && x < (this.arenaRect.x + this.arenaRect.width) - r && y > this.arenaRect.y + r && y < (this.arenaRect.y + this.arenaRect.height) - r;
     const blocked = this.obstacleRects.some((o) => x > o.x - r && x < o.right + r && y > o.y - r && y < o.bottom + r);
     const crowded = this.fighters.some((o) => o.alive && Math.hypot(o.x - x, o.y - y) < r * 2);
     if (inside && !blocked && !crowded) return { x, y };
@@ -168,7 +194,7 @@ export function onSubstitute(this: CombatActionsContext, f: Fighter, dirx: numbe
     const x = from.x + Math.cos(a) * 100;
     const y = from.y + Math.sin(a) * 100;
     const r = f.radius;
-    const inside = x > ARENA.x + r && x < ARENA.x + ARENA.w - r && y > ARENA.y + r && y < ARENA.y + ARENA.h - r;
+    const inside = x > this.arenaRect.x + r && x < (this.arenaRect.x + this.arenaRect.width) - r && y > this.arenaRect.y + r && y < (this.arenaRect.y + this.arenaRect.height) - r;
     const blocked = this.obstacleRects.some((o) => x > o.x - r && x < o.right + r && y > o.y - r && y < o.bottom + r);
     if (inside && !blocked) {
       spot = { x, y };
@@ -188,12 +214,12 @@ export function teleportSafe(this: CombatActionsContext, f: Fighter): void {
   let best: { x: number; y: number } | null = null;
   let bestScore = -1;
   for (let k = 0; k < 60; k++) {
-    const x = Phaser.Math.Between(ARENA.x + 40, ARENA.x + ARENA.w - 40);
-    const y = Phaser.Math.Between(ARENA.y + 40, ARENA.y + ARENA.h - 40);
+    const x = Phaser.Math.Between(this.expedition ? Math.max(this.arenaRect.x + 40, f.x - 500) : this.arenaRect.x + 40, this.expedition ? Math.min((this.arenaRect.x + this.arenaRect.width) - 40, f.x + 500) : (this.arenaRect.x + this.arenaRect.width) - 40);
+    const y = Phaser.Math.Between(this.expedition ? Math.max(this.arenaRect.y + 40, f.y - 500) : this.arenaRect.y + 40, this.expedition ? Math.min((this.arenaRect.y + this.arenaRect.height) - 40, f.y + 500) : (this.arenaRect.y + this.arenaRect.height) - 40);
     const blocked =
       this.obstacleRects.some((o) => x > o.x - r && x < o.right + r && y > o.y - r && y < o.bottom + r) ||
       this.chests.some((c) => Math.abs(x - c.x) < c.w / 2 + r && Math.abs(y - c.y) < c.h / 2 + r);
-    if (blocked) continue;
+    if (blocked || this.expedition && !(this.expedition.cleared.includes('river') && this.expedition.cleared.includes('village')) && y < 950) continue;
     // Score = distance to the nearest enemy (anywhere is fine if there are none).
     const score = enemies.length ? Math.min(...enemies.map((e) => Math.hypot(e.x - x, e.y - y))) : Math.random();
     if (score > bestScore) {
@@ -205,6 +231,48 @@ export function teleportSafe(this: CombatActionsContext, f: Fighter): void {
   this.fx.smoke(f.x, f.y, 16, 1.1);
   f.body.reset(best.x - r, best.y - r);
   this.fx.smoke(best.x, best.y, 12, 0.9);
+}
+
+/** 影步: the nearest enemy within `range` that can be seen and touched. */
+export function shadowStepTarget(this: CombatActionsContext, f: Fighter, range: number): Fighter | null {
+  const near = this.fighters.filter((o) => o.alive && f.isEnemy(o) && !o.untouchable && !o.trapped && !o.hidden
+    && Math.hypot(o.x - f.x, o.y - f.y) <= range);
+  return near.reduce<Fighter | null>((a, b) => (!a || f.distTo(b) < f.distTo(a) ? b : a), null);
+}
+
+/** 影步: reappear just behind the target (or beside them, if their back is against something), facing them. */
+export function shadowStep(this: CombatActionsContext, f: Fighter, range: number): void {
+  const t = shadowStepTarget.call(this, f, range);
+  if (!t) return;
+  const r = f.radius;
+  const gap = t.radius + r + 8;
+  let spot: { x: number; y: number } | null = null;
+  for (let i = 0; i < 8 && !spot; i++) {
+    // Straight behind first, then fanning round to either side.
+    const a = t.facing + Math.PI + (i % 2 ? 1 : -1) * Math.ceil(i / 2) * (Math.PI / 6);
+    const x = t.x + Math.cos(a) * gap;
+    const y = t.y + Math.sin(a) * gap;
+    const inside = x > this.arenaRect.x + r && x < (this.arenaRect.x + this.arenaRect.width) - r && y > this.arenaRect.y + r && y < (this.arenaRect.y + this.arenaRect.height) - r;
+    const blocked = this.obstacleRects.some((o) => x > o.x - r && x < o.right + r && y > o.y - r && y < o.bottom + r)
+      || this.chests.some((c) => Math.abs(x - c.x) < c.w / 2 + r && Math.abs(y - c.y) < c.h / 2 + r);
+    if (inside && !blocked) spot = { x, y };
+  }
+  if (!spot) return;
+  this.fx.shadowStep(f.x, f.y, spot.x, spot.y, f.color);
+  f.body.reset(spot.x - r, spot.y - r);
+  f.facing = Math.atan2(t.y - spot.y, t.x - spot.x);
+}
+
+/** 換影: you and the nearest enemy in range trade places. */
+export function swapPlaces(this: CombatActionsContext, f: Fighter, range: number): void {
+  const t = shadowStepTarget.call(this, f, range);
+  if (!t) return;
+  const mine = { x: f.x, y: f.y };
+  const theirs = { x: t.x, y: t.y };
+  this.fx.swapFlash(mine.x, mine.y, theirs.x, theirs.y, f.color);
+  f.warp(theirs.x, theirs.y);
+  t.warp(mine.x, mine.y);
+  f.facing = Math.atan2(mine.y - theirs.y, mine.x - theirs.x);
 }
 
 export function forTeam(this: CombatActionsContext, f: Fighter, apply: (t: Fighter) => void): void {

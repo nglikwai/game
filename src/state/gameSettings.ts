@@ -1,4 +1,4 @@
-import { isQuestMode, GAME_MODES, MAX_HUMANS, MAX_PLAYERS, QUEST, type GameMode, type QuestRule, type QuestSide } from '@/config';
+import { isPartyMode, isQuestMode, GAME_MODES, MAX_HUMANS, MAX_PLAYERS, QUEST, type GameMode, type QuestRule, type QuestSide } from '@/config';
 import { KEY_SETS, isKeySet, keyLabel } from '@/input/keyboard';
 import { parsePad } from '@/input/controllerIds';
 import { type Binds, type ControlId } from '@/input/contracts';
@@ -153,7 +153,7 @@ export function saveSettings() {
 }
 
 /** Modes where players pick a team in the lobby (Quest uses its own per-player faction selector). */
-export const usesTeams = (mode: GameMode) => mode !== 'ffa' && !isQuestMode(mode);
+export const usesTeams = (mode: GameMode) => mode !== 'ffa' && !isPartyMode(mode);
 
 /**
  * Deal everyone who is playing into two teams at random, as evenly as possible (with an odd number,
@@ -199,10 +199,10 @@ export function toggleSkill(slot: SlotConfig, id: string): EquipResult {
 /** Why the current setup can't start, or null if it can. */
 export function validate(s: GameSettings): string | null {
   // Quest: only P1–P4 play (the enemies come from the stage).
-  const slots = isQuestMode(s.mode) ? s.slots.slice(0, QUEST.partySlots) : s.slots;
+  const slots = isPartyMode(s.mode) ? s.slots.slice(0, QUEST.partySlots) : s.slots;
   const active = slots.filter((x) => x.control !== 'off');
-  if (isQuestMode(s.mode) && active.length < 1) return T().needOne;
-  if (!isQuestMode(s.mode) && active.length < 2) return T().needTwo;
+  if (isPartyMode(s.mode) && active.length < 1) return T().needOne;
+  if (!isPartyMode(s.mode) && active.length < 2) return T().needTwo;
   const humans = active.map((x) => x.control).filter((c) => c !== 'cpu');
   if (humans.length > MAX_HUMANS) return T().tooManyHumans(MAX_HUMANS);
   if (new Set(humans).size !== humans.length) return T().sameControls;

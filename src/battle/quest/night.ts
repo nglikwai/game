@@ -52,7 +52,7 @@ export function spawnNightBoss(this: QuestNightContext, partySize: number): void
   f.radius = r;
   f.damageScale = b.damage;
   this.stats[index] = f.stats;
-  this.sprites[index] = this.add.image(sp.x, sp.y, ninjaTexture(this, color)).setScale(r / 18 / RES);
+  this.sprites[index] = this.add.image(sp.x, sp.y, ninjaTexture(this, color, f.role.id)).setScale(r / 18 / RES);
   this.lSprites.add(this.sprites[index]);
   this.prevStates[index] = f.state;
   f.facing = Math.atan2(WORLD_CENTER.y - sp.y, WORLD_CENTER.x - sp.x);
@@ -142,7 +142,6 @@ export function renderNightFlames(this: QuestNightContext, now: number): void {
   const g = this.nightFlames;
   if (!g) return;
   g.clear();
-  const radius = QUEST.night.lantern * S;
   for (const candle of this.nightCandles) {
     const bob = Math.sin(now * 6 + candle.x) * 3;
     g.fillStyle(0x3a2a22, 1).fillRect(candle.x - 4, candle.y - 18, 8, 28);
@@ -160,7 +159,6 @@ export function renderNightFlames(this: QuestNightContext, now: number): void {
     g.fillStyle(0xfff1c9, 1).fillCircle(candle.x, candle.y - 18 - h * 0.4, 4);
     if (candle.warn === null) continue;
     const progress = Math.min(1, candle.warn / QUEST.night.flareWarn);
-    g.lineStyle(3, 0xffb45a, 0.45 + progress * 0.5).strokeCircle(candle.x, candle.y, radius);
-    g.fillStyle(0xff8a3a, 0.06 + progress * 0.14).fillCircle(candle.x, candle.y, radius * progress);
+    g.fillStyle(0xfff1c9, 0.5 + progress * 0.5).fillCircle(candle.x, candle.y - 25, 5 + progress * 4);
   }
 }

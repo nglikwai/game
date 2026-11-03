@@ -25,9 +25,9 @@ export const QUEST_ENEMY_BANNED = ['lifeline', 'sprint'];
 /** Weapons each role tends to pick (Ronin picks from everything). */
 const ROLE_WEAPONS: Record<RoleId, WeaponId[]> = {
   ronin: WEAPONS.map((w) => w.id),
-  samurai: ['hammer', 'bomb', 'flail', 'kusarigama', 'fan', 'staff', 'whip', 'yari'],
-  shinobi: ['daggers', 'ninjato', 'shuriken', 'fan', 'kusarigama', 'kunai', 'staff', 'nunchaku'],
-  mystic: ['talisman', 'fan', 'shuriken', 'bomb', 'kusarigama', 'kunai', 'whip'],
+  samurai: ['hammer', 'bomb', 'flail', 'kusarigama', 'fan', 'staff', 'whip', 'spade', 'yari'],
+  shinobi: ['daggers', 'ninjato', 'shuriken', 'fan', 'kusarigama', 'kunai', 'staff', 'nunchaku', 'windmill'],
+  mystic: ['talisman', 'fan', 'shuriken', 'bomb', 'kusarigama', 'kunai', 'whip', 'windmill'],
 };
 
 interface Pool {
@@ -36,16 +36,16 @@ interface Pool {
   team: string[];
 }
 
-const SURVIVAL: Pool = { any: ['meditate', 'second-wind', 'golden-bell', 'substitute'], team: ['healing-circle', 'lifeline', 'ward-circle'] };
-const OFFENSE: Pool = { any: ['arrow', 'fireball', 'fury', 'caltrops', 'thunder', 'reaper', 'holy-fire', 'sacred-tree', 'sacrifice'], team: ['war-drum'] };
-const UTILITY: Pool = { any: ['sprint', 'blink', 'flicker', 'stealth'], team: ['spirit-circle'] };
+const SURVIVAL: Pool = { any: ['meditate', 'second-wind', 'sweet-dew', 'golden-bell', 'substitute', 'bloodthirst', 'counter'], team: ['healing-circle', 'lifeline', 'ward-circle'] };
+const OFFENSE: Pool = { any: ['arrow', 'fireball', 'hook', 'chakram', 'fury', 'caltrops', 'thunder', 'reaper', 'holy-fire', 'sacred-tree', 'sacrifice'], team: ['war-drum'] };
+const UTILITY: Pool = { any: ['sprint', 'blink', 'flicker', 'stealth', 'shadow-step'], team: ['spirit-circle'] };
 
 /** Role flavour: skills each role likes a bit more (picked twice as often). */
 const FAVOURITES: Record<RoleId, string[]> = {
   ronin: [],
-  samurai: ['golden-bell', 'meditate', 'fury', 'war-drum', 'sacrifice', 'ward-circle'],
-  shinobi: ['substitute', 'blink', 'flicker', 'stealth', 'caltrops'],
-  mystic: ['healing-circle', 'spirit-circle', 'second-wind', 'fireball'],
+  samurai: ['golden-bell', 'meditate', 'fury', 'war-drum', 'sacrifice', 'ward-circle', 'bloodthirst', 'counter'],
+  shinobi: ['substitute', 'blink', 'flicker', 'stealth', 'caltrops', 'hook', 'shadow-step'],
+  mystic: ['healing-circle', 'spirit-circle', 'second-wind', 'fireball', 'sweet-dew', 'chakram'],
 };
 
 const pick = <T,>(a: T[]) => a[Math.floor(Math.random() * a.length)];
@@ -59,13 +59,20 @@ export function skillsExceptGroup(): string[] {
 }
 
 /** Finale bosses draw six skills from the non-group list. Every other enemy keeps a normal loadout. */
-export function questBossSkills(random: () => number = Math.random): string[] {
-  const pool = skillsExceptGroup().filter((id) => id !== 'sprint');
+export function questBossSkills(random: () => number = Math.random, exclude: readonly string[] = []): string[] {
+  // No 疾走, and no 換影 (a CPU has no good use for it).
+  const pool = skillsExceptGroup().filter((id) => id !== 'sprint' && id !== 'swap' && !exclude.includes(id));
   for (let i = pool.length - 1; i > 0; i--) {
     const j = Math.floor(random() * (i + 1));
     [pool[i], pool[j]] = [pool[j], pool[i]];
   }
   return pool.slice(0, QUEST_BOSS_SKILLS);
+}
+
+/** Twin wardens may share ordinary skills, but only one can carry 死神. */
+export function questBossSkillPair(random: () => number = Math.random): [string[], string[]] {
+  const first = questBossSkills(random);
+  return [first, questBossSkills(random, first.includes('reaper') ? ['reaper'] : [])];
 }
 
 const kindOf = (id: string) => SKILLS.find((s) => s.id === id)?.effect.kind;

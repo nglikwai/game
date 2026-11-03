@@ -1,3 +1,5 @@
+import { drawTowerDetails, renderTowerModel } from '@/rendering/towerArt';
+import { renderCursedTree } from '@/rendering/mapProps';
 import * as Phaser from 'phaser';
 import { MAIN_TOWER_HEAL, RESPAWN_TOWER_COST, TOWER_RESPAWN_HP, TOWER_RESPAWN_SOUL_KEEP, TEAM_RESPAWN, QUEST } from '@/config';
 import { Fighter } from '@/gameplay/Fighter';
@@ -11,9 +13,9 @@ import type { BattleScene } from '@/scenes/BattleScene';
 
 /** The state and operations this system needs from the scene. No runtime scene dependency. */
 type ObjectivesTowersContext = Phaser.Scene & Pick<BattleScene,
-  'damageTower' | 'deathTime' | 'destroyTower' | 'elapsed' | 'fighters'
+  'lFloor' | 'damageTower' | 'deathTime' | 'destroyTower' | 'elapsed' | 'fighters'
   | 'freeSpot' | 'fx' | 'groveCast' | 'grovePhase' | 'obstacleRects'
-  | 'over' | 'physics' | 'popText' | 'projectiles' | 'quest'
+  | 'mode' | 'over' | 'physics' | 'popText' | 'projectiles' | 'quest'
   | 'questTree' | 'questTreeCast' | 'releaseSnarePrisoner' | 'renderSnareTree' | 'renderTreeTower'
   | 'renderDragonHead' | 'renderWyvern' | 'rescueTreeSealed' | 'respawnTimers' | 'showBanner' | 'sideColor' | 'stats'
   | 'teamRespawnT' | 'towerHeals' | 'towers' | 'walls'
@@ -115,12 +117,16 @@ export function destroyTower(this: ObjectivesTowersContext, tw: Tower): void {
   sfx.wallBreak();
   this.fx.smoke(tw.x, tw.y, 24, 1.4);
   this.fx.hammerSmash(tw.x, tw.y, 50);
-  this.showBanner(tw.dragon ? T().dragonHeadDown(T().dragonHeads[tw.dragon]) : tw.wyvern ? T().wyvernDown(T().wyvernNames[tw.wyvern]) : tw.grove ? T().groveTreeDown(tw.grove) : tw.tree ? T().questTreeDestroyed : (tw.main ? T().mainTowerDown : T().towerDown)(T().teamNames[tw.team]), this.sideColor(tw.team));
+  this.showBanner(tw.expeditionBanner ? T().expeditionRallyStopped : tw.dragon ? T().dragonHeadDown(T().dragonHeads[tw.dragon]) : tw.wyvern ? T().wyvernDown(T().wyvernNames[tw.wyvern]) : tw.grove ? T().groveTreeDown(tw.grove) : tw.tree ? T().questTreeDestroyed : (tw.main ? T().mainTowerDown : T().towerDown)(T().teamNames[tw.team]), this.sideColor(tw.team));
   // The attackers get a short War Drum.
   for (const f of this.fighters) if (f.alive && f.team !== tw.team) f.empower(1.3, 5);
 }
 
 export function renderTower(this: ObjectivesTowersContext, g: Phaser.GameObjects.Graphics, over: Phaser.GameObjects.Graphics, tw: Tower, now: number): void {
+  if (tw.expeditionBanner) {
+    if (tw.alive) { over.fillStyle(0x1c242a, 1).fillRect(tw.x - 26, tw.y - 65, 52, 5); over.fillStyle(0xd5b170, 1).fillRect(tw.x - 26, tw.y - 65, 52 * tw.hp / tw.maxHp, 5); }
+    return;
+  }
   if (tw.dragon) {
     this.renderDragonHead(g, over, tw, now);
     return;
@@ -135,35 +141,38 @@ export function renderTower(this: ObjectivesTowersContext, g: Phaser.GameObjects
     return;
   }
   const color = this.sideColor(tw.team);
+  const rendered = renderTowerModel(this, tw, tw.x + (tw.shakeT > 0 ? Math.sin(now * 80) * 2 : 0));
   if (!tw.alive) {
     // Rubble where it stood.
     const k = tw.w / 44;
     g.fillStyle(0x4f4a42, 1).fillRect(tw.x - 18 * k, tw.y - 14 * k, 14 * k, 10 * k).fillRect(tw.x + 2 * k, tw.y - 4 * k, 16 * k, 12 * k).fillRect(tw.x - 12 * k, tw.y + 6 * k, 12 * k, 9 * k);
     return;
   }
-  // Aura on the ground, then range ring.
+  // Healing aura on the ground.
   const pulse = 0.5 + 0.5 * Math.sin(now * 2);
   g.fillStyle(color, 0.06 + pulse * 0.03).fillCircle(tw.x, tw.y, tw.aura);
   g.lineStyle(2, color, 0.3).strokeCircle(tw.x, tw.y, tw.aura);
-  g.lineStyle(1, color, 0.15).strokeCircle(tw.x, tw.y, tw.range);
-  const sx = tw.shakeT > 0 ? Phaser.Math.Between(-2, 2) : 0;
+  const sx = tw.shakeT > 0 ? Math.sin(now * 80) * 2 : 0;
   const x = tw.x + sx;
   const h = tw.w / 2;
-  // Stone base, wooden walls, tiled roof in team colour, gold finial.
-  g.fillStyle(0x000000, 0.35).fillRect(x - h + 6, tw.y - h + 8, tw.w, tw.h);
-  g.fillStyle(0x8d877a, 1).fillRect(x - h, tw.y - h, tw.w, tw.h);
-  g.lineStyle(2, 0x4f4a42, 1).strokeRect(x - h, tw.y - h, tw.w, tw.h);
-  over.fillStyle(0x5a3a1e, 1).fillRect(x - h + 6, tw.y - h + 6, tw.w - 12, tw.h - 12);
-  const roof = [{ x: x - h - 4, y: tw.y - h - 4 }, { x: x + h + 4, y: tw.y - h - 4 }, { x: x + h + 4, y: tw.y + h + 4 }, { x: x - h - 4, y: tw.y + h + 4 }];
-  over.fillStyle(color, 0.85).fillPoints(roof.map((p) => ({ x: x + (p.x - x) * 0.75, y: tw.y + (p.y - tw.y) * 0.75 })) as Phaser.Math.Vector2[], true);
-  over.lineStyle(2, 0x1e1e22, 1).lineBetween(x - h * 0.8, tw.y - h * 0.8, x + h * 0.8, tw.y + h * 0.8).lineBetween(x + h * 0.8, tw.y - h * 0.8, x - h * 0.8, tw.y + h * 0.8);
-  over.fillStyle(0xd9ae4a, 1).fillCircle(x, tw.y, tw.main ? 7 : 4);
-  if (tw.main) {
-    // Main tower: a second, smaller roof tier and gold trim.
-    const r2 = h * 0.45;
-    over.fillStyle(color, 1).fillRect(x - r2, tw.y - r2, r2 * 2, r2 * 2);
-    over.lineStyle(2, 0xd9ae4a, 1).strokeRect(x - r2, tw.y - r2, r2 * 2, r2 * 2).strokeRect(x - h, tw.y - h, tw.w, tw.h);
-    over.fillStyle(0xd9ae4a, 1).fillCircle(x, tw.y, 6);
+  if (rendered) drawTowerDetails(over, tw, x, color, now);
+  else {
+    // Stone base, wooden walls, tiled roof in team colour, gold finial.
+    g.fillStyle(0x000000, 0.35).fillRect(x - h + 6, tw.y - h + 8, tw.w, tw.h);
+    g.fillStyle(0x8d877a, 1).fillRect(x - h, tw.y - h, tw.w, tw.h);
+    g.lineStyle(2, 0x4f4a42, 1).strokeRect(x - h, tw.y - h, tw.w, tw.h);
+    over.fillStyle(0x5a3a1e, 1).fillRect(x - h + 6, tw.y - h + 6, tw.w - 12, tw.h - 12);
+    const roof = [{ x: x - h - 4, y: tw.y - h - 4 }, { x: x + h + 4, y: tw.y - h - 4 }, { x: x + h + 4, y: tw.y + h + 4 }, { x: x - h - 4, y: tw.y + h + 4 }];
+    over.fillStyle(color, 0.85).fillPoints(roof.map((p) => ({ x: x + (p.x - x) * 0.75, y: tw.y + (p.y - tw.y) * 0.75 })) as Phaser.Math.Vector2[], true);
+    over.lineStyle(2, 0x1e1e22, 1).lineBetween(x - h * 0.8, tw.y - h * 0.8, x + h * 0.8, tw.y + h * 0.8).lineBetween(x + h * 0.8, tw.y - h * 0.8, x - h * 0.8, tw.y + h * 0.8);
+    over.fillStyle(0xd9ae4a, 1).fillCircle(x, tw.y, tw.main ? 7 : 4);
+    if (tw.main) {
+      // Main tower: a second, smaller roof tier and gold trim.
+      const r2 = h * 0.45;
+      over.fillStyle(color, 1).fillRect(x - r2, tw.y - r2, r2 * 2, r2 * 2);
+      over.lineStyle(2, 0xd9ae4a, 1).strokeRect(x - r2, tw.y - r2, r2 * 2, r2 * 2).strokeRect(x - h, tw.y - h, tw.w, tw.h);
+      over.fillStyle(0xd9ae4a, 1).fillCircle(x, tw.y, 6);
+    }
   }
   // Health bar.
   const bw = tw.w + 10;
@@ -173,6 +182,7 @@ export function renderTower(this: ObjectivesTowersContext, g: Phaser.GameObjects
 
 export function renderTreeTower(this: ObjectivesTowersContext, g: Phaser.GameObjects.Graphics, over: Phaser.GameObjects.Graphics, tree: Tower, now: number): void {
   const x = tree.x + (tree.shakeT > 0 ? Math.sin(now * 80) * 3 : 0), y = tree.y;
+  const rendered = renderCursedTree(this, tree, x, y);
   if (!tree.alive) {
     g.fillStyle(0x24231f, 1).fillEllipse(x, y, 72 * S, 54 * S);
     g.lineStyle(5, 0x514536, 1).lineBetween(x - 38 * S, y + 12 * S, x + 26 * S, y - 18 * S);
@@ -189,23 +199,25 @@ export function renderTreeTower(this: ObjectivesTowersContext, g: Phaser.GameObj
   const pulse = 0.5 + 0.5 * Math.sin(now * 2);
   g.fillStyle(tint, (on ? 0.08 : 0.04) + pulse * 0.03).fillCircle(x, y, tree.aura);
   g.lineStyle(on ? 2 : 1, tint, on ? 0.55 : 0.2).strokeCircle(x, y, tree.aura);
-  for (let k = 0; k < 11; k++) {
-    const a = k * Math.PI * 2 / 11;
-    const length = (58 + (k % 3) * 10) * S * (slim < 1 ? 0.72 : 1);
-    const ex = x + Math.cos(a) * length, ey = y + Math.sin(a) * length;
-    const limb = Array.from({ length: 9 }, (_, n) => {
-      const t = n / 8, u = 1 - t;
-      return { x: u * u * x + 2 * u * t * (ex + 15 * S) + t * t * ex,
-        y: u * u * y + 2 * u * t * (y + Math.sin(a) * 20 * S) + t * t * ey };
-    });
-    g.lineStyle(9 * S * slim, wood, 1).strokePoints(limb as Phaser.Math.Vector2[], false);
-    g.lineStyle(1.5 * S * slim, tint, 0.8).strokePoints(limb as Phaser.Math.Vector2[], false);
-    const fork = limb[5], side = a + (k % 2 ? 0.65 : -0.65);
-    g.lineStyle(4 * S * slim, wood, 1).lineBetween(fork.x, fork.y, fork.x + Math.cos(side) * 28 * S * slim, fork.y + Math.sin(side) * 28 * S * slim);
+  if (!rendered) {
+    for (let k = 0; k < 11; k++) {
+      const a = k * Math.PI * 2 / 11;
+      const length = (58 + (k % 3) * 10) * S * (slim < 1 ? 0.72 : 1);
+      const ex = x + Math.cos(a) * length, ey = y + Math.sin(a) * length;
+      const limb = Array.from({ length: 9 }, (_, n) => {
+        const t = n / 8, u = 1 - t;
+        return { x: u * u * x + 2 * u * t * (ex + 15 * S) + t * t * ex,
+          y: u * u * y + 2 * u * t * (y + Math.sin(a) * 20 * S) + t * t * ey };
+      });
+      g.lineStyle(9 * S * slim, wood, 1).strokePoints(limb as Phaser.Math.Vector2[], false);
+      g.lineStyle(1.5 * S * slim, tint, 0.8).strokePoints(limb as Phaser.Math.Vector2[], false);
+      const fork = limb[5], side = a + (k % 2 ? 0.65 : -0.65);
+      g.lineStyle(4 * S * slim, wood, 1).lineBetween(fork.x, fork.y, fork.x + Math.cos(side) * 28 * S * slim, fork.y + Math.sin(side) * 28 * S * slim);
   }
   over.fillStyle(0x5a4534, 1).fillEllipse(x, y, 58 * S * slim, 76 * S * slim);
   over.lineStyle(2, tint, 1).strokeEllipse(x, y, 58 * S * slim, 76 * S * slim);
   over.lineStyle(2 * S, 0x382e27, 0.8).lineBetween(x - 8 * S, y + 10 * S, x - 4 * S, y + 30 * S).lineBetween(x + 11 * S, y + 13 * S, x + 8 * S, y + 33 * S);
+  }
   over.fillStyle(eye, 0.7 + pulse * 0.3).fillEllipse(x - 11 * S, y - 6 * S, 8 * S, 14 * S).fillEllipse(x + 11 * S, y - 6 * S, 8 * S, 14 * S);
   const bw = tree.w + 20;
   over.fillStyle(0x080b10, 0.9).fillRoundedRect(x - bw / 2, y - tree.h / 2 - 19, bw, 9, 3);
@@ -233,24 +245,25 @@ export function updateTeamRespawns(this: ObjectivesTowersContext, dt: number): v
     // Only the main tower can bring anyone back; the small towers can't.
     const home = this.towers.find((tw) => tw.alive && tw.main && tw.team === team);
     for (const f of dead) this.respawnTimers.delete(f);
-    if (dead.length === 0 || !home) {
+    const teamWiped = this.mode === 'team' && !this.fighters.some((f) => f.team === team && f.alive);
+    if (dead.length === 0 || !home || teamWiped) {
       this.teamRespawnT[team] = -1;
       continue;
     }
     const rescued = this.quest?.stage === QUEST.rescueStage && this.walls.length === 2 && this.walls.every((w) => w.rescued);
     const room = this.quest?.stage === QUEST.rescueStage
       ? (rescued ? 0 : QUEST.rescue.held) - this.fighters.filter((f) => f.alive && f.team === team).length
-      : 1;
+      : questEnemyRespawn ? QUEST.reinforcementBatch : 1;
     if (room <= 0) {
       this.teamRespawnT[team] = -1;
       continue;
     }
     if (this.teamRespawnT[team] < 0) this.teamRespawnT[team] = wait;
     this.teamRespawnT[team] -= dt;
-    // Countdown on the next one in line; the rest are waiting their turn.
-    dead.forEach((f, k) => this.respawnTimers.set(f, k === 0 ? Math.max(0, this.teamRespawnT[team]) : Infinity));
+    const bringing = Math.min(dead.length, room, questEnemyRespawn ? QUEST.reinforcementBatch : 1);
+    // Every member of the next wave shares its countdown.
+    dead.forEach((f, k) => this.respawnTimers.set(f, k < bringing ? Math.max(0, this.teamRespawnT[team]) : Infinity));
     if (this.teamRespawnT[team] > 0) continue;
-    const bringing = 1;
     const taken = this.fighters.filter((o) => o.alive).map((o) => ({ x: o.x, y: o.y }));
     for (let n = 0; n < bringing && home.alive; n++) {
       const f = dead[n];

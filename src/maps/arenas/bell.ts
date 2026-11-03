@@ -1,3 +1,4 @@
+import { paintScenery } from '@/maps/art/renderedProps';
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, paintLantern, paintLanternGlow, paintShadow, paintVignette,
@@ -99,6 +100,7 @@ function paintBell(ctx: Ctx, o: Obstacle) {
 }
 
 function paintPine(ctx: Ctx, o: Obstacle, rand: () => number) {
+  if (paintScenery(ctx, o)) return;
   for (let k = 3; k >= 0; k--) {
     ctx.fillStyle = ['#1e3a1e', '#2a4a24', '#36602e', '#4a7a3a'][k];
     ctx.beginPath();

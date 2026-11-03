@@ -1,3 +1,4 @@
+import { paintScenery } from '@/maps/art/renderedProps';
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, mirrored, paintLantern, paintLanternGlow, paintShadow,
@@ -137,6 +138,7 @@ function paintStonePath(ctx: Ctx, rand: () => number) {
 }
 
 function paintShrine(ctx: Ctx, o: Obstacle) {
+  if (paintScenery(ctx, o)) return;
   const l = o.x - o.w / 2;
   const t = o.y - o.h / 2;
   // Snow-covered roof seen from above, with dark eaves and a ridge.
@@ -224,6 +226,7 @@ function paintTorii(ctx: Ctx, x: number, y: number, vertical: boolean) {
 }
 
 export function paintPine(ctx: Ctx, o: Obstacle, rand: () => number) {
+  if (paintScenery(ctx, o)) return;
   blob(ctx, o.x + 8, o.y + 10, 34, 'rgba(60,80,110,0.45)');
   // Layers of needles from the outside in, getting lighter.
   for (const [r, color] of [[30, '#1f3b2a'], [22, '#28503a'], [14, '#326247']] as const) {

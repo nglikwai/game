@@ -9,7 +9,12 @@ module.exports = function sourceLoader({ navigator = {}, music = {}, sfx = {}, s
   const keys = {};
   const phaser = {
     Scene: class {},
-    Geom: { Rectangle: class {} },
+    Geom: { Rectangle: class {
+      constructor(x = 0, y = 0, width = 0, height = 0) { Object.assign(this, { x, y, width, height }); }
+      get right() { return this.x + this.width; }
+      get bottom() { return this.y + this.height; }
+      static Contains(r, x, y) { return x >= r.x && x <= r.right && y >= r.y && y <= r.bottom; }
+    } },
     Math: {
       Clamp: (v, min, max) => Math.max(min, Math.min(max, v)),
       Between: (min, max) => Math.floor((min + max) / 2),
@@ -18,7 +23,7 @@ module.exports = function sourceLoader({ navigator = {}, music = {}, sfx = {}, s
     Input: { Keyboard: { KeyCodes: new Proxy(keys, { get: (o, key) => o[key] ??= Object.keys(o).length + 1 }) } },
   };
   const context = vm.createContext({
-    console, performance, Math, structuredClone, DataView, Uint8Array, ArrayBuffer,
+    console, performance, Math, structuredClone, setTimeout, clearTimeout, DataView, Uint8Array, ArrayBuffer,
     window: { innerWidth: 1280, innerHeight: 720, devicePixelRatio: 1 },
     navigator: { userAgent: 'Node test', ...navigator },
     localStorage: { getItem: (k) => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v) },
@@ -27,6 +32,7 @@ module.exports = function sourceLoader({ navigator = {}, music = {}, sfx = {}, s
   function load(filename) {
     if (filename === 'phaser') return phaser;
     const absolute = path.resolve(__dirname, '..', filename.startsWith('@/') ? `src/${filename.slice(2)}` : filename);
+    if (/\.(png|webp|jpg|svg)$/.test(absolute)) return { default: '/src/' + path.relative(path.resolve(__dirname, '../src'), absolute) };
     if (cache.has(absolute)) return cache.get(absolute).exports;
     const module = { exports: {} };
     cache.set(absolute, module);
@@ -41,7 +47,7 @@ module.exports = function sourceLoader({ navigator = {}, music = {}, sfx = {}, s
       const target = id.startsWith('@/')
         ? path.resolve(__dirname, '../src', id.slice(2))
         : path.resolve(path.dirname(absolute), id);
-      return load(fs.existsSync(`${target}.ts`) ? `${target}.ts` : `${target}/index.ts`);
+      return load(/\.(png|webp|jpg|svg)$/.test(target) ? target : fs.existsSync(`${target}.ts`) ? `${target}.ts` : `${target}/index.ts`);
     };
     vm.runInContext(`(function(require, module, exports) { ${source}\n})`, context, { filename: absolute })(requireSource, module, module.exports);
     return module.exports;

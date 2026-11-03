@@ -1,3 +1,5 @@
+import { paintWaterSurface } from '@/maps/art/water';
+import { paintScenery } from '@/maps/art/renderedProps';
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import { GROVE } from '@/maps/quest/grove';
 import { SEALS } from '@/maps/quest/seals';
@@ -283,6 +285,7 @@ function paintBlood(ctx: Ctx, o: Obstacle, rand: () => number) {
   ctx.beginPath();
   ctx.roundRect(l, t, o.w, o.h, 8);
   ctx.fill();
+  paintWaterSurface(ctx, o, 'round', 'blood', rand);
   ctx.save();
   ctx.clip();
   for (let i = 0; i < Math.max(3, (o.w * o.h) / 1800); i++) blob(ctx, l + rand() * o.w, t + rand() * o.h, 8 + rand() * 18, 'rgba(255,90,90,0.18)');
@@ -401,6 +404,7 @@ function paintBrazier(ctx: Ctx, o: Obstacle) {
 }
 
 function paintObsidianRock(ctx: Ctx, o: Obstacle) {
+  if (paintScenery(ctx, o)) return;
   const l = o.x - o.w / 2;
   const t = o.y - o.h / 2;
   ctx.fillStyle = '#16121c';

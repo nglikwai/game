@@ -1,3 +1,4 @@
+import { paintScenery } from '@/maps/art/renderedProps';
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, paintShadow, paintVignette,
@@ -105,6 +106,7 @@ function paintTrapPlate(ctx: Ctx, z: TerrainZone) {
 }
 
 function paintPillar(ctx: Ctx, o: Obstacle) {
+  if (paintScenery(ctx, o)) return;
   const r = o.w / 2;
   ctx.fillStyle = '#2a2624';
   ctx.fillRect(o.x - r - 4, o.y - r - 4, o.w + 8, o.h + 8);

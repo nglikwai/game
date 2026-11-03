@@ -12,5 +12,5 @@ export function parsePad(id: string): { index: number; side?: PadSide } | null {
   return m ? { index: Number(m[1]) - 1, side: m[2] as PadSide | undefined } : null;
 }
 
-/** The usual choices; the lobby adds gamepads beyond the first four (and Joy-Con halves) as they show up. */
-export const CONTROL_OPTIONS: ControlId[] = ['off', 'kb1', 'kb2', 'kb3', 'kb4', 'pad1', 'pad2', 'pad3', 'pad4', 'cpu'];
+/** Base choices; the lobby adds directly connected controllers as they show up. */
+export const CONTROL_OPTIONS: ControlId[] = ['off', 'kb1', 'kb2', 'kb3', 'kb4', 'cpu'];

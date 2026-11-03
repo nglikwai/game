@@ -35,6 +35,19 @@ In **闖關**, choose **自由 / Free** under the faction rules to give each act
   each for a two-player team (scaled with team size), twice their previous HP, and thicker brickwork.
   Fallen players can respawn while their main tower stands.
 - **攻城戰 Siege**: destroy all three enemy towers to win.
+- **遠征闖關 Expedition — 霧林破陣 Mistwood Breach**: a connected forest world for up to four heroes,
+  roughly 5,000 × 3,200 battlefield pixels. The camera follows the human party and smoothly zooms out for
+  local co-op; a movement boundary keeps human players together. CPU allies follow and protect the party.
+  Explore the village and river outpost in either order, defeat both captains and their guards, then enter
+  the fortress to defeat the Thorn Commander. An optional healer rescue unlocks a one-use healing station.
+  The commander aims a charge for 0.5 seconds, crashes into stone pillars, raises temporary thorn walls,
+  and calls guards at half health. Destroy his rally banner to stop further reinforcements.
+  Stand beside a fallen ally for three uninterrupted seconds, away from nearby enemies, to revive them.
+  A party wipe offers checkpoint retry or equipment editing; cleared camps and the map seed survive both.
+  The fortress checkpoint activates after both captains fall. The minimap tracks exploration and objectives;
+  foreground trees fade near fighters. Trees vary between runs while roads and objectives remain connected.
+  CPU-only parties can navigate and demonstrate the stage. This first expedition uses the existing weapons,
+  four equipped skills, loading sequence and MVP/SVP results.
 - **闖關2 Quest 2**: a separate four-stage campaign containing 妖樹苑 Cursed Grove, 封印祭壇 Sealed Altars, 引魂燈道 Spirit Lantern Road, and the new 雙煞鬼門 Twin Warden Gate. Hold each altar for 8 seconds; escort the lantern against guards returning every 14 seconds. The finale pairs a hammer-wielding Crimson Warden with a talisman/fire-casting Jade Warden. Defeat both within 12 seconds of each other or the fallen one revives at 60% HP. Each warden has 180 + 70 HP per party member. Both campaigns keep the same party bonuses, loading sequence, setup editing, checkpoint retries and item/soul/stat carry; completing one does not enter the other.
 - **闖關 Quest**: up to 4 players (P1–P4, humans or CPU allies), with 5% faster movement, fight through four underworld (地獄) stages,
   each with its own map: 第一關 三途川 Sanzu River (defeat every enemy, two waves with a five-second break; cross the blood river on bone
@@ -53,7 +66,7 @@ In **闖關**, choose **自由 / Free** under the faction rules to give each act
   Changing setup preserves the stage-start items, soul and stats checkpoint. The underworld has its own music, with a boss theme for the last stage.
   **龍巢 Dragon's Lair** is one of the two semi-finals (each run draws one fight, two tactics, one dragon semi-final, then the finale): a three-headed dragon walks the
   right half of the cave, keeps its distance from the nearest fighter and turns to face it, so its heads can shoot in
-  any direction. Each head is a separate target riding on the body (120 + 650 HP per party member), and the heads take
+  any direction. Each head is a separate target riding on the body (90 + 450 HP per party member), and the heads take
   turns aiming at a fighter (the head glows while it takes aim, then locks for a moment before the shot). Shots are fast,
   reach across the whole cave and burst where they land (on a fighter, a stone or the wall) over a wide area, so step
   out of the way when a head starts glowing, or put a standing stone between you and the dragon. 炎首 fires a wide fan of three fireballs
@@ -65,7 +78,7 @@ In **闖關**, choose **自由 / Free** under the faction rules to give each act
   between its usual projectiles and a
   three-second beam sweeping through 90 degrees. Its head glows for 0.5 s first, with no warning lines. Fire breath
   burns, ice breath chills and freezes, and lightning breath shocks; beam control effects last at most 0.15 s and
-  damage ticks every 0.5 s at half projectile damage. Stone pillars and chests block the beam. Cutting off the firing
+  it hurts the moment it touches someone (with a flaring splash on them), then every 0.5 s while they stay in it, at half projectile damage. Stone pillars and chests block the beam. Cutting off the firing
   head interrupts it. Three guards (cave cultists: 70% HP, 85% damage)
   start in front of it, and while any head lives a fallen guard comes back beside the dragon every 12 s, up to three
   standing. To pass, cut off all three heads, then defeat the remaining guards. Healing herbs grow in the left half of
@@ -85,13 +98,13 @@ In **闖關**, choose **自由 / Free** under the faction rules to give each act
   fell both wyverns and the guards. Boulders and a standing stone give cover; herbs grow at the mouth of the gorge.
   In a Hell run the wyverns fight on Hell's side, which loses only when both wyverns and every guard fall.
   **赤砂伏擊 Red Sand Ambush** joins the first 「擊敗敵人」 phase, which draws one of four opening fights.
-  Heroes start together in a caravan yard covered in red sand, wind ripples and dunes; enemies attack from both flanks. Clear every enemy
+  Heroes start together on a ring of skulls in a hellish waste of scorched black rock and glowing lava cracks; enemies attack from both side walls. Clear every enemy
   to pass. Ambushers retain their original 125% role HP, normal damage, and two-to-four enemy scaling.
-  Four large sand funnels (240 design pixels across) surround safe central lanes: entering one slows, pulls inward
-  and deals 10 damage per second.
-  The dark core (18% of the pit radius) is instantly fatal, including while casting or holding a Revival Pill.
-  Weapon and barrel knockback can push either side into the pits. CPUs route around them; forced spawn positions
-  and random chests stay clear. Stone cover, explosive barrels and healing herbs provide room to fight back.
+  Four huge funnels of blood-red sand (580 × 280 design pixels) cover about 70% of the arena, leaving a cross of rock
+  between them. Inside one, the pull and the damage (3 up to 10 per second) grow toward the middle.
+  The small round core (10% of the pit's shorter radius) is instantly fatal, including while casting or holding a Revival Pill.
+  Weapon and barrel knockback can push either side into the pits. CPUs fight on the sand but route around each pit's
+  deep middle (the inner 40%), and never dash or shadow-step into it; forced spawn positions and random chests stay clear. Stone cover, explosive barrels and healing herbs provide room to fight back.
   Hell players take the ambushers' side. Randomized pit geometry and visible funnels stay aligned on retry.
   **引魂古道 Spirit Lantern Path** is a carrying trial in the six-stage tactical pool (two are drawn per run).
   Collect blue wandering spirits at the three springs and bring six back to the green lantern on the left.
@@ -149,11 +162,13 @@ Skills have distinct cast flourishes: healing lotuses, faceted golden shields, w
 and departure seals for ninja tricks. Team skills mark their living recipients, and Lifeline draws a thread to the revived
 ally. Thunder, Holy Fire, Sacred Tree and Reaper have separate ritual glyphs and matching target marks; their lighting
 stays within the caster's local circle. Holy Fire blooms into tapered flames and roots rise into a leafy cage.
-All fourteen weapons have their own motion and impact treatment: tapered fire and frost crescents, shuriken
+All sixteen weapons have their own motion and impact treatment: tapered fire and frost crescents, shuriken
 afterimages, three kunai trails, hammer debris, visible chain links and a spiked flail head, crossing dagger cuts,
 a pointed sword lunge, a travelling spear pressure ring, paper lightning charms and layered bomb pressure waves, nunchaku sticks whirled out to both sides,
 and a nine-section chain whip lashed along its S. 雙節棍 Nunchaku hits only to your left and right (nothing straight ahead
-or behind), so turn side-on to strike; 九節鞭 Chain Whip hits along an S-shaped band in front, leaving pockets in its bends.
+or behind), so turn side-on to strike; 九節鞭 Chain Whip hits along an S-shaped band in front, leaving pockets in its bends; 風車刃 Windmill Blade
+whirls three curved blades all round you, missing whoever stands between them; 月牙鏟 Crescent Spade scoops a U in front
+with its horns pointing forward, never reaching far ahead.
 Weapon-specific hit accents appear only when damage lands. Throwing glints use the game clock, so pausing
 also freezes them; all visual effects expire without changing weapon reach, damage or attack timing.
 火山口 Volcano Crater (fire vents erupt two at a time after a warning) · 傳送神社 Portal Shrine (three portal pairs) ·
@@ -178,10 +193,12 @@ Start positions are fixed but shuffled every round, and in team modes red's side
 ## Rules
 - **Roles**: 浪人 Ronin (balanced) · 武士 Samurai (140 HP, hard to interrupt, +40% healing received, 15% slower) · 忍者 Shinobi (80 HP,
   15% faster, cheaper movement skills) · 術士 Mystic (90 HP, 120 PE that recovers 25% faster, 10% shorter skill cooldowns). Set in the loadout window.
-- **HP** (red) never regenerates by itself. **PE / 體力** (yellow) does: fastest standing still (×1.7), slowest
-  while moving (×0.6). Attacks and skills cost PE.
-- **Weapons** use a shared hit-area baseline (`WEAPON_AREA`); Shuriken cover 25% more area with a wider lane at the same reach, and the Flail covers 15% more area. Damage, knockback and PE cost scale with swing time, so
-  every weapon has equal damage- and PE-per-second: fast ones hit soft, slow ones hit hard. While swinging, hits
+- **HP** (red) never regenerates by itself. **PE / 體力** (yellow) does, at a steady 12 per second
+  (Mystic ×1.25, ×2 in a friendly tower's aura), pausing 0.5 s after you spend some. Only skills cost PE.
+- **Weapons** use a shared hit-area baseline (`WEAPON_AREA`); Shuriken cover 25% more area with a wider lane at the same reach, and the Flail covers 15% more area. Swinging costs no PE; PE only pays for skills.
+  Damage and knockback scale with swing time, so fast weapons hit soft and slow ones hit hard. Each weapon's damage rate is
+  then scaled by its `power` (0.8–1.3): weapons that are easy or safe to land (long reach, all-round cover, a lunge) hit
+  softer, and short, slow or blind-spotted ones hit harder. While swinging, hits
   weaker than half your weapon's force don't interrupt you (poise).
   火扇 Fire Fan · 手裡劍 Shuriken · 大錘 Hammer · 雙匕 twin kunai · 流星錘 chain weight ·
   鎖鐮 Kusarigama (mid-range band, blind spot up close) · 焙烙玉 Fire Bomb (lands ~175 px away) ·
@@ -190,7 +207,11 @@ Start positions are fixed but shuffled every round, and in team modes red's side
   long reach, gaps between them) · 長槍 Yari Spear (a long, narrow thrust with a red tassel; strong reach,
   slower strikes and precise aiming, without moving the fighter forward).
 - **Skills**: each fighter equips up to 3 skills from one shared pool, in any combination, in the loadout window:
-  調息 Meditate, 回春 Second Wind, 飛箭 Arrow, 火球 Fireball, 疾走 Sprint, 閃步 Blink Dash, 霸氣 Fury (+35% attack, 8 s),
+  調息 Meditate, 回春 Second Wind, 飛箭 Arrow, 火球 Fireball, 鉤鎖 Hook Chain (a hook on a chain that drags the first enemy
+  it catches right up to you), 飛輪 Chakram (out 300 px and back, cutting everyone it passes each way), 甘露 Sweet Dew (heal
+  30 over 8 s while you keep fighting), 影步 Shadow Step (blink behind the nearest enemy), 換影 Shadow Swap (trade places
+  with the nearest enemy), 見切 Counter (block the next hit within 0.6 s and strike back), 疾走 Sprint, 閃步 Blink Dash, 霸氣 Fury (+35% attack, 8 s), 噬血 Bloodthirst (heal 40% of all the damage you deal
+  for 6 s),
   金鐘罩 Golden Bell (−35% damage taken, 7 s), 隱身術 Vanish (nearly invisible, +25% move speed; CPUs lose you), 替身術 Substitution
   (the next hit lands on a log), 撒菱 Caltrops (spikes that slow and hurt enemies), 捨身 Self-Sacrifice (charge for 0.7 s, rooted, with the blast area shown on the ground; then spend 30 of your own HP for a blast that deals 60 to every enemy around you; with 30 HP or less it costs your life, but still hits for 60), 瞬身術 Body Flicker (teleport far from enemies), 癒之陣 Healing Circle
   (heal the whole team), 回氣陣 Spirit Circle (team PE), 戰鼓 War Drum (team +20% damage, 10 s), 護體陣 Ward Circle (whole team −30% damage and knockback, 8 s), 聖火 Holy Fire / 天雷 Thunder / 死神 Reaper (see 魂 below),
@@ -261,6 +282,48 @@ a button so the browser sees them. Each single Joy-Con, held sideways, is its ow
 lobby card shows which controller is on that slot. A single Joy-Con has no aiming stick, so you aim where you move.
 Menus respect the split-pad grip settings too. When WebHID is ready for a Joy-Con side, it takes
 priority over browser gamepad input for that side, so a press cannot confirm and go Back through two input paths.
+**暴走 Berserk.** Every human player can spend 魂 on a short super state: hold the **next item** button
+(SL on a sideways Joy-Con, ZL / L on a Joy-Con half, LT on a gamepad, C / [ / B / Num− on the keyboard sets) for 0.4 s
+with at least one full 魂 level. A tap still just switches items. It spends every full level; more 魂 lasts longer and
+buffs harder (levels 1 / 2 / 3 / 4, tuned in `SOUL_RAGE`):
+
+| | 1 | 2 | 3 | 4 |
+|---|---|---|---|---|
+| Lasts | 6 s | 8 s | 10 s | 12 s |
+| Damage dealt | +15% | +30% | +45% | +60% |
+| Damage taken | −15% | −25% | −35% | −45% |
+| Knockback taken | −20% | −40% | −55% | −70% |
+| Walk speed | +10% | +17% | +24% | +32% |
+| Swing speed | +10% | +18% | +25% | +32% |
+| Weapon area | +20% | +35% | +50% | +70% |
+| Skill cooldowns / PE regen | ×1.25 / ×1.5 | ×1.5 / ×1.75 | ×1.75 / ×2 | ×2 / ×2.5 |
+| Extra | | | super armour (hits don't interrupt) | + 20% weapon lifesteal |
+
+PE refills when it starts, and no 魂 is gained while it lasts. CPUs and bosses never berserk. The player turns into an
+oni: a little larger and tinted, with horns, glowing eyes, burning headband tails and afterimages, inside a ring of
+flames whose colour shows the level (orange, crimson, violet, blue) and a ring that burns down with the time left.
+The 魂 diamonds glow in that colour when ready, the controller roars, and the first time you have 魂 a tip names your button.
+
+**Vibration and lights.** Controllers that can vibrate do so during fights (Chrome / Edge for normal gamepads); every
+pattern is tuned in `RUMBLE` (`src/input/rumble.ts`):
+| Event | Feel |
+|---|---|
+| Your weapon lands | crisp kick, harder and longer for heavier hits |
+| You're hit | deep thud by damage taken |
+| Knocked out / swallowed by a sand pit | one long full-strength rumble |
+| Low HP (under 30%) | a heartbeat, once until you heal back above it |
+| 魂 reaches level N | N pulses, stronger each level; level 4 ends on a long one |
+| 暴走 begins | deep roar, longer and stronger with the level |
+| Skill cast | light sharp tick |
+| A 魂 summon lands | deep boom that grows with the level spent |
+| 見切 blocks a hit | sharp snap |
+| A barrel blows up nearby | deep blast, fading with distance |
+| A Revival Pill saves you | three rising pulses |
+
+Joy-Cons and Pro Controllers connected directly (WebHID) also get HD rumble pitch (deep thuds are low, kicks are high),
+show the player number on their side lights (flashing while HP is low or knocked out), and light the HOME ring
+(Joy-Con (R) / Pro): a slow glow while a 魂 summon is ready, a fast pulse when the meter is full.
+
 **Controller Setup (手把設定)**, from the title screen or the 🎮 button in the fighter setup, lists every controller the browser reports (Chrome has 8 gamepad slots) with a live readout of every button and stick axis the browser reports (so you can see exactly what your Joy-Con sends), and what each one is doing in the game. For each controller you can:
 - pick **用法 (use as)**: *automatic* (by its name), *one player*, or *two players (left / right)*, which splits a joined Joy-Con pair into a left and a right Joy-Con (offered in the fighter setup's control selector as `手把 N・左 Joy-Con` / `右 Joy-Con`). Use this when the browser names your pair something the game doesn't recognise;
 - **握法 (grip)**, for split pads: *sideways* (the default, one Joy-Con per player) turns each stick and arrow set 90° the way the Joy-Con is held, the left one counter-clockwise and the right one clockwise, so "up" on the stick is "up" for you; *upright* leaves them as they are;
@@ -330,3 +393,25 @@ player input, audio, rendering, UI, localization, configuration and saved settin
 live in their owning folders. Quest maps and versus arenas are grouped separately.
 Run `npm run check` for architecture and TypeScript checks; `npm run build`
 also enforces these boundaries before producing the game bundle.
+
+## GitHub Pages deployment
+
+The game is published at https://nglikwai.github.io/game/ using
+`.github/workflows/deploy.yml`. In the repository's **Settings → Pages**, select
+**GitHub Actions** as the source. Every push to `main` runs the tests, builds the
+game and deploys `dist`. The workflow can also be started manually from Actions.
+Vite uses relative asset paths so the game works under the `/game/` project path.
+
+## Map scenery assets
+
+Normal and Quest maps share original Blender-rendered pine, cherry, bamboo,
+rock, ruin, pillar, lantern, shrine, crate, barrel and cursed-tree scenery, with material-specific ground
+wear and map palettes. Previews use the same artwork as battles. Source models
+are in `assets/blender/map-scenery.blend`; the reproducible export script is
+`scripts/blender/build_map_props.py`. See the architecture guide for regeneration
+and fallback rendering details. Blender is not needed to run or build the game.
+
+Towers use original Blender watchtower and two-tier keep models with team banners
+and visible roof damage. Rivers, ponds, springs and coastal water have clipped
+depth and caustic detail. Each fighter role has its own outfit, and walking steps
+animate beneath the body. These visuals share the existing gameplay geometry.

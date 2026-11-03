@@ -1,6 +1,5 @@
 import {
-  BODY_RADIUS, DAMAGE_PER_SEC, HITSTUN_PER_CYCLE, KNOCKBACK_PER_SEC,
-  PE_COST_PER_SEC, WEAPON_AREA,
+  BODY_RADIUS, DAMAGE_PER_SEC, HITSTUN_PER_CYCLE, KNOCKBACK_PER_SEC, SOUL_RAGE, WEAPON_AREA,
 } from '@/config';
 
 /** Hit shapes, all relative to the attacker's centre and facing angle. */
@@ -23,9 +22,19 @@ export type Shape =
    * An S-shaped band `width` wide whose centre line runs from `offset` to `offset + length` in front, swaying
    * `amplitude` to each side over `waves` full waves. The bends leave pockets it doesn't reach.
    */
-  | { kind: 'wave'; offset: number; length: number; amplitude: number; waves: number; width: number };
+  | { kind: 'wave'; offset: number; length: number; amplitude: number; waves: number; width: number }
+  /**
+   * `arms` curved blades `width` wide spiralling out around the fighter, like a pinwheel: each runs from `inner` to
+   * `outer` from the centre, turning `curl` radians as it goes. The first arm starts straight ahead.
+   */
+  | { kind: 'pinwheel'; arms: number; inner: number; outer: number; curl: number; width: number }
+  /**
+   * A U-shaped band in front, horns pointing forward: the part of a ring (`inner` to `outer`) round a point `center`
+   * ahead, spanning `angle` radians on the side facing the fighter. Nothing far ahead, inside the U, or behind.
+   */
+  | { kind: 'scoop'; center: number; inner: number; outer: number; angle: number };
 
-export type WeaponId = 'fan' | 'shuriken' | 'hammer' | 'daggers' | 'flail' | 'kusarigama' | 'bomb' | 'ninjato' | 'talisman' | 'staff' | 'kunai' | 'yari' | 'nunchaku' | 'whip' | 'thunder-fan' | 'fire-kunai';
+export type WeaponId = 'fan' | 'shuriken' | 'hammer' | 'daggers' | 'flail' | 'kusarigama' | 'bomb' | 'ninjato' | 'talisman' | 'staff' | 'kunai' | 'yari' | 'nunchaku' | 'whip' | 'windmill' | 'spade' | 'thunder-fan' | 'fire-kunai';
 
 export interface Weapon {
   id: WeaponId;
@@ -40,7 +49,8 @@ export interface Weapon {
   knockback: number;
   /** Speed of a forward lunge during the active frames, if the weapon has one (px/s). */
   lunge?: number;
-  peCost: number;
+  /** Damage-rate multiplier: easy or safe weapons hit softer, awkward or risky ones harder. */
+  power: number;
   hitstun: number;
 }
 
@@ -85,6 +95,21 @@ export function waveLine(s: Extract<Shape, { kind: 'wave' }>, n = 32): { x: numb
   });
 }
 
+/** Points along each arm of a pinwheel, in its local frame (x forward, y to the side). */
+export function pinwheelArms(s: Extract<Shape, { kind: 'pinwheel' }>, n = 16): { x: number; y: number }[][] {
+  return Array.from({ length: s.arms }, (_, arm) => Array.from({ length: n + 1 }, (_, k) => {
+    const u = k / n;
+    const a = (arm / s.arms) * Math.PI * 2 + s.curl * u;
+    const r = s.inner + (s.outer - s.inner) * u;
+    return { x: Math.cos(a) * r, y: Math.sin(a) * r };
+  }));
+}
+
+/** The centre lines of a band-shaped weapon (whip, pinwheel), in its local frame. */
+function bandLines(s: Extract<Shape, { kind: 'wave' | 'pinwheel' }>): { x: number; y: number }[][] {
+  return s.kind === 'wave' ? [waveLine(s)] : pinwheelArms(s);
+}
+
 const pathLength = (pts: readonly { x: number; y: number }[]) =>
   pts.slice(1).reduce((sum, p, k) => sum + Math.hypot(p.x - pts[k]!.x, p.y - pts[k]!.y), 0);
 
@@ -101,44 +126,98 @@ const wave = (width: number, amplitude: number, waves: number, offset: number): 
   return shape;
 };
 
-function make(id: WeaponId, name: string, zh: string, shape: Shape, cycle: number): Weapon {
+/** A pinwheel whose arms reach just far enough for their bands to cover WEAPON_AREA. */
+const pinwheel = (arms: number, width: number, curl: number): Shape => {
+  const shape = { kind: 'pinwheel' as const, arms, width, curl, inner: BODY_RADIUS, outer: BODY_RADIUS };
+  let lo = BODY_RADIUS;
+  let hi = BODY_RADIUS + A / width;
+  for (let k = 0; k < 40; k++) {
+    shape.outer = (lo + hi) / 2;
+    if (pathLength(pinwheelArms(shape, 64)[0]!) * width * arms < A) lo = shape.outer;
+    else hi = shape.outer;
+  }
+  return shape;
+};
+
+/** A scoop `angleDeg` wide round a point `center` ahead, from `inner` out to whatever covers WEAPON_AREA. */
+const scoop = (center: number, inner: number, angleDeg: number): Shape => {
+  const angle = (angleDeg * Math.PI) / 180;
+  return { kind: 'scoop', center, inner, angle, outer: Math.sqrt((2 * A) / angle + inner * inner) };
+};
+
+/** Points along the middle of a scoop's band, from one horn round to the other, in its local frame. */
+export function scoopLine(s: Extract<Shape, { kind: 'scoop' }>, n = 24): { x: number; y: number }[] {
+  const r = (s.inner + s.outer) / 2;
+  return Array.from({ length: n + 1 }, (_, k) => {
+    const a = Math.PI - s.angle / 2 + (s.angle * k) / n;
+    return { x: s.center + Math.cos(a) * r, y: Math.sin(a) * r };
+  });
+}
+
+/**
+ * Swinging is free; weapons are balanced by area, speed and damage instead. `power` scales the damage rate:
+ * long reach, all-round cover or a lunge make a weapon easy to land, so it hits softer; short reach,
+ * blind spots or a slow windup make it risky, so it hits harder.
+ */
+function make(id: WeaponId, name: string, zh: string, shape: Shape, cycle: number, power = 1): Weapon {
   return {
-    id, name, zh, shape, cycle,
+    id, name, zh, shape, cycle, power,
     windup: cycle * 0.45,
     active: 0.08,
-    damage: DAMAGE_PER_SEC * cycle,
+    damage: DAMAGE_PER_SEC * power * cycle,
     knockback: KNOCKBACK_PER_SEC * cycle,
-    peCost: PE_COST_PER_SEC * cycle,
     hitstun: HITSTUN_PER_CYCLE * cycle,
   };
 }
 
+/** Shape fields that are angles or counts, not lengths: scaling a shape leaves them alone. */
+const UNSCALED = new Set(['kind', 'angle', 'spread', 'count', 'waves', 'curl', 'arms']);
+
+/** The same shape with every length × `k` (so its area × k²). */
+export function scaleShape<S extends Shape>(shape: S, k: number): S {
+  const out: Record<string, unknown> = { ...shape };
+  for (const [key, value] of Object.entries(shape)) if (!UNSCALED.has(key) && typeof value === 'number') out[key] = value * k;
+  return out as S;
+}
+
+/** 暴走 at `level` (1–4): a wider hit area and a faster swing. Damage is boosted through the fighter instead. */
+export function rageWeapon(w: Weapon, level: number): Weapon {
+  const i = Math.max(0, Math.min(SOUL_RAGE.duration.length - 1, level - 1));
+  const swing = SOUL_RAGE.swing[i]!;
+  return { ...w, shape: scaleShape(w.shape, Math.sqrt(SOUL_RAGE.area[i]!)), cycle: w.cycle * swing, windup: w.windup * swing };
+}
+
 export const WEAPONS: Weapon[] = [
   // Fan-shaped flame sweep.
-  make('fan', 'Fire Fan', '火扇', sector(110), 0.5),
+  make('fan', 'Fire Fan', '火扇', sector(110), 0.5, 0.95),
   // Larger stars cover a wider lane while keeping their existing throwing distance.
-  make('shuriken', 'Shuriken', '手裡劍', rect(40, BODY_RADIUS, 1.25), 0.5),
-  make('hammer', 'Hammer', '大錘', circle(-10), 1.1),
-  make('daggers', 'Daggers', '雙匕', rect(110, 6), 0.32),
-  make('flail', 'Flail', '流星錘', ring(36, 1.15), 0.85),
+  make('shuriken', 'Shuriken', '手裡劍', rect(40, BODY_RADIUS, 1.25), 0.5, 0.8),
+  // Short and slow: the heaviest hits.
+  make('hammer', 'Hammer', '大錘', circle(-10), 1.1, 1.3),
+  make('daggers', 'Daggers', '雙匕', rect(110, 6), 0.32, 1.1),
+  make('flail', 'Flail', '流星錘', ring(36, 1.15), 0.85, 0.9),
   // Sickle on a chain: a curved band at mid range, with a blind spot up close.
-  make('kusarigama', 'Kusarigama', '鎖鐮', arc(60, 130), 0.7),
+  make('kusarigama', 'Kusarigama', '鎖鐮', arc(60, 130), 0.7, 1.05),
   // Thrown bomb: the same circle as the hammer, but landing far away. Slowest, hardest-hitting.
-  make('bomb', 'Fire Bomb', '焙烙玉', circle(104), 1.2),
+  make('bomb', 'Fire Bomb', '焙烙玉', circle(104), 1.2, 1.1),
   // A lunging slash: you dash forward through a long, narrow strip.
-  { ...make('ninjato', 'Ninjato', '忍刀', rect(56, 10), 0.6), lunge: 850 },
+  { ...make('ninjato', 'Ninjato', '忍刀', rect(56, 10), 0.6, 0.9), lunge: 850 },
   // Lightning strikes in a cross around you, all four directions at once.
-  make('talisman', 'Thunder Talisman', '雷符', cross(34), 0.9),
+  make('talisman', 'Thunder Talisman', '雷符', cross(34), 0.9, 0.95),
   // An icy staff swung through both ends at once: hits in front and behind, leaving frost.
-  make('staff', 'Ice Staff', '冰棍', twin(40), 0.65),
+  make('staff', 'Ice Staff', '冰棍', twin(40), 0.65, 0.95),
   // Three kunai thrown in a fan: long reach, but with gaps between them.
-  make('kunai', 'Kunai Volley', '苦無', rays(21, 20), 0.75),
+  make('kunai', 'Kunai Volley', '苦無', rays(21, 20), 0.75, 0.85),
   // A precise polearm thrust: longer and narrower than the shuriken, without a lunge.
-  make('yari', 'Yari Spear', '長槍', rect(28, BODY_RADIUS - 4), 0.9),
+  make('yari', 'Yari Spear', '長槍', rect(28, BODY_RADIUS - 4), 0.9, 0.85),
   // Twin sticks whirled out to both sides at once: fast, short, and blind straight ahead and behind.
-  make('nunchaku', 'Nunchaku', '雙節棍', wings(80), 0.45),
+  make('nunchaku', 'Nunchaku', '雙節棍', wings(80), 0.45, 1.15),
   // A nine-section chain whip lashed in an S across the front, leaving pockets in its bends.
-  make('whip', 'Chain Whip', '九節鞭', wave(36, 50, 1, BODY_RADIUS - 6), 0.8),
+  make('whip', 'Chain Whip', '九節鞭', wave(36, 50, 1, BODY_RADIUS - 6), 0.8, 0.95),
+  // Three curved blades whirled round you like a pinwheel: it hits all round, but enemies between the blades slip by.
+  make('windmill', 'Windmill Blade', '風車刃', pinwheel(3, 30, 1.5), 0.6),
+  // A monk's crescent spade: a U-shaped scoop in front with its horns pointing forward. Close in, never far ahead.
+  make('spade', 'Crescent Spade', '月牙鏟', scoop(100, 44, 200), 0.95, 1.15),
 ];
 
 /**
@@ -171,6 +250,8 @@ export function shapeArea(s: Shape): number {
     case 'rays': return s.count * s.length * s.width;
     case 'wings': return s.radius * s.radius * s.angle;
     case 'wave': return pathLength(waveLine(s, 64)) * s.width;
+    case 'pinwheel': return pathLength(pinwheelArms(s, 64)[0]!) * s.width * s.arms;
+    case 'scoop': return 0.5 * s.angle * (s.outer * s.outer - s.inner * s.inner);
   }
 }
 
@@ -187,6 +268,12 @@ export function shapeReach(s: Shape): number {
     case 'rays': return s.offset + s.length;
     case 'wings': return s.radius;
     case 'wave': return Math.max(...waveLine(s).map((p) => Math.hypot(p.x, p.y))) + s.width / 2;
+    case 'pinwheel': return s.outer + s.width / 2;
+    case 'scoop': {
+      // The tips of the horns, or the bottom of the U's outer edge, whichever is further.
+      const tip = Math.PI - s.angle / 2;
+      return Math.max(Math.hypot(s.center + Math.cos(tip) * s.outer, Math.sin(tip) * s.outer), Math.abs(s.center - s.outer));
+    }
   }
 }
 
@@ -248,11 +335,17 @@ export function shapeHits(
         shapeHits({ kind: 'rect', offset: s.offset, length: s.length, width: s.width }, ox, oy, a, tx, ty, tr));
     case 'wings':
       return d <= tr || [-1, 1].some((side) => shapeHits({ kind: 'sector', radius: s.radius, angle: s.angle }, ox, oy, facing + side * Math.PI / 2, tx, ty, tr));
-    case 'wave': {
+    case 'wave':
+    case 'pinwheel': {
       const lx = dx * fx + dy * fy;
       const ly = -dx * fy + dy * fx;
-      const line = waveLine(s);
-      return line.slice(1).some((b, k) => segmentDistance(lx, ly, line[k]!, b) <= s.width / 2 + tr);
+      return bandLines(s).some((line) => line.slice(1).some((b, k) => segmentDistance(lx, ly, line[k]!, b) <= s.width / 2 + tr));
+    }
+    case 'scoop': {
+      // The same test as an arc, round the point ahead and facing back toward the fighter.
+      const cx = ox + fx * s.center;
+      const cy = oy + fy * s.center;
+      return shapeHits({ kind: 'arc', inner: s.inner, outer: s.outer, angle: s.angle }, cx, cy, facing + Math.PI, tx, ty, tr);
     }
   }
 }
@@ -343,20 +436,24 @@ export function drawShape(
     case 'wings':
       for (const side of [-1, 1]) drawShape(g, { kind: 'sector', radius: s.radius, angle: s.angle }, ox, oy, facing + side * Math.PI / 2, color, alpha);
       break;
-    case 'wave': {
-      // The band: the centre line pushed out half the width to each side.
-      const line = waveLine(s);
-      const edge = (side: number) => line.map((p, k) => {
-        const a = line[Math.max(0, k - 1)]!;
-        const b = line[Math.min(line.length - 1, k + 1)]!;
-        const tl = Math.hypot(b.x - a.x, b.y - a.y) || 1;
-        const lx = p.x - ((b.y - a.y) / tl) * side * s.width / 2;
-        const ly = p.y + ((b.x - a.x) / tl) * side * s.width / 2;
-        return { x: ox + fx * lx - fy * ly, y: oy + fy * lx + fx * ly };
-      });
-      g.fillPoints([...edge(1), ...edge(-1).reverse()] as Phaser.Math.Vector2[], true);
+    case 'wave':
+    case 'pinwheel':
+      // Each band: its centre line pushed out half the width to each side.
+      for (const line of bandLines(s)) {
+        const edge = (side: number) => line.map((p, k) => {
+          const a = line[Math.max(0, k - 1)]!;
+          const b = line[Math.min(line.length - 1, k + 1)]!;
+          const tl = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+          const lx = p.x - ((b.y - a.y) / tl) * side * s.width / 2;
+          const ly = p.y + ((b.x - a.x) / tl) * side * s.width / 2;
+          return { x: ox + fx * lx - fy * ly, y: oy + fy * lx + fx * ly };
+        });
+        g.fillPoints([...edge(1), ...edge(-1).reverse()] as Phaser.Math.Vector2[], true);
+      }
       break;
-    }
+    case 'scoop':
+      drawShape(g, { kind: 'arc', inner: s.inner, outer: s.outer, angle: s.angle }, ox + fx * s.center, oy + fy * s.center, facing + Math.PI, color, alpha);
+      break;
   }
 }
 

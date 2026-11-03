@@ -43,11 +43,13 @@ test('pits use elliptical bounds and inward pull strengthens toward the fatal ce
 
 test('entering the rim immediately damages either team without stun; nearby safe ground takes no damage', () => {
   const { scene, make } = battle();
-  const hero = make(0, 0), enemy = make(4, 1), outside = make(1, 0, 1.2);
+  const hero = make(0, 0), enemy = make(4, 1), outside = make(1, 0, 1.05);
   scene.updateSandPits(0.25);
-  assert.equal(hero.hp, hero.maxHp - 2.5); assert.equal(enemy.hp, enemy.maxHp - 2.5);
+  // 80% out is depth 0.2: 10 dps × (0.3 + 0.7 × 0.2) for a quarter second.
+  const chip = 10 * (0.3 + 0.7 * 0.2) * 0.25;
+  assert.ok(Math.abs(hero.hp - (hero.maxHp - chip)) < 1e-9); assert.ok(Math.abs(enemy.hp - (enemy.maxHp - chip)) < 1e-9);
   assert.equal(hero.state, 'idle'); assert.equal(outside.hp, outside.maxHp);
-  assert.equal(hero.stats.taken, 2.5);
+  assert.ok(Math.abs(hero.stats.taken - chip) < 1e-9);
 });
 
 test('the pit center instantly kills through guards, casting and a Revival Pill; normal combat still allows pill revival', () => {
@@ -65,7 +67,7 @@ test('the pit center instantly kills through guards, casting and a Revival Pill;
 
 test('standing still sinks a fighter, outward movement escapes the edge, and knockback accelerates a fall', () => {
   const sink = battle(), f = sink.make(0, 0);
-  for (let k = 0; k < 80 && f.alive; k++) {
+  for (let k = 0; k < 800 && f.alive; k++) {
     f.update(0.025, emptyIntent());
     f.body.center.x += f.vx * 0.025; f.body.center.y += f.vy * 0.025;
     sink.scene.updateSandPits(0.025);
@@ -79,9 +81,9 @@ test('standing still sinks a fighter, outward movement escapes the edge, and kno
   }
   assert.equal(runner.alive, true);
   assert.equal(sandPitContains(escape.pit, runner.x, runner.y), false);
-  const pushed = battle(), victim = pushed.make(0, 0, 0.7);
+  const pushed = battle(), victim = pushed.make(0, 0, 0.25);
   victim.takeHit(1, -1, 0, 400, 0.3);
-  for (let k = 0; k < 20 && victim.alive; k++) {
+  for (let k = 0; k < 40 && victim.alive; k++) {
     victim.update(0.025, emptyIntent()); victim.body.center.x += victim.vx * 0.025;
     pushed.scene.updateSandPits(0.025);
   }
@@ -115,7 +117,7 @@ test('random layouts keep the visible pit center, pull, fatal core and safe spaw
   }
 });
 
-test('CPU waypoints can traverse two pits without entering a funnel or stopping on its rim', () => {
+test('CPU waypoints can cross the sand without entering any pit\'s deep middle or stopping', () => {
   const map = getMap('ambush'), pit = map.zones[0];
   const target = { x: 1100, y: pit.y }, at = { x: 180, y: pit.y };
   for (let step = 0; step < 400 && Math.hypot(at.x - target.x, at.y - target.y) > 8; step++) {
@@ -125,7 +127,8 @@ test('CPU waypoints can traverse two pits without entering a funnel or stopping 
     const amount = Math.min(8, distance);
     at.x += (goal.x - at.x) / distance * amount; at.y += (goal.y - at.y) / distance * amount;
     const world = toWorld(at);
-    assert.ok(map.zones.every((z) => !sandPitContains(z, world.x, world.y)));
+    const deep = (z) => ({ ...z, w: z.w * z.avoid, h: z.h * z.avoid });
+    assert.ok(map.zones.every((z) => !sandPitContains(deep(z), world.x, world.y)));
   }
   assert.ok(Math.hypot(at.x - target.x, at.y - target.y) <= 8);
 });
@@ -142,4 +145,44 @@ test('random chests avoid the pits and their edges', () => {
     scene.dropRandomChest(0);
   } finally { phaser.Math.Between = between; }
   assert.deepEqual(placed, safe);
+});
+
+test('the wide pits cover about 70% of the arena around a small round fatal core that CPUs keep away from', () => {
+  const { sandPitCore, sandPitDangers } = load('@/battle/environment/sandPits.ts');
+  const map = getMap('ambush');
+  let inside = 0, total = 0;
+  for (let x = ARENA.x; x < ARENA.x + ARENA.w; x += 6) for (let y = ARENA.y; y < ARENA.y + ARENA.h; y += 6) {
+    total++;
+    if (map.zones.some((z) => sandPitContains(z, x, y))) inside++;
+  }
+  assert.ok(inside / total > 0.66 && inside / total < 0.74);
+  const pit = map.zones[0];
+  assert.ok(sandPitCore(pit) < 20 * MAP_SCALE);
+  const danger = sandPitDangers(map)[0];
+  assert.ok(danger.ry > sandPitCore(pit) * 2 && danger.rx < pit.w * MAP_SCALE / 2);
+});
+
+test('a CPU dodging a swing will not dash into a pit\'s deep middle', () => {
+  const { AIController } = load('@/ai/AIController.ts');
+  const { SKILLS } = load('@/gameplay/skills.ts');
+  const dodges = (hazard) => {
+    const { scene, center, make } = battle();
+    const f = make(0, 0, 0), foe = make(4, 1, 0);
+    f.body.center = { x: center.x + 170, y: center.y };
+    foe.body.center = { x: center.x + 210, y: center.y };
+    foe.facing = Math.PI; foe.state = 'windup';
+    f.skills = [SKILLS.find((sk) => sk.id === 'blink')]; f.cooldowns = [0]; f.pe = f.maxPe;
+    const world = { fighters: scene.fighters, projectiles: [], objectives: [], chests: [],
+      fires: () => hazard ? [{ x: center.x, y: center.y, r: 120, rx: 120, ry: 120 }] : [] };
+    const ai = new AIController('hard');
+    const original = Math.random;
+    let dashed = 0;
+    try {
+      Math.random = () => 0;
+      for (let k = 0; k < 20; k++) if (ai.decide(f, world).skills[0]) dashed++;
+    } finally { Math.random = original; }
+    return dashed;
+  };
+  assert.ok(dodges(false) > 0);
+  assert.equal(dodges(true), 0);
 });

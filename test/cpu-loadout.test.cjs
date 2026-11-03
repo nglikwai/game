@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const load = require('./load-source.cjs')();
-const { QUEST_ENEMY_BANNED, questBossSkills, randomCpuEquipment, randomCpuLoadout, rollCpuLoadouts, skillsExceptGroup } = load('src/ai/loadouts.ts');
+const { QUEST_ENEMY_BANNED, questBossSkills, questBossSkillPair, randomCpuEquipment, randomCpuLoadout, rollCpuLoadouts, skillsExceptGroup } = load('src/ai/loadouts.ts');
 const { ROLES } = load('src/gameplay/roles.ts');
 const { WEAPONS } = load('src/gameplay/weapons.ts');
 const { skillById } = load('src/gameplay/skills.ts');
@@ -119,4 +119,21 @@ test('ordinary quest enemies equip at most four skills, never Lifeline, Sprint o
     assert.equal(new Set(gear.skills).size, 4);
     assert.ok(gear.skills.every((id) => id !== 'lifeline' && id !== 'sprint' && skillById(id).category !== 'team'));
   }
+});
+
+test('twin bosses may equip Reaper on only one boss across randomized loadouts', () => {
+  let seed = 712, reapers = 0;
+  const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
+  for (let i = 0; i < 100; i++) {
+    const pair = questBossSkillPair(random);
+    for (const skills of pair) {
+      assert.equal(skills.length, 6);
+      assert.equal(new Set(skills).size, 6);
+      assert.ok(skills.every(id => skillById(id).category !== 'team'));
+    }
+    const count = pair.filter(skills => skills.includes('reaper')).length;
+    assert.ok(count <= 1);
+    reapers += count;
+  }
+  assert.ok(reapers > 0, 'Reaper remains available to one of the bosses');
 });

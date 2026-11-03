@@ -92,3 +92,37 @@ test('all impact families draw finite geometry and release their effects', () =>
   assert.ok(calls() > 100);
   assert.equal(fx.effects.length, 0); assert.equal(fx.particles.length, 0);
 });
+
+test('throwing attacks show only the current weapon body before arrival, without origin lines or ghost weapons', () => {
+  for (const [method, life] of [['shurikenThrow', .16], ['kunaiVolley', .18], ['fireKunai', .22]]) {
+    const fx = new Fx();
+    if (method === 'shurikenThrow') fx[method](0, 0, 0, 18, 240, 0xffffff);
+    else fx[method](0, 0, [0], 18, 240, 0xffffff);
+    fx.update(.06);
+    const x = 18 + 222 * .06 / life;
+    const coords = [];
+    const g = new Proxy({}, { get: (_, key) => (...args) => {
+      if (['fillPoints', 'strokePoints'].includes(key)) coords.push(...args[0]);
+      if (key === 'lineBetween') coords.push({ x: args[0], y: args[1] }, { x: args[2], y: args[3] });
+      if (key === 'fillCircle') coords.push({ x: args[0], y: args[1] });
+      return g;
+    } });
+    fx.draw(g, g, g);
+    assert.ok(coords.length > 0, method);
+    for (const point of coords) assert.ok(Math.abs(point.x - x) <= 30, `${method}: a path or afterimage extends behind the weapon`);
+  }
+});
+
+test('stage hazard windups do not draw ground paths, while the live hazards still render', () => {
+  const { renderRollers, renderFlames } = load('src/battle/environment/hazards.ts');
+  const { g, calls } = graphics();
+  const scene = { g, gOver: g, gGlow: g, map: { rollers: { radius: 30 } },
+    rollWarn: { y: 300, dir: 1, t: .5 }, boulders: [],
+    flameMarks: [{ x: 100, y: 200, r: 80, t: .5 }], flamePatches: [] };
+  renderRollers.call(scene, 1); renderFlames.call(scene, 1);
+  assert.equal(calls(), 0, 'windup alone must not paint the attack area');
+  scene.boulders = [{ x: 300, y: 300, spin: 0 }];
+  scene.flamePatches = [{ x: 100, y: 200, r: 80, t: 0, life: 3 }];
+  renderRollers.call(scene, 1); renderFlames.call(scene, 1);
+  assert.ok(calls() > 20, 'the boulder and active fire must remain visible');
+});

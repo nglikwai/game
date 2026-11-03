@@ -271,3 +271,11 @@ test('the wyverns keep their distance from each other and stay inside their halv
   assert.ok(sun(scene).tower.y < moon(scene).tower.y);
   assert.ok(Math.hypot(sun(scene).tower.x - moon(scene).tower.x, sun(scene).tower.y - moon(scene).tower.y) <= W.maxGap * S + 40);
 });
+
+test('both wyverns restore two fallen guards in the same wave', () => {
+  const scene = gorge(), guards = [4, 5].map(i => fighter(i, 1));
+  scene.fighters = [fighter(0, 0), ...guards]; scene.placeWyverns(1);
+  guards.forEach(f => { f.state = 'dead'; }); scene.wyvernGuardT = 0;
+  step(scene, 0, 0);
+  assert.equal(guards.filter(f => f.alive).length, QUEST.wyverns.maxGuards);
+});

@@ -22,7 +22,7 @@ function localModule(specifier, file) {
     errors.push(`${relative(root, file)}: alias leaves src: ${specifier}`);
     return null;
   }
-  const found = [`${target}.ts`, `${target}/index.ts`].find(existsSync);
+  const found = (/\.(png|webp|jpg|svg)$/.test(target) && existsSync(target)) ? target : [`${target}.ts`, `${target}/index.ts`].find(existsSync);
   if (!found) errors.push(`${relative(root, file)}: unresolved module ${specifier}`);
   return found;
 }

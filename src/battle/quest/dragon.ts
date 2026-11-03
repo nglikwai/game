@@ -176,25 +176,27 @@ export function updateDragon(this: QuestDragonContext, dt: number): void {
   sfx.summonCharge(element === 'fire' ? 'soulFire' : element === 'thunder' ? 'soulThunder' : 'soulTree', warn);
 }
 
-/** While the dragon lives, a fallen guard comes back beside it now and then, up to four standing. */
+/** While the dragon lives, fallen guards return in pairs, within the living-guard cap. */
 function callGuard(this: QuestDragonContext, dt: number): void {
   const d = QUEST.dragon;
   this.dragonGuardT -= dt;
   if (this.dragonGuardT > 0) return;
   this.dragonGuardT = d.guardRespawn;
   const guards = this.fighters.filter((f) => f.team === DRAGON_TEAM && !f.boss);
-  const fallen = guards.find((f) => !f.alive);
-  if (!fallen || guards.filter((f) => f.alive).length >= d.maxGuards) return;
-  const b = this.dragonBody!;
-  const taken = this.fighters.filter((f) => f.alive).map((f) => ({ x: f.x, y: f.y }));
-  const spot = this.freeSpot(onBody(b, b.w * 0.2, b.h * 0.9), taken);
-  fallen.revive(spot.x, spot.y);
-  fallen.pocket.length = 0;
-  this.onRevived(fallen);
-  this.fx.respawnBeam(b.x, b.y, spot.x, spot.y, DRAGON_COLORS.fire);
-  this.fx.smoke(spot.x, spot.y, 12, 1);
-  this.popText(spot.x, spot.y - 40, T().dragonGuardBack, '#ffb08a');
-  sfx.respawn();
+  const room = d.maxGuards - guards.filter((f) => f.alive).length;
+  const fallen = guards.filter((f) => !f.alive).slice(0, Math.max(0, Math.min(QUEST.reinforcementBatch, room)));
+  for (const guard of fallen) {
+    const b = this.dragonBody!;
+    const taken = this.fighters.filter((f) => f.alive).map((f) => ({ x: f.x, y: f.y }));
+    const spot = this.freeSpot(onBody(b, b.w * 0.2, b.h * 0.9), taken);
+    guard.revive(spot.x, spot.y);
+    guard.pocket.length = 0;
+    this.onRevived(guard);
+    this.fx.respawnBeam(b.x, b.y, spot.x, spot.y, DRAGON_COLORS.fire);
+    this.fx.smoke(spot.x, spot.y, 12, 1);
+    this.popText(spot.x, spot.y - 40, T().dragonGuardBack, '#ffb08a');
+    sfx.respawn();
+  }
 }
 
 /** The aimed attack goes off: three fireballs, an ice shard (and one more shortly after), or one lightning bolt. */

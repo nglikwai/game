@@ -22,22 +22,24 @@ export function updateEscort(this: QuestEscortContext, dt: number): void {
   if (!lantern || this.over || this.paused || this.countdown > 0) return;
   advanceLantern(lantern, this.fighters, dt);
   if (!lantern.alive || lantern.arrived || lantern.lost) return;
-  const guard = this.fighters.find((f) => f.team === 1 && !f.alive);
-  if (!guard) { this.escortRespawnT = QUEST.escort.respawnEvery; return; }
+  const fallen = this.fighters.filter((f) => f.team === 1 && !f.alive);
+  if (!fallen.length) { this.escortRespawnT = QUEST.escort.respawnEvery; return; }
   this.escortRespawnT -= dt;
   if (this.escortRespawnT > 0) return;
-  // Alternate northern/southern ambushes ahead of the lantern, with room to react.
-  const side = guard.index % 2;
-  const spot = this.freeSpot({ x: Math.min(ARENA.x + ARENA.w - 90, lantern.x + 240 * S), y: side ? ARENA.y + ARENA.h - 70 : ARENA.y + 70 },
-    this.fighters.filter((f) => f.alive).map((f) => ({ x: f.x, y: f.y })));
-  guard.revive(spot.x, spot.y, guard.maxHp * TOWER_RESPAWN_HP);
-  guard.pocket.length = 0;
-  guard.selectedItem = 0;
-  guard.soul *= TOWER_RESPAWN_SOUL_KEEP;
-  this.onRevived(guard);
-  this.nameTags[guard.index]?.setVisible(true);
-  this.fx.smoke(spot.x, spot.y, 12, 1);
-  sfx.respawn();
+  for (const guard of fallen.slice(0, QUEST.reinforcementBatch)) {
+    // Alternate northern/southern ambushes ahead of the lantern, with room to react.
+    const side = guard.index % 2;
+    const spot = this.freeSpot({ x: Math.min(ARENA.x + ARENA.w - 90, lantern.x + 240 * S), y: side ? ARENA.y + ARENA.h - 70 : ARENA.y + 70 },
+      this.fighters.filter((f) => f.alive).map((f) => ({ x: f.x, y: f.y })));
+    guard.revive(spot.x, spot.y, guard.maxHp * TOWER_RESPAWN_HP);
+    guard.pocket.length = 0;
+    guard.selectedItem = 0;
+    guard.soul *= TOWER_RESPAWN_SOUL_KEEP;
+    this.onRevived(guard);
+    this.nameTags[guard.index]?.setVisible(true);
+    this.fx.smoke(spot.x, spot.y, 12, 1);
+    sfx.respawn();
+  }
   this.escortRespawnT = QUEST.escort.respawnEvery;
 }
 

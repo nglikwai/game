@@ -7,7 +7,7 @@ interface ArtDirection { material: Material; motif: Motif; light: string; trim: 
 const art = (material: Material, motif: Motif, light: string, trim: string, grain = 0): ArtDirection => ({ material, motif, light, trim, grain });
 
 /** Every arena has an explicit material and palette; no map falls back to a generic treatment. */
-export const MAP_ART: Record<MapId, ArtDirection> = {
+export const MAP_ART: Record<Exclude<MapId, 'expedition-forest'>, ArtDirection> = {
   courtyard: art('stone', 'temple', '#efc894', '#d5b274'),
   river: art('grass', 'wave', '#acd1a1', '#a9cbb6'),
   snow: art('snow', 'frost', '#c1dfff', '#c4d7e5'),
@@ -91,6 +91,7 @@ function clearGround(map: GameMap, x: number, y: number, pad = 16) {
 }
 
 function paintMapFinish(ctx: Ctx, map: GameMap) {
+  if (map.id === 'expedition-forest') return;
   const direction = MAP_ART[map.id];
   const seed = [...map.id].reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 17);
   const rand = mulberry32(seed);
@@ -102,6 +103,7 @@ function paintMapFinish(ctx: Ctx, map: GameMap) {
     if (!clearGround(map, x, y, 22)) continue;
     paintMaterial(ctx, x, y, direction, rand);
   }
+  paintGroundWear(ctx, map, direction, rand);
   // Secondary details bring the existing props out of the floor without changing their silhouette.
   for (const o of map.obstacles) paintPropFinish(ctx, o, direction, map.id);
   // A broad wash is baked into the texture once; live skill and hazard telegraphs remain above it.
@@ -110,6 +112,36 @@ function paintMapFinish(ctx: Ctx, map: GameMap) {
   ctx.fillStyle = light; ctx.fillRect(ARENA.x, ARENA.y, ARENA.w, ARENA.h);
   ctx.restore();
   paintBorder(ctx, direction);
+}
+
+/** Quiet patches of wear make the floor feel like a place without competing with skill telegraphs. */
+function paintGroundWear(ctx: Ctx, map: GameMap, a: ArtDirection, rand: () => number) {
+  for (let n = 0; n < 32; n++) {
+    const x = ARENA.x + 45 + rand() * (ARENA.w - 90), y = ARENA.y + 45 + rand() * (ARENA.h - 90);
+    if (!clearGround(map, x, y, 45)) continue;
+    const r = 18 + rand() * 23;
+    const wash = ctx.createRadialGradient(x, y, 0, x, y, r);
+    wash.addColorStop(0, a.trim + (a.material === 'snow' ? '15' : '12')); wash.addColorStop(1, a.trim + '00');
+    ctx.fillStyle = wash; ctx.beginPath(); ctx.ellipse(x, y, r, r * .65, 0, 0, Math.PI * 2); ctx.fill();
+    if (a.material === 'grass') {
+      // Ferns and ground cover, drawn low enough to stay distinct from solid plants.
+      ctx.strokeStyle = a.trim + '65'; ctx.lineWidth = 1;
+      for (let k = 0; k < 7; k++) {
+        const angle = k * 2.4, length = 5 + rand() * 7;
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.quadraticCurveTo(x + Math.cos(angle) * length * .5, y - 8, x + Math.cos(angle) * length, y + Math.sin(angle) * length * .4); ctx.stroke();
+      }
+    } else if (a.material === 'sand' || a.material === 'snow') {
+      ctx.strokeStyle = a.light + '25'; ctx.lineWidth = 1;
+      for (let k = 0; k < 3; k++) {
+        ctx.beginPath(); ctx.moveTo(x - r * .65, y + k * 5); ctx.quadraticCurveTo(x, y - 6 + k * 5, x + r * .65, y + k * 5); ctx.stroke();
+      }
+    } else if (a.material === 'stone' || a.material === 'ash') {
+      ctx.strokeStyle = '#080e1838'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(x - 9, y - 4); ctx.lineTo(x - 2, y); ctx.lineTo(x + 3, y - 2); ctx.lineTo(x + 10, y + 6); ctx.stroke();
+      ctx.fillStyle = a.light + '30';
+      for (let k = 0; k < 4; k++) ctx.fillRect(x + (rand() - .5) * 28, y + (rand() - .5) * 16, 1.5 + rand() * 2, 1.5);
+    }
+  }
 }
 
 function paintMaterial(ctx: Ctx, x: number, y: number, a: ArtDirection, rand: () => number) {

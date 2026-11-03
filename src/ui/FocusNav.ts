@@ -4,6 +4,8 @@ import { C } from '@/ui/theme';
 
 // ---------- focus navigation ----------
 
+export type FocusDirection = 'left' | 'right' | 'up' | 'down';
+
 export interface Focusable {
   id: string;
   /** Top-left and size, in game coordinates. */
@@ -27,6 +29,9 @@ export class FocusNav {
   private zoneById = new Map<string, Phaser.GameObjects.Zone>();
   /** Items whose mouse zone is currently clipped away (e.g. scrolled out of view). */
   private hidden = new Set<string>();
+  private neighbors = new Map<string, Partial<Record<FocusDirection, string | null>>>();
+  /** Rebuilt mouse zones must not steal focus from a stationary controller user. */
+  private controllerFocus = false;
   private hl: Phaser.GameObjects.Graphics;
   current: string | null = null;
   onBack?: () => void;
@@ -35,6 +40,20 @@ export class FocusNav {
 
   constructor(private scene: Phaser.Scene, private depth = 50) {
     this.hl = scene.add.graphics().setDepth(depth + 1);
+    scene.input?.on('pointermove', this.followPointer, this);
+    scene.events?.once('shutdown', this.destroy, this);
+  }
+
+  private followPointer(p: Phaser.Input.Pointer) {
+    if (!this.enabled) return;
+    this.controllerFocus = false;
+    for (const it of this.items.values()) {
+      if (this.hidden.has(it.id)) continue;
+      if (p.worldX >= it.x && p.worldX <= it.x + it.w && p.worldY >= it.y && p.worldY <= it.y + it.h) {
+        if (this.current !== it.id) this.focus(it.id, false);
+        return;
+      }
+    }
   }
 
   /** Forget all items (call before rebuilding a screen). Keeps the focused id if it comes back. */
@@ -44,6 +63,14 @@ export class FocusNav {
     this.zones = [];
     this.zoneById.clear();
     this.hidden.clear();
+    this.neighbors.clear();
+  }
+
+  has(id: string): boolean { return this.items.has(id); }
+
+  /** Explicit routes let separated groups, such as a footer, behave as one row. Null stops at an edge. */
+  setNeighbors(id: string, routes: Partial<Record<FocusDirection, string | null>>) {
+    if (this.items.has(id)) this.neighbors.set(id, { ...this.neighbors.get(id), ...routes });
   }
 
   add(item: Focusable) {
@@ -51,10 +78,11 @@ export class FocusNav {
     const z = this.scene.add.zone(item.x + item.w / 2, item.y + item.h / 2, item.w, item.h).setDepth(this.depth + 2);
     z.setInteractive({ useHandCursor: true });
     z.on('pointerover', () => {
-      if (this.enabled && this.current !== item.id) this.focus(item.id, false);
+      if (this.enabled && !this.controllerFocus && this.current !== item.id) this.focus(item.id, false);
     });
     z.on('pointerdown', (p: Phaser.Input.Pointer) => {
       if (!this.enabled) return;
+      this.controllerFocus = false;
       this.focus(item.id, false);
       if (item.onAdjust) {
         sfx.menuChange();
@@ -123,12 +151,15 @@ export class FocusNav {
   }
 
   destroy() {
+    this.scene.input?.off('pointermove', this.followPointer, this);
+    this.scene.events?.off('shutdown', this.destroy, this);
     this.reset();
     this.hl.destroy();
   }
 
   /** Returns true if the key was handled. */
   key(e: KeyboardEvent, source: 'keyboard' | 'gamepad' = 'keyboard'): boolean {
+    if (source === 'gamepad') this.controllerFocus = true;
     const K = Phaser.Input.Keyboard.KeyCodes;
     const it = this.current ? this.items.get(this.current) : undefined;
     switch (e.keyCode) {
@@ -172,12 +203,19 @@ export class FocusNav {
   private move(dx: number, dy: number) {
     const cur = this.current ? this.items.get(this.current) : undefined;
     if (!cur) return;
+    const direction: FocusDirection = dx ? dx < 0 ? 'left' : 'right' : dy < 0 ? 'up' : 'down';
+    const route = this.neighbors.get(cur.id)?.[direction];
+    if (route === null) return;
+    if (route && this.items.has(route) && !this.hidden.has(route)) {
+      this.focus(route);
+      return;
+    }
     const cx = cur.x + cur.w / 2;
     const cy = cur.y + cur.h / 2;
     let best: Focusable | null = null;
     let bestScore = Infinity;
     for (const it of this.items.values()) {
-      if (it === cur) continue;
+      if (it === cur || this.hidden.has(it.id)) continue;
       const ox = it.x + it.w / 2 - cx;
       const oy = it.y + it.h / 2 - cy;
       const along = ox * dx + oy * dy;

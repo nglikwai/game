@@ -102,7 +102,7 @@ export function updateGrove(this: QuestGroveContext, dt: number): void {
   }
 }
 
-/** While the respawn tree works, fallen enemies come back one at a time, never past four alive. */
+/** While the respawn tree works, fallen enemies return in pairs, never past four alive. */
 export function updateGroveRespawn(this: QuestGroveContext, dt: number): void {
   const tree = this.groveTrees.find((t) => t.grove === 'respawn' && t.alive);
   if (!tree) return;
@@ -114,19 +114,22 @@ export function updateGroveRespawn(this: QuestGroveContext, dt: number): void {
   }
   this.groveRespawnT -= dt;
   if (this.groveRespawnT > 0) return;
-  const guard = dead[0];
-  const spot = this.freeSpot({ x: tree.x + (guard.index % 2 ? 80 : -80), y: tree.y + 70 }, this.fighters.filter((f) => f.alive).map((f) => ({ x: f.x, y: f.y })));
-  guard.revive(spot.x, spot.y, guard.maxHp * TOWER_RESPAWN_HP);
-  guard.pocket.length = 0;
-  guard.selectedItem = 0;
-  guard.soul *= TOWER_RESPAWN_SOUL_KEEP;
-  this.nameTags[guard.index]?.setVisible(true);
-  this.onRevived(guard);
-  this.fx.respawnBeam(tree.x, tree.y, spot.x, spot.y, 0xc45a4a);
-  sfx.respawn();
-  this.popText(tree.x, tree.y - 70, T().groveRole('respawn'), '#e7a090');
-  // The same price as a Quest tower: 10% of max HP, and the last revive can fell the tree.
-  this.damageTower(tree, tree.maxHp * RESPAWN_TOWER_COST, undefined);
+  const room = QUEST.grove.maxEnemies - enemies.filter((f) => f.alive).length;
+  for (const guard of dead.slice(0, Math.min(QUEST.reinforcementBatch, room))) {
+    if (!tree.alive) break;
+    const spot = this.freeSpot({ x: tree.x + (guard.index % 2 ? 80 : -80), y: tree.y + 70 }, this.fighters.filter((f) => f.alive).map((f) => ({ x: f.x, y: f.y })));
+    guard.revive(spot.x, spot.y, guard.maxHp * TOWER_RESPAWN_HP);
+    guard.pocket.length = 0;
+    guard.selectedItem = 0;
+    guard.soul *= TOWER_RESPAWN_SOUL_KEEP;
+    this.nameTags[guard.index]?.setVisible(true);
+    this.onRevived(guard);
+    this.fx.respawnBeam(tree.x, tree.y, spot.x, spot.y, 0xc45a4a);
+    sfx.respawn();
+    this.popText(tree.x, tree.y - 70, T().groveRole('respawn'), '#e7a090');
+    // The same price as a Quest tower: 10% of max HP, and the last revive can fell the tree.
+    this.damageTower(tree, tree.maxHp * RESPAWN_TOWER_COST, undefined);
+  }
   this.groveRespawnT = QUEST.grove.respawnEvery;
 }
 
@@ -201,7 +204,4 @@ export function renderGroveCast(this: QuestGroveContext, now: number): void {
   const color = cast.spell.color;
   const progress = Math.min(1, cast.elapsed / cast.spell.warn);
   this.fx.summonCircle(this.g, this.gGlow, tree.x, tree.y, progress, color, now, cast.spell.kind);
-  this.fx.targetMark(this.gOver, cast.x, cast.y, progress, color, now, cast.spell.kind);
-  this.g.fillStyle(color, 0.08 + progress * 0.2).fillCircle(cast.x, cast.y, QUEST.grove.radius);
-  this.g.lineStyle(3, color, 0.7).strokeCircle(cast.x, cast.y, QUEST.grove.radius);
 }

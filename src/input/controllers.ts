@@ -3,7 +3,7 @@ import { halfLabels, labelsForPad, type PadSide } from '@/input/gamepads';
 import { readController, resolvePad } from '@/input/padSettings';
 import { directLabels, hidPad, hidState, isProPad } from '@/input/nintendoHid';
 import type { Difficulty } from '@/config';
-import { type Intent, emptyIntent, type Controller, type ControlId, type Binds, type Labels, type KeySetId } from '@/input/contracts';
+import { type Intent, emptyIntent, type Controller, type ControlId, type Binds, type Labels, type KeySetId, type HomeLight, type RumbleTone } from '@/input/contracts';
 import { parsePad } from '@/input/controllerIds';
 import { KEY_SETS, KeyboardController } from '@/input/keyboard';
 import { AIController } from '@/ai/AIController';
@@ -38,6 +38,16 @@ class GamepadController implements Controller {
     return this.side ? halfLabels(this.side) : labelsForPad(this.pad);
   }
 
+  /** The browser's dual-rumble effect, where the pad supports it (a joined Joy-Con pair shakes both halves). */
+  rumble(strength: number, ms: number, tone: RumbleTone = 'normal') {
+    const actuator = (this.pad as (Gamepad & { vibrationActuator?: { playEffect?(type: string, o: object): Promise<unknown> } }) | null)?.vibrationActuator;
+    // The heavy (strong) motor carries deep thuds; the light (weak) one carries sharp kicks.
+    const strong = tone === 'deep' ? strength : tone === 'sharp' ? strength * 0.3 : strength;
+    const weak = tone === 'deep' ? strength * 0.3 : tone === 'sharp' ? strength : Math.min(1, 0.2 + strength * 0.6);
+    actuator?.playEffect?.('dual-rumble', { duration: ms, strongMagnitude: strong, weakMagnitude: weak })
+      .catch(() => undefined);
+  }
+
   read(): Intent {
     const pad = this.pad;
     if (!pad) return emptyIntent();
@@ -51,6 +61,7 @@ class GamepadController implements Controller {
       skills: [edge[1], edge[2], edge[3], edge[6]],
       useItem: edge[4],
       nextItem: edge[5],
+      nextItemHeld: st.actions[5],
     };
   }
 }
@@ -70,6 +81,18 @@ class HidController implements Controller {
     return directLabels(pad);
   }
 
+  rumble(strength: number, ms: number, tone?: RumbleTone) {
+    hidPad(this.n)?.rumble(strength, ms, tone);
+  }
+
+  setLights(slot: number, flash: boolean) {
+    hidPad(this.n)?.setLights(slot, flash);
+  }
+
+  setHomeLight(mode: HomeLight) {
+    hidPad(this.n)?.setHomeLight(mode);
+  }
+
   read(): Intent {
     const pad = hidPad(this.n);
     if (!pad) return emptyIntent();
@@ -78,6 +101,6 @@ class HidController implements Controller {
     this.prev = [...st.actions];
     // A Joy-Con has no second stick. A Pro Controller aims with its right stick.
     const aim = isProPad(pad);
-    return { mx: st.mx, my: st.my, ax: aim ? st.ax : 0, ay: aim ? st.ay : 0, attack: edge[0], skills: [edge[1], edge[2], edge[3], edge[6]], useItem: edge[4], nextItem: edge[5] };
+    return { mx: st.mx, my: st.my, ax: aim ? st.ax : 0, ay: aim ? st.ay : 0, attack: edge[0], skills: [edge[1], edge[2], edge[3], edge[6]], useItem: edge[4], nextItem: edge[5], nextItemHeld: st.actions[5] };
   }
 }

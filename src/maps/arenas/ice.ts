@@ -1,3 +1,4 @@
+import { paintScenery } from '@/maps/art/renderedProps';
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, mirrored,
@@ -133,6 +134,7 @@ function paintHole(ctx: Ctx, o: Obstacle) {
 }
 
 function paintSnowyRock(ctx: Ctx, o: Obstacle) {
+  if (paintScenery(ctx, o)) return;
   blob(ctx, o.x + 5, o.y + 7, o.w * 0.7, 'rgba(60,80,110,0.45)');
   ctx.fillStyle = '#6b7380';
   ctx.beginPath();

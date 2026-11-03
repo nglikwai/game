@@ -1,8 +1,10 @@
+import { drawWeaponContact } from '@/rendering/impactArt';
+import { drawShotEmblem } from '@/rendering/skillEmblems';
 import * as Phaser from 'phaser';
-import { drawLog, drawShurikenStar, kunai } from '@/rendering/fighterArt';
+import { drawLog, drawShurikenStar, SHURIKEN_BATTLE_SCALE, kunai, spear, windmillWheel, crescentSpade, ninjato } from '@/rendering/fighterArt';
 import { SUMMON_LIGHT_RADIUS } from '@/config';
 import type { SkillEffect, SummonKind } from '@/gameplay/skills';
-import { waveLine, type Shape, type WeaponId } from '@/gameplay/weapons';
+import { scoopLine, waveLine, type Shape, type WeaponId } from '@/gameplay/weapons';
 
 /**
  * Short-lived visual effects: particles plus scripted effects (weapon strikes,
@@ -74,10 +76,15 @@ export class Fx {
           glow.fillStyle(flameColor(t), 0.42 * (1 - t)).fillCircle(p.x, p.y, p.size * (1 - t * 0.6));
           break;
         case 'spark':
-          glow.fillStyle(p.color, 1 - t).fillCircle(p.x, p.y, p.size * (1 - t));
+          // Velocity-aligned sparks leave sharp streaks, cooling to small glints as they slow.
+          glow.lineStyle(Math.max(.4, p.size * (1 - t) * .7), p.color, 1 - t)
+            .lineBetween(p.x - p.vx * .025, p.y - p.vy * .025, p.x, p.y);
+          glow.fillStyle(0xfff6dd, (1 - t) * .65).fillCircle(p.x, p.y, p.size * .4 * (1 - t));
           break;
         case 'dust':
-          over.fillStyle(p.color, 0.5 * (1 - t)).fillCircle(p.x, p.y, p.size * (0.6 + t));
+          { const r = p.size * (.6 + t);
+            over.fillStyle(p.color, .5 * (1 - t)).fillTriangle(p.x - r, p.y + r * .5, p.x + r * .15, p.y - r, p.x + r, p.y + r * .35);
+          }
           break;
         case 'smoke':
           over.fillStyle(p.color, 0.6 * (1 - t)).fillCircle(p.x, p.y, p.size * (0.5 + t * 1.2));
@@ -103,11 +110,11 @@ export class Fx {
   skillCast(getPos: () => { x: number; y: number }, e: SkillEffect, facing: number) {
     if (e.kind.startsWith('soul')) return; // Soul calls have their own continuous ritual.
     const kind = e.kind;
-    const heal = kind === 'channelHeal' || kind === 'instantHeal' || kind === 'teamHeal' || kind === 'revive';
-    const shield = kind === 'guard' || kind === 'teamGuard';
-    const fury = kind === 'powerUp' || kind === 'teamFury' || kind === 'sacrifice';
+    const heal = kind === 'channelHeal' || kind === 'instantHeal' || kind === 'regen' || kind === 'teamHeal' || kind === 'revive';
+    const shield = kind === 'guard' || kind === 'teamGuard' || kind === 'counter';
+    const fury = kind === 'powerUp' || kind === 'teamFury' || kind === 'sacrifice' || kind === 'lifesteal';
     const wind = kind === 'dash' || kind === 'speedBuff';
-    const shadow = kind === 'stealth' || kind === 'teleport' || kind === 'substitute';
+    const shadow = kind === 'stealth' || kind === 'teleport' || kind === 'substitute' || kind === 'shadowStep' || kind === 'swap';
     const shot = e.kind === 'projectile' ? e : null;
     const color = heal ? 0x80edbb : shield ? 0xffd376 : fury ? 0xff7958 : wind ? 0x89e4f4
       : shadow ? 0xb5a0f5 : kind === 'teamPe' ? 0x90c5ff : shot ? shot.color : 0xc4cbd9;
@@ -120,7 +127,8 @@ export class Fx {
       const { x, y } = at();
       const r = radius * (0.45 + 0.55 * Math.sin(Math.min(1, t * 2) * Math.PI / 2));
       const a = Math.sin(Math.PI * Math.min(1, t * 1.5)) * 0.5;
-      g.lineStyle(2, color, a).strokeCircle(x, y, r);
+      if (shot) drawShotEmblem(g, shot, x, y, facing, t, a);
+      else if (kind !== 'caltrops') g.lineStyle(2, color, a).strokeCircle(x, y, r);
       if (heal) {
         // Six petals opening flat on the ground.
         for (let k = 0; k < 6; k++) {
@@ -159,12 +167,10 @@ export class Fx {
           }
         }
       } else if (wind || shot) {
-        const c = Math.cos(facing), s = Math.sin(facing);
-        for (let k = -1; k <= 1; k++) {
-          const d = 18 + t * (shot ? 60 : 90);
-          const px = x + c * d - s * k * 12, py = y + s * d + c * k * 12;
-          g.lineStyle(k === 0 ? 3 : 1.5, color, fade * 0.8).lineBetween(px - c * 28, py - s * 28, px, py);
-          g.lineBetween(px, py, px - c * 9 - s * 6, py - s * 9 + c * 6);
+        for (let k = 0; k < 3; k++) {
+          const a = facing + k * Math.PI * 2 / 3 + t * 2;
+          const px = x + Math.cos(a) * 18, py = y + Math.sin(a) * 18;
+          g.fillStyle(color, fade).fillCircle(px, py, 2.5);
         }
       } else if (fury) {
         for (let k = 0; k < 7; k++) {
@@ -211,23 +217,6 @@ export class Fx {
 
   // ---------- weapon strikes ----------
 
-  /** A tapered crescent, built inside the weapon's actual radial band. */
-  private arcRibbon(getPos: () => { x: number; y: number }, start: number, span: number, inner: number, outer: number, color: number, life = 0.22) {
-    this.effect('glow', life, (g, t) => {
-      const { x, y } = getPos();
-      const head = Math.min(1, t * 3 + 0.15), tail = Math.max(0, head - 0.65);
-      const outside = [], inside = [];
-      for (let k = 0; k <= 12; k++) {
-        const u = k / 12, a = start + (tail + (head - tail) * u) * span;
-        const r = inner + (outer - inner) * Math.sin(u * Math.PI / 2);
-        outside.push({ x: x + Math.cos(a) * r, y: y + Math.sin(a) * r });
-        inside.push({ x: x + Math.cos(a) * inner, y: y + Math.sin(a) * inner });
-      }
-      g.fillStyle(color, 0.28 * (1 - t)).fillPoints([...outside, ...inside.reverse()] as Phaser.Math.Vector2[], true);
-      g.lineStyle(2 * (1 - t), 0xf0f6ff, 0.75 * (1 - t)).strokePoints(outside as Phaser.Math.Vector2[], false);
-    });
-  }
-
   /** Arrival glints run on the scene clock, so pauses and scene changes cannot leave delayed timers. */
   private arrivalFlash(x: number, y: number, color: number, delay: number) {
     const life = delay + 0.14;
@@ -249,39 +238,75 @@ export class Fx {
     }
   }
 
+  /** 見切: a bright parry flash, two crossing cuts and a ring of sparks. */
+  counterFlash(x: number, y: number) {
+    this.sparks(x, y, 0xe8f2ff, 10);
+    this.effect('glow', 0.3, (g, t) => {
+      const r = 18 + t * 26;
+      g.lineStyle(3 * (1 - t), 0xe8f2ff, 0.9 * (1 - t)).strokeCircle(x, y, r);
+      for (const a of [Math.PI / 4, -Math.PI / 4]) {
+        const l = 26 * Math.min(1, t * 3);
+        g.lineStyle(3 * (1 - t), 0xffffff, 1 - t).lineBetween(x - Math.cos(a) * l, y - Math.sin(a) * l, x + Math.cos(a) * l, y + Math.sin(a) * l);
+      }
+    });
+  }
+
+  /** 影步: smoke at departure and arrival. */
+  shadowStep(fromX: number, fromY: number, toX: number, toY: number, color: number) {
+    this.smoke(fromX, fromY, 12, 0.9);
+    this.smoke(toX, toY, 8, 0.7);
+  }
+
+  /** 換影: a puff of smoke at both spots. */
+  swapFlash(ax: number, ay: number, bx: number, by: number, color: number) {
+    this.smoke(ax, ay, 10, 0.8);
+    this.smoke(bx, by, 10, 0.8);
+  }
+
+  /** 飛輪 in flight: a four-bladed steel ring, spinning. */
+  drawChakram(g: Phaser.GameObjects.Graphics, x: number, y: number, r: number, spin: number) {
+    g.lineStyle(3, 0xd0d8e0, 1).strokeCircle(x, y, r * 0.65);
+    for (let k = 0; k < 4; k++) {
+      const a = spin + (k * Math.PI) / 2;
+      const tip = { x: x + Math.cos(a) * r * 1.25, y: y + Math.sin(a) * r * 1.25 };
+      const base = { x: x + Math.cos(a - 0.7) * r * 0.65, y: y + Math.sin(a - 0.7) * r * 0.65 };
+      const back = { x: x + Math.cos(a + 0.35) * r * 0.65, y: y + Math.sin(a + 0.35) * r * 0.65 };
+      g.fillStyle(0xe8eef6, 1).fillTriangle(base.x, base.y, tip.x, tip.y, back.x, back.y);
+    }
+    g.fillStyle(0x3a2a1c, 1).fillCircle(x, y, r * 0.25);
+  }
+
+  /** 鉤鎖 in flight: the chain from the thrower to the hook. */
+  drawChain(g: Phaser.GameObjects.Graphics, x: number, y: number, tx: number, ty: number, alpha: number) {
+    this.chainLinks(g, x, y, tx, ty, alpha);
+  }
+
+  /** 鉤鎖 landing: the chain stays taut between thrower and victim while they are dragged in. */
+  hookPull(from: () => { x: number; y: number }, to: () => { x: number; y: number }) {
+    const t0 = to();
+    this.sparks(t0.x, t0.y, 0xdfe6f0, 6);
+    this.effect('over', 0.35, (g, t) => {
+      const a = from();
+      const b = to();
+      this.chainLinks(g, a.x, a.y, b.x, b.y, 1 - t * 0.6);
+      g.lineStyle(2, 0xdfe6f0, 0.9 * (1 - t)).strokeCircle(b.x, b.y, 10 + t * 6);
+    });
+  }
+
   /** Small accents on confirmed hits distinguish steel, blunt, fire and lightning impacts. */
   weaponImpact(id: WeaponId, x: number, y: number, facing: number, accent: number) {
     if (id === 'staff') return; // Its existing frost burst also communicates the chill debuff.
-    const fire = id === 'fan' || id === 'bomb' || id === 'fire-kunai', heavy = id === 'hammer' || id === 'flail' || id === 'nunchaku';
+    const fire = id === 'fan' || id === 'bomb' || id === 'fire-kunai', heavy = id === 'hammer' || id === 'flail' || id === 'nunchaku' || id === 'spade';
     const lightning = id === 'talisman' || id === 'thunder-fan';
     const color = fire ? 0xffbc67 : lightning ? 0xb5dcff : heavy ? 0xe8cc99 : accent;
-    this.effect('over', 0.24, (g, t) => {
-      for (let k = 0; k < (heavy ? 6 : 3); k++) {
-        const a = facing + k * Math.PI * 2 / (heavy ? 6 : 3);
-        const r = 5 + t * (heavy ? 25 : 18), px = x + Math.cos(a) * r, py = y + Math.sin(a) * r - (heavy ? Math.sin(t * Math.PI) * 10 : 0);
-        if (heavy) {
-          g.fillStyle(color, 0.8 * (1 - t)).fillTriangle(px - 3, py + 2, px + 1, py - 4, px + 4, py + 3);
-        } else {
-          g.lineStyle(2, color, 0.8 * (1 - t)).lineBetween(px, py, px + Math.cos(a) * 9, py + Math.sin(a) * 9);
-        }
-      }
-    });
+    this.effect('over', 0.24, (g, t) => drawWeaponContact(g, id, x, y, facing, color, t));
     if (fire) for (let k = 0; k < 3; k++) this.ember(x, y);
   }
 
   /** 雷扇: the fire fan's sweep, in lightning. */
   thunderFan(x: number, y: number, facing: number, radius: number, spread: number) {
-    this.arcRibbon(() => ({ x, y }), facing - spread / 2, spread, radius * 0.45, radius * 0.96, 0x8ec8ff, 0.28);
-    this.effect('floor', 0.4, (g, t) => {
-      g.lineStyle(3, 0xd7ecff, 0.35 * (1 - t)).beginPath().arc(x, y, radius * 0.86, facing - spread * 0.48, facing + spread * 0.48, false).strokePath();
-    });
+
     this.effect('glow', 0.2, (g, t) => {
-      const a0 = facing - spread / 2;
-      const a1 = a0 + spread * Math.min(1, t * 1.6);
-      g.lineStyle(12 * (1 - t), 0xf4fbff, 0.75 * (1 - t));
-      g.beginPath();
-      g.arc(x, y, radius * 0.78, a0, a1, false);
-      g.strokePath();
       for (let k = 0; k < 5; k++) {
         const a = facing + (k - 2) * spread * 0.18;
         let px = x + Math.cos(a) * radius * 0.2;
@@ -309,15 +334,6 @@ export class Fx {
 
   /** 火扇: a sweep of flame across the fan-shaped hit area. */
   flameFan(x: number, y: number, facing: number, radius: number, spread: number) {
-    this.arcRibbon(() => ({ x, y }), facing - spread / 2, spread, radius * 0.5, radius * 0.94, 0xff8a38, 0.25);
-    this.effect('floor', 0.55, (g, t) => {
-      g.lineStyle(2, 0xb86835, 0.28 * (1 - t)).beginPath().arc(x, y, radius * 0.82, facing - spread * 0.48, facing + spread * 0.48, false).strokePath();
-      for (let k = 0; k < 7; k++) {
-        const a = facing - spread * 0.45 + k * spread * 0.15;
-        const r = radius * (0.35 + t * 0.55);
-        g.lineStyle(2, 0xffc777, 0.5 * (1 - t)).lineBetween(x + Math.cos(a) * r, y + Math.sin(a) * r, x + Math.cos(a) * (r + 10), y + Math.sin(a) * (r + 10));
-      }
-    });
     for (let i = 0; i < 48; i++) {
       const a = facing + (Math.random() - 0.5) * spread;
       const r0 = 14 + Math.random() * 10;
@@ -326,14 +342,9 @@ export class Fx {
       const speed = ((radius - r0) / life) * (1.1 + Math.random() * 0.9);
       this.add({ kind: 'flame', x: x + Math.cos(a) * r0, y: y + Math.sin(a) * r0, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, life, size: 6 + Math.random() * 7, drag: 0.04, color: 0 });
     }
-    // A bright arc sweeping across the fan.
-    this.effect('glow', 0.16, (g, t) => {
-      const a0 = facing - spread / 2;
-      const a1 = a0 + spread * Math.min(1, t * 1.4);
-      g.lineStyle(10 * (1 - t), 0xffc04a, 0.8 * (1 - t));
-      g.beginPath();
-      g.arc(x, y, radius * 0.75, a0, a1, false);
-      g.strokePath();
+    this.effect('over', 0.2, (g, t) => {
+      const px = x + Math.cos(facing) * 18, py = y + Math.sin(facing) * 18;
+      g.fillStyle(0xffdc8a, 1 - t).fillCircle(px, py, 5 * (1 - t));
     });
   }
 
@@ -345,18 +356,10 @@ export class Fx {
     this.effect('over', life + 0.12, (g, t) => {
       const k = Math.min(1, t * ((life + 0.12) / life));
       const d = from + (to - from) * k;
-      const sx = x + c * from;
-      const sy = y + s * from;
       const px = x + c * d;
       const py = y + s * d;
-      g.lineStyle(5, color, 0.5 * (1 - t)).lineBetween(sx, sy, px, py);
-      g.lineStyle(2.5, 0xffffff, 0.9 * (1 - t)).lineBetween(sx, sy, px, py);
       if (k < 1) {
-        for (const lag of [34, 18]) {
-          const past = Math.max(from, d - lag);
-          drawShurikenStar(g, x + c * past, y + s * past, 5, t * 40 - lag * 0.1);
-        }
-        drawShurikenStar(g, px, py, 10, t * 40);
+        drawShurikenStar(g, px, py, 10 * SHURIKEN_BATTLE_SCALE, t * 40);
       }
     });
     const ex = x + c * to;
@@ -364,21 +367,16 @@ export class Fx {
     this.arrivalFlash(ex, ey, 0xe8ecf4, life);
   }
 
-  /** 冰棍: the staff whips through both ends, trailing frost and leaving ice crystals at the tips. */
+  /** 冰棍: the staff whips through both ends, with ice crystals at the tips. */
   staffSweep(getPos: () => { x: number; y: number }, facing: number, length: number, width: number) {
-    for (const off of [0, Math.PI]) this.arcRibbon(getPos, facing + off - Math.PI / 2, Math.PI, length * 0.75, length, 0xa1ddff, 0.3);
     this.effect('over', 0.3, (g, t) => {
       const { x, y } = getPos();
       const a = facing + Math.PI / 2 - t * Math.PI;
       const c = Math.cos(a);
       const s = Math.sin(a);
-      g.lineStyle(width * 0.5 * (1 - t), 0xbfe9ff, 0.4 * (1 - t)).lineBetween(x - c * length, y - s * length, x + c * length, y + s * length);
+      g.lineStyle(4, 0x608eae, 1 - t).lineBetween(x - c * length, y - s * length, x + c * length, y + s * length);
       g.lineStyle(2, 0xffffff, 0.7 * (1 - t)).lineBetween(x - c * length, y - s * length, x + c * length, y + s * length);
       for (const d of [1, -1]) {
-        g.lineStyle(5 * (1 - t), 0x9fe0ff, 0.85 * (1 - t));
-        g.beginPath();
-        g.arc(x, y, length * 0.9, a - (d > 0 ? 0 : Math.PI) - 0.6, a - (d > 0 ? 0 : Math.PI), false);
-        g.strokePath();
         // A snowflake riding the tip.
         this.snowflake(g, x + d * c * length * 0.92, y + d * s * length * 0.92, 7 * (1 - t * 0.5), (1 - t) * 0.9);
       }
@@ -388,13 +386,11 @@ export class Fx {
     const { x, y } = getPos();
     for (const d of [1, -1]) {
       this.sparks(x + d * c * length, y + d * s * length, 0xdff6ff, 6);
-      this.frostMark(x + d * c * length * 0.8, y + d * s * length * 0.8);
     }
   }
 
   /** 雙節棍: a stick whirled out to each side at once, cracking at the end of both arcs. */
   nunchakuWhirl(getPos: () => { x: number; y: number }, facing: number, radius: number, angle: number) {
-    for (const side of [-1, 1]) this.arcRibbon(getPos, facing + side * Math.PI / 2 - angle / 2, angle, radius * 0.35, radius, 0xe8d3a8, 0.22);
     this.effect('over', 0.22, (g, t) => {
       const { x, y } = getPos();
       const sweep = Math.min(1, t * 1.4);
@@ -424,12 +420,6 @@ export class Fx {
     const sn = Math.sin(facing);
     const world = (x: number, y: number, p: { x: number; y: number }) => ({ x: x + c * p.x - sn * p.y, y: y + sn * p.x + c * p.y });
     const reached = (t: number) => Math.max(1, Math.floor(Math.min(1, t * 2.2) * (line.length - 1)));
-    this.effect('glow', 0.3, (g, t) => {
-      const { x, y } = getPos();
-      const pts = line.slice(0, reached(t) + 1).map((p) => world(x, y, p));
-      g.lineStyle(shape.width * 0.6, 0xc9d6ff, 0.18 * (1 - t)).strokePoints(pts as Phaser.Math.Vector2[], false);
-      g.lineStyle(2, 0xffffff, 0.75 * (1 - t)).strokePoints(pts as Phaser.Math.Vector2[], false);
-    });
     this.effect('over', 0.3, (g, t) => {
       const { x, y } = getPos();
       const head = reached(t);
@@ -452,6 +442,32 @@ export class Fx {
     const { x, y } = getPos();
     const tip = world(x, y, line[line.length - 1]!);
     this.sparks(tip.x, tip.y, 0xeaf2ff, 6);
+  }
+
+  /** 風車刃: the three blades whirled round once, without a painted sweep path. */
+  windmillSpin(getPos: () => { x: number; y: number }, facing: number, shape: Extract<Shape, { kind: 'pinwheel' }>) {
+    this.effect('over', 0.32, (g, t) => {
+      const { x, y } = getPos();
+      const a = facing + t * Math.PI * 2, radius = shape.outer * .65;
+      windmillWheel(g, x + Math.cos(a) * radius, y + Math.sin(a) * radius, 22, a * 3);
+    });
+  }
+
+  /** 月牙鏟: the crescent blade scoops through the U in front, throwing up dust at the bottom of the swing. */
+  spadeScoop(x: number, y: number, facing: number, shape: Extract<Shape, { kind: 'scoop' }>) {
+    const line = scoopLine(shape);
+    const c = Math.cos(facing), sn = Math.sin(facing);
+    const world = (p: { x: number; y: number }) => ({ x: x + c * p.x - sn * p.y, y: y + sn * p.x + c * p.y });
+    const pts = line.map(world);
+    this.effect('over', 0.26, (g, t) => {
+      // The blade sweeps from one horn to the other.
+      const head = Math.max(1, Math.round(Math.min(1, t * 1.8) * (pts.length - 1)));
+      const p = pts[head]!;
+      crescentSpade(g, p.x, p.y, facing + t * Math.PI, 32);
+    });
+    const bottom = world({ x: shape.center - (shape.inner + shape.outer) / 2, y: 0 });
+    this.smoke(bottom.x, bottom.y, 8, 0.6);
+    this.sparks(bottom.x, bottom.y, 0xe6d3a8, 5);
   }
 
   /** A six-armed snowflake. */
@@ -498,12 +514,7 @@ export class Fx {
       for (const a of angles) {
         const c = Math.cos(a);
         const s = Math.sin(a);
-        const tail = Math.max(from, d - 45);
-        g.fillStyle(0xcad9ec, 0.13 * (1 - t)).fillTriangle(x + c * tail - s * 4, y + s * tail + c * 4, x + c * d, y + s * d, x + c * tail + s * 4, y + s * tail - c * 4);
-        g.lineStyle(2, color, 0.45 * (1 - t)).lineBetween(x + c * from, y + s * from, x + c * d, y + s * d);
         if (k < 1) {
-          const past = Math.max(from, d - 24);
-          kunai(g, x + c * past, y + s * past, a, 7);
           kunai(g, x + c * d, y + s * d, a, 13);
         }
       }
@@ -520,25 +531,14 @@ export class Fx {
       for (const a of angles) {
         const c = Math.cos(a);
         const s = Math.sin(a);
-        const tail = Math.max(from, d - 78);
-        g.fillStyle(0xff7a32, 0.22 * (1 - t)).fillTriangle(x + c * tail - s * 8, y + s * tail + c * 8, x + c * d, y + s * d, x + c * tail + s * 8, y + s * tail - c * 8);
-        g.lineStyle(3, 0xffe08a, 0.75 * (1 - t)).lineBetween(x + c * from, y + s * from, x + c * d, y + s * d);
-        if (k < 1) kunai(g, x + c * d, y + s * d, a, 20);
+        if (k < 1) {
+          const px = x + c * d, py = y + s * d;
+          g.fillStyle(0xff8b38, .8 * (1 - t)).fillCircle(px, py, 6);
+          kunai(g, px, py, a, 20);
+        }
       }
     });
-    for (const a of angles) {
-      const c = Math.cos(a);
-      const s = Math.sin(a);
-      for (let i = 0; i < 7; i++) {
-        const d = from + Math.random() * (to - from);
-        this.add({
-          kind: 'flame', x: x + c * d, y: y + s * d, vx: c * (40 + Math.random() * 80), vy: s * (40 + Math.random() * 80) - 20,
-          life: 0.25 + Math.random() * 0.15, size: 5 + Math.random() * 5, drag: 0.08, color: 0,
-        });
-      }
-      this.ember(x + c * to, y + s * to);
-      this.arrivalFlash(x + c * to, y + s * to, 0xffb45a, life);
-    }
+    for (const a of angles) this.arrivalFlash(x + Math.cos(a) * to, y + Math.sin(a) * to, 0xffb45a, life);
   }
 
   /** 大錘: shockwave ring, dust and cracks where the hammer lands. */
@@ -586,71 +586,34 @@ export class Fx {
     }
   }
 
-  /** 長槍: a straight, pointed thrust trail, fading inside the narrow hit lane. */
+  /** 長槍: the physical spear thrusts forward. */
   spearThrust(x: number, y: number, facing: number, offset: number, length: number, width: number, color: number) {
     const c = Math.cos(facing), s = Math.sin(facing);
-    const at = (f: number, side = 0) => ({ x: x + c * f - s * side, y: y + s * f + c * side });
-    this.effect('glow', 0.18, (g, t) => {
-      const tip = at(offset + length);
-      const base = offset + length * t * 0.65;
-      g.fillStyle(color, 0.3 * (1 - t)).fillPoints([
-        at(base, -width * 0.45), tip, at(base, width * 0.45),
-      ] as Phaser.Math.Vector2[], true);
-      const start = at(base);
-      g.lineStyle(3 * (1 - t), 0xfff3d4, 0.9 * (1 - t)).lineBetween(start.x, start.y, tip.x, tip.y);
-      for (const side of [-1, 1]) {
-        const from = at(offset + length * 0.2, side * width * 0.35);
-        const to = at(offset + length * 0.8, side * width * 0.35);
-        g.lineStyle(1, 0xd8e9ff, 0.5 * (1 - t)).lineBetween(from.x, from.y, to.x, to.y);
-      }
-      // A narrow pressure ring travels along the shaft, never widening the hit lane.
-      const ring = offset + length * Math.min(1, t * 2);
-      const pts = Array.from({ length: 17 }, (_, k) => {
-        const a = k * Math.PI / 8;
-        return at(ring + Math.cos(a) * 5, Math.sin(a) * width * 0.38);
-      });
-      g.lineStyle(1.5, 0xffe5aa, 0.7 * (1 - t)).strokePoints(pts as Phaser.Math.Vector2[], false);
+    this.effect('over', 0.18, (g, t) => {
+      const d = offset + length * Math.sin(t * Math.PI) * .7;
+      spear(g, x + c * d, y + s * d, facing, 44, color);
     });
-    const tip = at(offset + length);
-    this.arrivalFlash(tip.x, tip.y, 0xffe5aa, 0.06);
+    this.arrivalFlash(x + c * (offset + length), y + s * (offset + length), 0xffe5aa, 0.06);
   }
 
   /** 雙匕: two quick tapered cuts crossing inside the short, wide hit lane. */
   daggerSlash(x: number, y: number, facing: number, reach: number, width: number, color: number) {
     const c = Math.cos(facing), s = Math.sin(facing);
-    const point = (forward: number, side: number) => ({ x: x + c * forward - s * side, y: y + s * forward + c * side });
-    for (const side of [-1, 1]) {
-      const from = point(reach * 0.25, side * width * 0.4);
-      const to = point(reach * 0.9, -side * width * 0.4);
-      const d = Math.hypot(to.x - from.x, to.y - from.y);
-      const nx = -(to.y - from.y) / d, ny = (to.x - from.x) / d;
-      this.effect('glow', 0.18, (g, t) => {
-        const progress = Math.min(1, t * 3 + 0.2);
-        const tip = { x: from.x + (to.x - from.x) * progress, y: from.y + (to.y - from.y) * progress };
-        const tail = { x: from.x + (to.x - from.x) * Math.max(0, progress - 0.8), y: from.y + (to.y - from.y) * Math.max(0, progress - 0.8) };
-        g.fillStyle(color, 0.3 * (1 - t)).fillPoints([
-          { x: tail.x + nx * 7, y: tail.y + ny * 7 }, tip,
-          { x: tail.x - nx * 7, y: tail.y - ny * 7 },
-        ] as Phaser.Math.Vector2[], true);
-        g.lineStyle(3 * (1 - t), 0xf1f6ff, 0.9 * (1 - t)).lineBetween(tail.x, tail.y, tip.x, tip.y);
-        g.lineStyle(1, color, 0.7 * (1 - t)).lineBetween(tail.x + nx * 5, tail.y + ny * 5, tip.x, tip.y);
-      });
-    }
-    const hit = point(reach * 0.55, 0);
-    this.sparks(hit.x, hit.y, 0xeaf2ff, 6);
+    this.effect('over', 0.18, (g, t) => {
+      for (const side of [-1, 1]) {
+        const d = reach * (.25 + .5 * Math.sin(t * Math.PI)), lateral = side * width * (.3 - t * .5);
+        kunai(g, x + c * d - s * lateral, y + s * d + c * lateral, facing - side * .5, 16);
+      }
+    });
+    this.sparks(x + c * reach * .55, y + s * reach * .55, 0xeaf2ff, 6);
   }
 
-  /** 流星錘: the weight whirled once around the ninja, with a motion trail. */
+  /** 流星錘: the weight whirled once around the ninja, on its chain. */
   chainSpin(getPos: () => { x: number; y: number }, facing: number, inner: number, outer: number) {
     const r = (inner + outer) / 2;
-    this.arcRibbon(getPos, facing, Math.PI * 2, inner, outer, 0xbabfc9, 0.25);
     this.effect('over', 0.22, (g, t) => {
       const { x, y } = getPos();
       const a = facing + t * Math.PI * 2.2;
-      g.lineStyle(outer - inner, 0xc9ced8, 0.18 * (1 - t));
-      g.beginPath();
-      g.arc(x, y, r, a - 1.6, a, false);
-      g.strokePath();
       const wx = x + Math.cos(a) * r;
       const wy = y + Math.sin(a) * r;
       this.chainLinks(g, x, y, wx, wy, 1 - t * 0.5);
@@ -667,16 +630,10 @@ export class Fx {
   /** 鎖鐮: the sickle flung out on its chain, sweeping across the curved band. */
   sickleSweep(getPos: () => { x: number; y: number }, facing: number, inner: number, outer: number, angle: number) {
     const r = (inner + outer) / 2;
-    this.arcRibbon(getPos, facing - angle / 2, angle, inner, outer, 0xb8cde5, 0.24);
     this.effect('over', 0.2, (g, t) => {
       const { x, y } = getPos();
       const a0 = facing - angle / 2;
       const a = a0 + angle * Math.min(1, t * 1.3);
-      // Silver trail along the band.
-      g.lineStyle(outer - inner, 0xdfe6f0, 0.22 * (1 - t));
-      g.beginPath();
-      g.arc(x, y, r, a0, a, false);
-      g.strokePath();
       const sx = x + Math.cos(a) * r;
       const sy = y + Math.sin(a) * r;
       this.chainLinks(g, x, y, sx, sy, 1 - t * 0.5);
@@ -687,14 +644,6 @@ export class Fx {
       g.arc(sx, sy, 9, rot, rot + 2.2, false);
       g.strokePath();
       g.lineStyle(3, 0x6b3f1f, 1).lineBetween(sx, sy, sx - Math.cos(rot) * 8, sy - Math.sin(rot) * 8);
-    });
-    this.effect('glow', 0.2, (g, t) => {
-      const { x, y } = getPos();
-      const a = facing - angle / 2 + angle * Math.min(1, t * 1.3);
-      g.lineStyle(3 * (1 - t), 0xffffff, 0.7 * (1 - t));
-      g.beginPath();
-      g.arc(x, y, outer - 4, a - 0.5, a, false);
-      g.strokePath();
     });
   }
 
@@ -728,28 +677,12 @@ export class Fx {
     });
   }
 
-  /** 忍刀: a bright cut along the lunge. */
+  /** 忍刀: the blade extends during the lunge. */
   lungeSlash(getPos: () => { x: number; y: number }, facing: number, length: number, width: number) {
-    const start = getPos();
-    this.effect('glow', 0.22, (g, t) => {
-      const c = Math.cos(facing);
-      const s = Math.sin(facing);
-      const end = getPos();
-      // Streak from where the lunge began to the sword tip.
-      const tipX = end.x + c * length;
-      const tipY = end.y + s * length;
-      g.fillStyle(0x8ac7fa, 0.22 * (1 - t)).fillPoints([
-        { x: start.x - s * width * 0.3, y: start.y + c * width * 0.3 },
-        { x: tipX, y: tipY },
-        { x: start.x + s * width * 0.3, y: start.y - c * width * 0.3 },
-      ] as Phaser.Math.Vector2[], true);
-      g.lineStyle(width * 0.18 * (1 - t), 0xffffff, 0.75 * (1 - t)).lineBetween(start.x, start.y, tipX, tipY);
-      g.lineStyle(3 * (1 - t), 0x9fd8ff, 0.9 * (1 - t)).lineBetween(start.x - s * 6, start.y + c * 6, tipX - s * 6, tipY + c * 6);
-      for (const side of [-1, 1]) {
-        const d = length * (0.3 + t * 0.5);
-        const x = end.x + c * d - s * side * width * 0.3, y = end.y + s * d + c * side * width * 0.3;
-        g.lineStyle(1, 0xc8e8ff, 0.6 * (1 - t)).lineBetween(x - c * 28, y - s * 28, x + c * 5, y + s * 5);
-      }
+    this.effect('over', 0.22, (g, t) => {
+      const { x, y } = getPos();
+      const extension = 10 + Math.sin(t * Math.PI) * length * .5;
+      ninjato(g, x + Math.cos(facing) * extension, y + Math.sin(facing) * extension, facing, 28);
     });
   }
 
@@ -924,18 +857,6 @@ export class Fx {
       }
       g.lineStyle(3 * (1 - t), color, alpha * (1 - t)).strokeCircle(x, y, SUMMON_LIGHT_RADIUS * (0.7 + t * 0.3));
     });
-  }
-
-  /** A target mark that tightens as the summon completes (`t` 0→1). */
-  targetMark(g: Phaser.GameObjects.Graphics, x: number, y: number, t: number, color: number, now: number, kind?: SummonKind) {
-    const r = 46 - 22 * t;
-    g.lineStyle(2.5, color, 0.6 + 0.4 * Math.sin(now * 14));
-    g.strokeCircle(x, y, r);
-    for (let k = 0; k < 4; k++) {
-      const ang = now * 3 + (k * Math.PI) / 2;
-      g.lineBetween(x + Math.cos(ang) * (r - 8), y + Math.sin(ang) * (r - 8), x + Math.cos(ang) * (r + 8), y + Math.sin(ang) * (r + 8));
-    }
-    if (kind) this.summonGlyph(g, x, y - 58, 10, kind, color, 0.7, now);
   }
 
   /** 捨身: a blood-red shockwave bursting out to `radius`, with a flash at the centre. */
@@ -1124,17 +1045,6 @@ export class Fx {
       );
       // Bony hand on the pole.
       g.fillStyle(0xe8e0cc, fade).fillCircle(hand.x, hand.y, 4 * K);
-    });
-    // The swing's trail.
-    this.effect('glow', life, (g, t) => {
-      const ts = (t - swingAt + 0.06) / 0.25;
-      if (ts < 0 || ts > 1) return;
-      const { x, y } = getPos();
-      g.lineStyle(14 * (1 - ts), 0x9a5aff, 0.6 * (1 - ts));
-      g.beginPath();
-      g.arc(x + side * 44 * K, y - 30 * K, 70 * K, side > 0 ? Math.PI * 0.6 : -Math.PI * 0.4, side > 0 ? Math.PI * 1.2 : Math.PI * 0.2, side < 0);
-      g.strokePath();
-      g.lineStyle(3, 0xf0e8ff, 0.9 * (1 - ts)).lineBetween(x - 34, y - 20 * side, x + 34, y + 20 * side);
     });
     if (!hit) return;
     // Caught: hands from the ground, a chain to the reaper, the soul pulled out.

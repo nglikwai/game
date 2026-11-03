@@ -51,7 +51,7 @@ test('the lantern starts in the center; two allies push it, one does not, and bo
   assert.equal(a.progress, 0.5);
   const ally = { x: a.x, y: a.y, team: 0, alive: true };
   const enemy = { ...ally, team: 1 };
-  for (const occupants of [[], [ally], [{ ...enemy, alive: false }], [{ ...ally, alive: false }, ally], [ally, ally, enemy]]) {
+  for (const occupants of [[ally], [{ ...ally, alive: false }, ally], [ally, ally, enemy]]) {
     const before = a.x;
     advanceLantern(a, occupants, 10);
     assert.equal(a.x, before);
@@ -69,6 +69,27 @@ test('the lantern starts in the center; two allies push it, one does not, and bo
   advanceLantern(a, [enemy], 1);
   assert.ok(Math.abs(a.x - (back - step)) < 1e-6);
   assert.equal(a.push, -1);
+});
+
+test('left empty, the lantern drifts slowly back toward the party side but never into a loss', () => {
+  const lantern = createLantern(1, 1, 0);
+  const start = lantern.x;
+  advanceLantern(lantern, [], 1);
+  assert.ok(Math.abs(lantern.x - (start - lantern.speed * QUEST.escort.drift)) < 1e-6);
+  assert.equal(lantern.drifting, true);
+  assert.equal(lantern.push, 0);
+  // A dead fighter standing in it counts as nobody.
+  advanceLantern(lantern, [{ x: lantern.x, y: lantern.y, team: 0, alive: false }], 1);
+  assert.equal(lantern.drifting, true);
+  // One ally holds it in place.
+  const held = lantern.x;
+  advanceLantern(lantern, [{ x: lantern.x, y: lantern.y, team: 0, alive: true }], 5);
+  assert.equal(lantern.x, held);
+  assert.equal(lantern.drifting, false);
+  advanceLantern(lantern, [], 10000);
+  assert.equal(lantern.x, lantern.left);
+  assert.equal(lantern.lost, false);
+  assert.equal(lantern.progress, 0);
 });
 
 test('two allies can push the lantern to the enemy side, and enemies alone can push it back to a loss', () => {
@@ -182,7 +203,7 @@ for (const difficulty of ['standard', 'hard']) {
     assert.equal(lantern.arrived, true);
   });
 
-  test(`${difficulty}: allies guide the lantern instead of pursuing distant enemies, and guards attack it`, () => {
+  test(`${difficulty}: allies guide the lantern instead of pursuing distant enemies, and guards walk into it without attacking it`, () => {
     const lantern = createLantern(1, 1, 0); lantern.x = 500; lantern.y = 400;
     const ally = fighter(0, 0, 200, 400), enemy = fighter(4, 1, 1000, 400);
     const world = { fighters: [ally, enemy], projectiles: [], objectives: [], chests: [], escort: lantern, defendTeam: 0 };
@@ -192,9 +213,13 @@ for (const difficulty of ['standard', 'hard']) {
     assert.equal(ai.decide(ally, world).mx, 0);
     ally.body.center = { x: 100, y: 700 };
     enemy.body.center = { x: lantern.x - 60, y: lantern.y };
-    const attack = ai.decide(enemy, world);
-    assert.equal(attack.attack, true);
-    assert.ok(attack.ax > 0.99);
+    const raid = ai.decide(enemy, world);
+    assert.equal(raid.attack, false);
+    assert.ok(raid.mx > 0.99);
+    // Once inside, the guard holds its place to push and still doesn't swing.
+    enemy.body.center = { x: lantern.x, y: lantern.y };
+    const hold = ai.decide(enemy, world);
+    assert.equal(hold.attack, false);
   });
 
   test(`${difficulty}: an ally fights a guard threatening the lantern`, () => {
@@ -205,3 +230,14 @@ for (const difficulty of ['standard', 'hard']) {
     assert.ok(intent.my > 0.5);
   });
 }
+
+test('escort reinforcements arrive together from opposite sides of the lantern', () => {
+  const scene = battle();
+  const guards = [scene.fighters[1], fighter(5, 1, 1400, 500), fighter(6, 1, 1400, 500)];
+  scene.fighters.push(...guards.slice(1));
+  guards.forEach(f => { f.state = 'dead'; });
+  scene.escortRespawnT = 0;
+  scene.updateEscort(0);
+  assert.deepEqual(guards.map(f => f.alive), [true, true, false]);
+  assert.ok((guards[0].y - scene.lantern.y) * (guards[1].y - scene.lantern.y) < 0);
+});

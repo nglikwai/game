@@ -87,7 +87,7 @@ export function applyQuestTreeHit(this: QuestTreeContext, cast: QuestTreeCast, h
   if (this.over || !config || !this.questTree?.alive) return;
   const { target, spell } = cast;
   if (target.team !== 0 || !target.alive || target.untouchable) return;
-  // Moving out of the warning circle avoids damage and paralysis entirely.
+  // Leaving the targeted area avoids damage and paralysis entirely.
   if (Math.hypot(target.x - cast.x, target.y - cast.y) > config.radius + target.radius) {
     this.summonResult(target, false, spell.color);
     return;
@@ -112,10 +112,6 @@ export function renderQuestTree(this: QuestTreeContext, now: number): void {
   if (!cast) return;
   const progress = Math.min(1, cast.elapsed / (cast.spell.warn * config.warnScale));
   this.fx.summonCircle(this.g, this.gGlow, tree.x, tree.y, progress, color, now, cast.spell.kind);
-  this.fx.targetMark(this.gOver, cast.x, cast.y, progress, color, now, cast.spell.kind);
-  this.g.fillStyle(color, 0.08 + progress * 0.2).fillCircle(cast.x, cast.y, config.radius);
-  this.g.lineStyle(3, color, 0.7).strokeCircle(cast.x, cast.y, config.radius);
-  this.gGlow.lineStyle(2, color, 0.25 + progress * 0.35).lineBetween(tree.x, tree.y, cast.x, cast.y);
 }
 
 /** Stage 2: two great towers on the enemy side. They shoot, heal and keep sending enemies back in. */

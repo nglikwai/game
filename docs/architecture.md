@@ -109,6 +109,14 @@ configuration from `BattleScene`.
   in `BattleScene` and keep their context lists explicit.
 - **Visuals:** edit `maps/` for arena art, `battle/presentation/` for battle UI
   and draw order, or the owning objective/stage module for its local graphics.
+- **Expedition:** `config/expedition.ts` owns Mistwood's dimensions, encounters and timings;
+  `maps/expedition/forest.ts` owns geometry and seeded art. `battle/expedition/` separates
+  checkpoint/camera rules, navigation, encounter runtime and presentation. `BattleScene`
+  wires these into existing fighters and combat. Use the scene's `arenaRect` for world
+  bounds instead of the fixed versus-arena constants when adding movement or projectiles.
+  The expedition transforms only `worldLayer` for camera following, leaving HUDs and menus
+  fixed. Floor art is baked in small tiles and released on shutdown. Four reusable enemy
+  seats keep fighter indexes, statistics and collision ownership stable between encounters.
 - **Input/CPU:** edit `input/` for human controls and `ai/` for CPU decisions. Keep
   input mapping separate from stage objectives.
 
@@ -162,3 +170,46 @@ for internal imports, reserves the source root for entry files, prevents runtime
 imports from battle systems back into scenes, and detects runtime import cycles.
 Type-only scene references used by battle contexts are permitted. This is run by
 `npm run check` and `npm run build` so the layout stays consistent as the game grows.
+
+## Blender scenery
+
+`assets/blender/map-scenery.blend` contains the original editable scenery kit.
+`scripts/blender/build_map_props.py` recreates the models and exports thirteen
+transparent orthographic sprites into `src/assets/maps/`. To regenerate on macOS:
+
+```sh
+/Applications/Blender.app/Contents/MacOS/Blender --background --factory-startup --python scripts/blender/build_map_props.py
+```
+
+`rendering/mapProps.ts` loads the sprites through Vite in Title and Battle preload.
+`maps/art/renderedProps.ts` scopes those images to a canvas paint; scenery painters
+call `paintScenery` before their procedural fallback. This replaces each body at
+its authored coordinates, including seeded layout transforms, without stacking
+old and new silhouettes. Material filters preserve each map's palette. Landmark
+walls, cages and dynamic objectives retain their dedicated renderers. Arena cache
+keys include asset availability so a fallback preview cannot mask a later load.
+
+Live Quest trees reuse one sprite per objective with role tints. Their aura,
+animated eyes, HP and destruction state remain owned by the battle renderer.
+Ground wear is baked once for all versus and Quest maps. No model is rendered
+in 3D at runtime; Blender is only required to edit or regenerate source assets.
+
+Combat artwork keeps simulation data read-only. `rendering/projectileArt.ts`
+shares projectile identity between the body painter and particle trails, with
+explicit element/boomerang/hook precedence. `rendering/skillEmblems.ts` owns
+projectile cast symbols and `rendering/impactArt.ts` owns short weapon contact
+silhouettes. `Fx` schedules their lifetimes on the game clock; drawing functions
+do not allocate persistent particles or modify attack shapes and damage.
+
+
+`rendering/towerArt.ts` reuses Blender buildings for living towers and keeps team
+banners, roof damage and health bars in the battle overlay. Destroyed buildings
+hide immediately; collision, auras and HP remain simulation-owned. The main keep
+has a second roof tier. `rendering/characterArt.ts` paints the four role outfits
+and walking feet; ninja texture keys include role and colour to avoid sharing an
+incorrect outfit. Both regular fighters and additional Quest bosses use it.
+
+`maps/art/water.ts` paints depth, submerged stones and broken caustics within each
+map's explicit rectangle, rounded pool or ellipse. Maps invoke it before fish,
+bridges, steam and props so those landmarks remain above the surface. Seeded
+Quest transforms carry the water artwork with its geometry.

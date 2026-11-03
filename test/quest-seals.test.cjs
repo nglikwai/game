@@ -127,7 +127,7 @@ test('battle creates correctly scaled seals, clears only after all three and eve
   assert.ok(scene.seals.every((p) => !p.sealed && p.progress === 0));
 });
 
-test('guards return one at a time on the seal timer and stop when the seals are all broken', () => {
+test('fallen guards return on the seal timer and stop when the seals are all broken', () => {
   const scene = battle();
   const guard = scene.fighters[1];
   guard.state = 'dead'; guard.hp = 0; guard.soul = 40; guard.pocket.push({ id: 'rice-ball' });
@@ -208,3 +208,15 @@ for (const difficulty of ['standard', 'hard']) {
     assert.ok(Math.abs(intent.mx) < 0.6);
   });
 }
+
+test('seal reinforcements return two fallen guards together and leave the remainder queued', () => {
+  const scene = battle();
+  const guards = [scene.fighters[1], fighter(5, 1), fighter(6, 1)];
+  scene.fighters.push(...guards.slice(1));
+  guards.forEach(f => { f.state = 'dead'; scene.spawns[f.index] = { x: 1400, y: 500 }; });
+  scene.sealRespawnT = 0;
+  scene.updateSeals(0);
+  assert.deepEqual(guards.map(f => f.alive), [true, true, false]);
+  scene.updateSeals(QUEST.seals.respawnEvery);
+  assert.equal(guards[2].alive, true);
+});

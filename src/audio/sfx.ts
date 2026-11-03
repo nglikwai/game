@@ -158,6 +158,22 @@ export const sfx = {
     tone(140, 0.35, { type: 'sawtooth', to: 70, vol: 0.08 });
   },
 
+  /** Short overlapping breath pulses, driven by the beam's game timer rather than an audio loop. */
+  dragonBeam(element: 'fire' | 'ice' | 'thunder') {
+    if (element === 'fire') {
+      noise(0.34, { filter: 'lowpass', freq: 1700, to: 800, vol: 0.32, attack: 0.035 });
+      tone(95, 0.3, { type: 'sawtooth', to: 65, vol: 0.1 });
+    } else if (element === 'ice') {
+      noise(0.34, { filter: 'highpass', freq: 2500, to: 4200, vol: 0.22, attack: 0.035 });
+      tone(880, 0.3, { type: 'sine', to: 1320, vol: 0.08 });
+      tone(1320, 0.26, { type: 'triangle', to: 1760, vol: 0.045 });
+    } else {
+      noise(0.3, { filter: 'bandpass', freq: 2100, to: 950, q: 1.8, vol: 0.26, attack: 0.015 });
+      tone(145, 0.3, { type: 'sawtooth', to: 180, vol: 0.09 });
+      tone(760, 0.12, { type: 'square', to: 320, vol: 0.055 });
+    }
+  },
+
   heal() {
     [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.35, { vol: 0.12, delay: i * 0.07 }));
   },

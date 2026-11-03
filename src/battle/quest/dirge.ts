@@ -49,13 +49,8 @@ export function updateDirge(this: QuestDirgeContext, dt: number): void {
 
 export function renderDirge(this: QuestDirgeContext): void {
   if (this.quest?.stage !== QUEST.dirgeStage) return;
-  const warn = this.dirgeWarn;
-  const r = QUEST.dirge.tollRadius;
-  const progress = warn ? Math.min(1, warn.elapsed / QUEST.dirge.tollWarn) : 0;
-  for (const ring of tollRings.call(this)) {
-    this.g.lineStyle(2, DIRGE_COLOR, 0.35).strokeCircle(ring.x, ring.y, r);
-    if (!warn) continue;
-    this.g.fillStyle(DIRGE_COLOR, 0.05 + progress * 0.12).fillCircle(ring.x, ring.y, r * progress);
-    this.g.lineStyle(3, DIRGE_COLOR, 0.85).strokeCircle(ring.x, ring.y, r);
-  }
+  const boss = this.fighters.find((f) => f.boss && f.alive);
+  if (!boss || !this.dirgeWarn) return;
+  const progress = Math.min(1, this.dirgeWarn.elapsed / QUEST.dirge.tollWarn);
+  this.g.fillStyle(DIRGE_COLOR, 0.15 + progress * .3).fillCircle(boss.x, boss.y, boss.radius + 8);
 }

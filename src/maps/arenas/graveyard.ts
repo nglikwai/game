@@ -1,3 +1,4 @@
+import { paintScenery } from '@/maps/art/renderedProps';
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, mirrored, paintShadow, paintVignette,
@@ -139,6 +140,7 @@ function paintGrave(ctx: Ctx, o: Obstacle, rand: () => number) {
 
 /** A bare, twisted tree seen from above. */
 function paintDeadTree(ctx: Ctx, o: Obstacle, rand: () => number) {
+  if (paintScenery(ctx, o)) return;
   ctx.strokeStyle = '#2a1e18';
   ctx.lineCap = 'round';
   const branch = (x: number, y: number, a: number, len: number, w: number, depth: number) => {

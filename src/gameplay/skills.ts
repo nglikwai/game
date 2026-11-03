@@ -11,10 +11,18 @@ export const SKILL_SLOTS = 4;
 export type SkillEffect =
   | { kind: 'channelHeal'; heal: number; duration: number }
   | { kind: 'instantHeal'; heal: number }
-  | { kind: 'projectile'; speed: number; radius: number; damage: number; knockback: number; hitstun: number; range: number; color: number }
+  /** Heal `heal` HP spread over `duration` s, while you keep moving and fighting. */
+  | { kind: 'regen'; heal: number; duration: number }
+  /**
+   * `pull`: a hook on a chain that drags whoever it catches to the thrower instead of knocking them away.
+   * `boomerang`: flies out `range`, then back to the thrower, cutting through everyone once each way.
+   */
+  | { kind: 'projectile'; speed: number; radius: number; damage: number; knockback: number; hitstun: number; range: number; color: number; pull?: boolean; boomerang?: boolean }
   | { kind: 'speedBuff'; multiplier: number; duration: number }
   | { kind: 'dash'; speed: number; duration: number }
   | { kind: 'powerUp'; multiplier: number; duration: number }
+  /** For `duration` s, heal `share` of all the damage you deal. */
+  | { kind: 'lifesteal'; share: number; duration: number }
   /** fixedHp: revive with this much HP instead of splitting the caster's (Revival Pill). */
   | { kind: 'revive'; fixedHp?: number }
   | { kind: 'guard'; reduction: number; duration: number }
@@ -30,6 +38,15 @@ export type SkillEffect =
   | { kind: 'sacrifice'; hpCost: number; radius: number; knockback: number; charge: number }
   /** Vanish and reappear at a random spot as far from enemies as possible. */
   | { kind: 'teleport' }
+  /** Trade places with the nearest enemy within `range`. */
+  | { kind: 'swap'; range: number }
+  /** Blink to just behind the nearest enemy within `range`, facing their back. */
+  | { kind: 'shadowStep'; range: number }
+  /**
+   * For `window` s, the next hit is blocked completely. If whoever struck is within `reach`, you strike back
+   * for `damage`, knocking them away and stunning them for `stun` s.
+   */
+  | { kind: 'counter'; window: number; damage: number; knockback: number; stun: number; reach: number }
   /** Heal every living teammate (and yourself), wherever they are. */
   | { kind: 'teamHeal'; heal: number }
   /** Restore PE to every living teammate (and yourself). */
@@ -45,11 +62,18 @@ export type SkillEffect =
   /** Spends soul like Thunder; each strike almost always lands, but burns only a little. */
   | { kind: 'soulFire' }
   /** Spends soul: each level strikes TWO enemies, hitting 75% of the time for a little damage and a long paralysis. */
-  | { kind: 'soulTree' };
+  | { kind: 'soulTree' }
+  /**
+   * 暴走: not a skill to equip. Every human player triggers it by holding the next-item button with 魂;
+   * it spends every full soul level on a short super state (SOUL_RAGE).
+   */
+  | { kind: 'soulRage' };
 
 export type SummonKind = 'soulThunder' | 'soulReaper' | 'soulFire' | 'soulTree';
 export const isSummon = (kind: string | undefined): kind is SummonKind =>
   kind === 'soulThunder' || kind === 'soulReaper' || kind === 'soulFire' || kind === 'soulTree';
+/** Any skill paid for with 魂 (the summons and 暴走): it needs a full soul level and shows the soul meter. */
+export const spendsSoul = (kind: string | undefined) => isSummon(kind) || kind === 'soulRage';
 
 /** How many enemies one cast strikes. The Quest boss hits two players per soul level. */
 export function summonStrikeCount(kind: SummonKind, level: number, boss = false) {
@@ -87,6 +111,12 @@ export const SKILLS: Skill[] = [
     effect: { kind: 'instantHeal', heal: 15 },
   },
   {
+    id: 'sweet-dew', category: 'heal', name: 'Sweet Dew', zh: '甘露', peCost: 45, cooldown: 16,
+    desc: 'Heal 30 HP over 8s. You can keep moving and fighting while it works.',
+    descZh: '8秒內逐漸回復30生命，期間可以照常移動和攻擊。',
+    effect: { kind: 'regen', heal: 30, duration: 8 },
+  },
+  {
     id: 'arrow', category: 'ranged', name: 'Arrow', zh: '飛箭', peCost: 18, cooldown: 0.9,
     desc: 'Fast, light shot. 6 dmg.',
     descZh: '快速的輕型射擊，6點傷害。',
@@ -99,6 +129,18 @@ export const SKILLS: Skill[] = [
     effect: { kind: 'projectile', speed: 520, radius: 13, damage: 12, knockback: 520, hitstun: 0.35, range: 620, color: 0xff7a2a },
   },
   {
+    id: 'hook', category: 'ranged', name: 'Hook Chain', zh: '鉤鎖', peCost: 30, cooldown: 7,
+    desc: 'Throw a hook on a chain: the first enemy it catches takes 4 dmg and is dragged right up to you.',
+    descZh: '擲出鐵鉤，鉤中的第一名敵人受到4點傷害，並被拉到你身前。',
+    effect: { kind: 'projectile', speed: 1000, radius: 7, damage: 4, knockback: 0, hitstun: 0.45, range: 520, color: 0xb8c0cc, pull: true },
+  },
+  {
+    id: 'chakram', category: 'ranged', name: 'Chakram', zh: '飛輪', peCost: 30, cooldown: 4,
+    desc: 'Throw a spinning blade that flies out 300 px and back to you, cutting every enemy it passes for 6 dmg, once each way.',
+    descZh: '擲出旋轉飛輪，飛出300像素後回到手中，去程和回程各對經過的每名敵人造成6點傷害。',
+    effect: { kind: 'projectile', speed: 720, radius: 11, damage: 6, knockback: 120, hitstun: 0.15, range: 300, color: 0xd0d8e0, boomerang: true },
+  },
+  {
     id: 'thunder', category: 'summon', name: 'Thunder', zh: '天雷', peCost: 0, cooldown: 3,
     desc: 'Summon (1s call, untouchable): spends your 魂 (soul); lightning strikes the nearest enemies anywhere, 1 per soul level (max 4). Hit chance 55/65/75/85% by soul level; a hit deals 5–30 damage. Every bolt paralyses (0.8s on a miss, 2s on a hit); paralysed fighters can\'t act and still take 40% damage.',
     descZh: '召喚（需時1秒，期間無敵）：消耗「魂」召喚雷電攻擊最近的敵人，每級魂打1人（最多4人），不限距離。命中率按魂等級為55/65/75/85%，命中造成5–30傷害。無論是否命中都會麻痺（落空0.8秒，命中2秒）；麻痺時無法行動，且仍會受到40%傷害。',
@@ -106,8 +148,8 @@ export const SKILLS: Skill[] = [
   },
   {
     id: 'reaper', category: 'summon', name: 'Reaper', zh: '死神', peCost: 0, cooldown: 3,
-    desc: 'Summon (1s call, untouchable): spends your 魂 (soul); the reaper visits the nearest enemies anywhere, 1 per soul level (max 4). Hit chance only 10/15/20/25% by soul level. A hit ignores protection: under 80 HP the target dies, otherwise they are left at 20 HP, then paralysed for 2.5s. A miss still paralyses for 0.8s.',
-    descZh: '召喚（需時1秒，期間無敵）：消耗「魂」，死神造訪最近的敵人，每級魂1人（最多4人），不限距離。命中率按魂等級只有10/15/20/25%。命中無視防護：生命低於80即死，否則只剩20生命，並麻痺2.5秒；落空麻痺0.8秒。',
+    desc: 'Summon (1s call, untouchable): spends your 魂 (soul); the reaper visits the nearest enemies anywhere, 1 per soul level (max 4). Hit chance only 10/15/20/25% by soul level. A hit ignores protection: under 80 HP the target dies, otherwise they are left at 20 HP (a boss loses at most 200 HP), then paralysed for 2.5s. A miss still paralyses for 0.8s.',
+    descZh: '召喚（需時1秒，期間無敵）：消耗「魂」，死神造訪最近的敵人，每級魂1人（最多4人），不限距離。命中率按魂等級只有10/15/20/25%。命中無視防護：生命低於80即死，否則只剩20生命（首領最多損失200生命），並麻痺2.5秒；落空麻痺0.8秒。',
     effect: { kind: 'soulReaper' },
   },
   {
@@ -135,10 +177,34 @@ export const SKILLS: Skill[] = [
     effect: { kind: 'dash', speed: 950, duration: 0.14 },
   },
   {
+    id: 'shadow-step', category: 'move', name: 'Shadow Step', zh: '影步', peCost: 25, cooldown: 9,
+    desc: 'Blink to just behind the nearest enemy within 360 px, facing their back.',
+    descZh: '瞬間閃到360像素內最近敵人的背後，面向對方。',
+    effect: { kind: 'shadowStep', range: 360 },
+  },
+  {
+    id: 'swap', category: 'move', name: 'Shadow Swap', zh: '換影', peCost: 25, cooldown: 10,
+    desc: 'Trade places with the nearest enemy within 420 px: pull them off an objective, or slip out of a trap.',
+    descZh: '與420像素內最近的敵人互換位置：把對方調離目標，或脫離險境。',
+    effect: { kind: 'swap', range: 420 },
+  },
+  {
     id: 'fury', category: 'buff', name: 'Fury', zh: '霸氣', peCost: 35, cooldown: 18,
     desc: '+35% attack damage and knockback for 8s.',
     descZh: '8秒內攻擊傷害和擊退提升35%。',
     effect: { kind: 'powerUp', multiplier: 1.35, duration: 8 },
+  },
+  {
+    id: 'bloodthirst', category: 'buff', name: 'Bloodthirst', zh: '噬血', peCost: 35, cooldown: 18,
+    desc: 'For 6s, heal 40% of all the damage you deal.',
+    descZh: '6秒內，你造成傷害的40%會回復為自己的生命值。',
+    effect: { kind: 'lifesteal', share: 0.4, duration: 6 },
+  },
+  {
+    id: 'counter', category: 'buff', name: 'Counter', zh: '見切', peCost: 25, cooldown: 9,
+    desc: 'For 0.6s, block the next hit completely. If the attacker is close, strike back for 14 dmg, knocking them away and stunning them.',
+    descZh: '0.6秒內完全擋下下一次攻擊。如果攻擊者在近處，立即反擊造成14點傷害，擊退並令對方硬直。',
+    effect: { kind: 'counter', window: 0.6, damage: 14, knockback: 380, stun: 0.6, reach: 150 },
   },
   {
     id: 'golden-bell', category: 'buff', name: 'Golden Bell', zh: '金鐘罩', peCost: 30, cooldown: 16,

@@ -33,21 +33,30 @@ export const HARD = {
   spacing: true,
 };
 
+/**
+ * CPUs only (the weapon is unchanged for players): a 手裡劍 lane reaches far and fast, and perfect aim made a CPU with
+ * one too strong. Its throws wobble up to `spread` radians either way (`hardSpread` on Hard), and it throws only
+ * `throwChance` as often as with other weapons.
+ */
+export const CPU_SHURIKEN = { spread: 0.24, hardSpread: 0.18, throwChance: 0.55 };
+
 /** Hard CPUs share what they are attacking, per team, so a team focuses one enemy instead of each hitting its nearest. */
 const TEAM_FOCUS = new Map<number, { target: Fighter; at: number }>();
 
 /**
  * How far from a target to stand: inside the band for ring / arc, on the circle for hammer / bomb, where the whip's
- * S crosses the middle, otherwise `share` of the weapon's reach.
+ * S crosses the middle, in the bottom of the spade's U, otherwise `share` of the weapon's reach.
  */
 function idealRange(s: Shape, reach: number, share: number): number {
   if (s.kind === 'ring' || s.kind === 'arc') return (s.inner + s.outer) / 2;
   if (s.kind === 'circle') return s.offset;
   if (s.kind === 'wave') return s.offset + s.length / 2;
+  if (s.kind === 'scoop') return s.center - (s.inner + s.outer) / 2 + 4;
   return reach * share;
 }
 
 export class AIController implements Controller {
+  readonly cpu = true;
   labels: Labels = ['', '', '', '', '', '', ''];
   /** Hard: faster reactions, smarter targets and spacing, punishes openings, dodges more. */
   private readonly hard: boolean;
@@ -166,7 +175,6 @@ export class AIController implements Controller {
     out.ay = Math.sin(ang + jitter);
 
     if (Math.random() < 0.02) this.strafe *= -1;
-    const tired = self.pe < w.peCost + 8;
 
     // Thunder (spends soul): worth it at level 2+, or to finish off a weak enemy.
     // The Quest boss's 1 soul already strikes two players, so he casts as soon as he has a level.
@@ -196,7 +204,13 @@ export class AIController implements Controller {
     }
 
     const heal = slotWith(self, 'channelHeal', 'instantHeal');
-    const shot = slotWith(self, 'projectile');
+    const regen = slotWith(self, 'regen');
+    // 鉤鎖 is a projectile too, but used to drag someone in, not to shoot from afar.
+    const hook = self.skills.findIndex((sk) => sk?.effect.kind === 'projectile' && !!sk.effect.pull);
+    const shot = self.skills.findIndex((sk) => sk?.effect.kind === 'projectile' && !sk.effect.pull);
+    const lifesteal = slotWith(self, 'lifesteal');
+    const counter = slotWith(self, 'counter');
+    const shadowStep = slotWith(self, 'shadowStep');
     const dash = slotWith(self, 'dash');
     const sprint = slotWith(self, 'speedBuff');
     const fury = slotWith(self, 'powerUp');
@@ -252,7 +266,7 @@ export class AIController implements Controller {
       out.skills[teamGuard] = true;
       return out;
     }
-    if (teamFury >= 0 && dist < reach * 1.5 && self.canUseSkill(teamFury) && self.pe > w.peCost + self.skills[teamFury]!.peCost) {
+    if (teamFury >= 0 && dist < reach * 1.5 && self.canUseSkill(teamFury) && self.pe > self.skills[teamFury]!.peCost) {
       out.skills[teamFury] = true;
       return out;
     }
@@ -263,6 +277,11 @@ export class AIController implements Controller {
       return out;
     }
 
+    // 甘露 works while fighting, so start it as soon as we're worn down.
+    if (regen >= 0 && self.hp < self.maxHp * 0.7 && !self.regenerating && self.canUseSkill(regen)) {
+      out.skills[regen] = true;
+      return out;
+    }
     // Recovery when hurt and nobody is close.
     if (heal >= 0 && self.hp < 45 && dist > 280 && self.canUseSkill(heal)) {
       out.skills[heal] = true;
@@ -328,7 +347,7 @@ export class AIController implements Controller {
     // Quest support allies must not abandon a fight or a threatened teammate for an objective/chest.
     // Towers remain the fallback while the guards are defeated or respawning.
     const raidGoal = raiding && (!target || dist > 180) ? raiding : null;
-    const goal = raidGoal ?? (defendParty && target ? null : obj ?? towerGoal ?? (chest && chestDist < 450 && (!target || dist > 220) ? chest : null));
+    const goal = defendParty && target ? null : (obj ?? towerGoal ?? (chest && chestDist < 450 && (!target || dist > 220) ? chest : null));
 
     let mx = 0;
     let my = 0;
@@ -341,7 +360,10 @@ export class AIController implements Controller {
       out.skills[guard] = true;
     } else if ((threatened || incoming) && substitute >= 0 && self.canUseSkill(substitute)) {
       out.skills[substitute] = true;
-    } else if (vanish >= 0 && self.canUseSkill(vanish) && dist < 200 && (self.hp < 40 || tired)) {
+    } else if (threatened && counter >= 0 && self.canUseSkill(counter)) {
+      // An enemy is mid-swing at us: parry it and strike back.
+      out.skills[counter] = true;
+    } else if (vanish >= 0 && self.canUseSkill(vanish) && dist < 200 && self.hp < 40) {
       // Hurt or out of breath with an enemy close: disappear and slip away.
       out.skills[vanish] = true;
     } else if (caltrops >= 0 && self.canUseSkill(caltrops) && dist < 110) {
@@ -351,17 +373,17 @@ export class AIController implements Controller {
       mx = perpX - Math.cos(ang) * (threatened ? 0.8 : 0);
       my = perpY - Math.sin(ang) * (threatened ? 0.8 : 0);
       if (dash >= 0 && self.canUseSkill(dash) && Math.random() < (this.hard ? HARD.dashChance : 0.45)) out.skills[dash] = true;
-    } else if (tired) {
-      // Out of PE: stand still to recover fastest if nobody is close, otherwise back off.
-      if (dist < 220) {
-        mx = -Math.cos(ang) + perpX * 0.6;
-        my = -Math.sin(ang) + perpY * 0.6;
-      }
     } else if (guiding && !allyThreat && (!target || Math.hypot(target.x - guiding.x, target.y - guiding.y) > guiding.radius + 100)) {
       // Return to the moving lantern instead of chasing a distant guard across the arena.
       const d = Math.hypot(guiding.x - self.x, guiding.y - self.y);
       if (d > guiding.radius * 0.4) {
         heading = guiding; mx = (guiding.x - self.x) / d; my = (guiding.y - self.y) / d;
+      }
+    } else if (raidGoal) {
+      // Stand inside the lantern's circle to push it back. The lantern can't be broken, so never swing at it.
+      const d = Math.hypot(raidGoal.x - self.x, raidGoal.y - self.y);
+      if (d > raidGoal.radius * 0.4) {
+        heading = raidGoal; mx = (raidGoal.x - self.x) / d; my = (raidGoal.y - self.y) / d;
       }
     } else if (relayGoal && (carrying || !allyThreat && (!target || dist > 220))) {
       const d = Math.hypot(relayGoal.x - self.x, relayGoal.y - self.y);
@@ -414,13 +436,29 @@ export class AIController implements Controller {
       mx = Math.cos(ang) * approach + perpX * 0.45;
       my = Math.sin(ang) * approach + perpY * 0.45;
 
-      if (fury >= 0 && dist < reach * 1.3 && self.canUseSkill(fury) && self.pe > w.peCost + self.skills[fury]!.peCost) {
+      const hookFx = hook >= 0 ? self.skills[hook]!.effect : null;
+      const stepFx = shadowStep >= 0 ? self.skills[shadowStep]!.effect : null;
+      if (fury >= 0 && dist < reach * 1.3 && self.canUseSkill(fury) && self.pe > self.skills[fury]!.peCost) {
         out.skills[fury] = true;
-      } else if (shapeHits(w.shape, self.x, self.y, ang + aimTurn(s), target.x, target.y, target.radius - 4) && Math.random() < (recovering ? 1 : this.hard ? HARD.attackChance : 0.8)) {
+      } else if (lifesteal >= 0 && dist < reach * 1.3 && self.hp < self.maxHp * 0.8 && self.canUseSkill(lifesteal) && self.pe > self.skills[lifesteal]!.peCost) {
+        out.skills[lifesteal] = true;
+      } else if (hookFx?.kind === 'projectile' && dist > reach + 60 && dist < hookFx.range * 0.85 && self.canUseSkill(hook)
+        && self.pe > self.skills[hook]!.peCost && Math.random() < (this.hard ? HARD.shotChance : 0.35)) {
+        // Drag the target into weapon range.
+        out.ax = Math.cos(ang);
+        out.ay = Math.sin(ang);
+        out.skills[hook] = true;
+      } else if (stepFx?.kind === 'shadowStep' && dist > reach + 60 && dist < stepFx.range * 0.9 && self.hp > 40 && self.canUseSkill(shadowStep)
+        && self.pe > self.skills[shadowStep]!.peCost && Math.random() < (this.hard ? HARD.shotChance : 0.3)) {
+        // Blink behind the target to strike from their blind side.
+        out.skills[shadowStep] = true;
+      } else if (shapeHits(w.shape, self.x, self.y, ang + aimTurn(s), target.x, target.y, target.radius - 4)
+        && Math.random() < (recovering ? 1 : this.hard ? HARD.attackChance : 0.8) * (w.id === 'shuriken' ? CPU_SHURIKEN.throwChance : 1)) {
         out.attack = true;
-        out.ax = Math.cos(ang + aimTurn(s));
-        out.ay = Math.sin(ang + aimTurn(s));
-      } else if (shot >= 0 && dist > 260 && dist < 640 && self.canUseSkill(shot) && self.pe > self.skills[shot]!.peCost + w.peCost && Math.random() < (this.hard ? HARD.shotChance : 0.35)) {
+        const wobble = w.id === 'shuriken' ? (Math.random() * 2 - 1) * (this.hard ? CPU_SHURIKEN.hardSpread : CPU_SHURIKEN.spread) : 0;
+        out.ax = Math.cos(ang + aimTurn(s) + wobble);
+        out.ay = Math.sin(ang + aimTurn(s) + wobble);
+      } else if (shot >= 0 && dist > 260 && dist < 640 && self.canUseSkill(shot) && self.pe > self.skills[shot]!.peCost && Math.random() < (this.hard ? HARD.shotChance : 0.35)) {
         // Lead the target a little.
         const p = self.skills[shot]!.effect;
         const t = p.kind === 'projectile' ? dist / p.speed : 0;
@@ -476,6 +514,19 @@ export class AIController implements Controller {
       mx = firePush.x;
       my = firePush.y;
     }
+    // Never dash into a hazard, or blink next to a target standing in one (e.g. a sand pit's deep middle).
+    const hazards = world.fires?.() ?? [];
+    const inHazard = (x: number, y: number) => hazards.some((fire) => fire.safeTeam !== self.team && (fire.rx && fire.ry
+      ? Math.hypot((x - fire.x) / (fire.rx + self.radius), (y - fire.y) / (fire.ry + self.radius)) < 1
+      : Math.hypot(x - fire.x, y - fire.y) < fire.r + self.radius));
+    const dashFx = dash >= 0 ? self.skills[dash]!.effect : null;
+    if (out.skills[dash] && dashFx?.kind === 'dash') {
+      const l = Math.hypot(mx, my);
+      const dx = l > 0.1 ? mx / l : Math.cos(self.facing), dy = l > 0.1 ? my / l : Math.sin(self.facing);
+      const far = dashFx.speed * dashFx.duration;
+      if (inHazard(self.x + dx * far, self.y + dy * far) || inHazard(self.x + dx * far / 2, self.y + dy * far / 2)) out.skills[dash] = false;
+    }
+    if (shadowStep >= 0 && out.skills[shadowStep] && target && inHazard(target.x, target.y)) out.skills[shadowStep] = false;
 
     // Obstacle escape: if we're making no headway where we want to go (stopped, or just
     // sliding along a wall), sidestep at 90° for a moment; if that's blocked too, try the other way.

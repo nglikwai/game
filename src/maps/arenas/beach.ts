@@ -1,3 +1,5 @@
+import { paintWaterSurface } from '@/maps/art/water';
+import { paintScenery } from '@/maps/art/renderedProps';
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, paintShadow, paintVignette,
@@ -100,6 +102,7 @@ function paintSea(ctx: Ctx, rand: () => number) {
     g.addColorStop(1, 'rgba(120,210,220,0.0)');
     ctx.fillStyle = g;
     ctx.fillRect(ARENA.x, y0, ARENA.w, SEA_H + SURF_H);
+    paintWaterSurface(ctx, { x: WIDTH / 2, y: top + dir * SEA_H / 2, w: ARENA.w, h: SEA_H }, 'rect', 'river', rand);
     // Foam lines along the shore.
     ctx.strokeStyle = 'rgba(255,255,255,0.7)';
     ctx.lineWidth = 2;
@@ -125,6 +128,7 @@ function paintTidePool(ctx: Ctx, o: Obstacle, rand: () => number) {
   ctx.beginPath();
   ctx.ellipse(o.x, o.y, o.w / 2, o.h / 2, 0, 0, Math.PI * 2);
   ctx.fill();
+  paintWaterSurface(ctx, o, 'ellipse', 'pond', rand);
   for (let i = 0; i < 2; i++) paintStar(ctx, o.x + (rand() - 0.5) * o.w * 0.5, o.y + (rand() - 0.5) * o.h * 0.4, '#e8603a');
 }
 
@@ -178,6 +182,7 @@ function paintMast(ctx: Ctx) {
 }
 
 function paintBarrel(ctx: Ctx, o: Obstacle) {
+  if (paintScenery(ctx, o)) return;
   ctx.fillStyle = '#7a4e28';
   ctx.beginPath();
   ctx.arc(o.x, o.y, o.w / 2, 0, Math.PI * 2);
@@ -190,6 +195,7 @@ function paintBarrel(ctx: Ctx, o: Obstacle) {
 }
 
 function paintBeachRock(ctx: Ctx, o: Obstacle) {
+  if (paintScenery(ctx, o)) return;
   ctx.fillStyle = '#6a645a';
   ctx.beginPath();
   ctx.ellipse(o.x, o.y, o.w / 2, o.h / 2, 0.3, 0, Math.PI * 2);

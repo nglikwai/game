@@ -63,6 +63,7 @@ export class KeyboardController implements Controller {
       skills: [jd(k.s1), jd(k.s2), jd(k.s3), jd(k.s4)],
       useItem: jd(k.use),
       nextItem: jd(k.next),
+      nextItemHeld: k.next.isDown,
     };
   }
 }

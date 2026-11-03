@@ -86,6 +86,7 @@ export function updateHellQuest(this: QuestProgressionContext, dt: number): void
   else if (stage === QUEST.beaconStage) {
     this.updateSpiritRelay(dt);
     if (this.spiritRelay && this.spiritRelay.delivered >= QUEST.beacons.required) this.questFail();
+    else if (this.spiritRelay && this.spiritRelay.timeLeft <= 0) this.questClear();
   }
   else if (stage === QUEST.escortStage) this.updateEscort(dt);
   else if (stage === QUEST.bossStage) this.updateBossReinforcements(dt);
@@ -131,6 +132,7 @@ export function updateQuest(this: QuestProgressionContext, dt: number): void {
   } else if (q.stage === QUEST.beaconStage) {
     this.updateSpiritRelay(dt);
     if (this.spiritRelay && this.spiritRelay.delivered >= QUEST.beacons.required) this.questClear();
+    else if (this.spiritRelay && this.spiritRelay.timeLeft <= 0) this.questFail();
   } else if (q.stage === QUEST.escortStage) {
     this.updateEscort(dt);
     if (this.lantern?.lost) this.questFail();
@@ -222,7 +224,7 @@ export function questFail(this: QuestProgressionContext): void {
     this.openModal({
       w: 900, h: 300, title: T().questFailed, titleColor: '#ff7a7a', depth: 400, closable: false,
       build: (m) => {
-        const lanternWhy = this.isHell ? T().hellLost : this.lantern && !this.lantern.alive ? T().lanternDestroyed : this.lantern?.lost ? T().lanternLost : '';
+        const lanternWhy = this.isHell ? T().hellLost : q.stage === QUEST.beaconStage && this.spiritRelay && this.spiritRelay.timeLeft <= 0 ? T().spiritRelayTimeout : this.lantern && !this.lantern.alive ? T().lanternDestroyed : this.lantern?.lost ? T().lanternLost : '';
         m.content.add(txt(this, WIDTH / 2, m.y + 110, `${T().questFailedAt(questStageNumber(q.route ?? [], q.stage))}${lanternWhy ? ` · ${lanternWhy}` : ''}`, 22, C.text, { title: true, bold: true, origin: 0.5 }));
         const by = m.y + m.h - 50;
         addButton(this, m.content, m.nav, {

@@ -1,3 +1,4 @@
+import { paintScenery } from '@/maps/art/renderedProps';
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, cornerPile, paintLantern, paintLanternGlow, paintShadow, paintVignette, stoneBlock,
@@ -233,6 +234,7 @@ function paintGrime(ctx: Ctx, rand: () => number) {
 }
 
 function paintPillar(ctx: Ctx, o: Obstacle) {
+  if (paintScenery(ctx, o)) return;
   const l = o.x - o.w / 2;
   const t = o.y - o.h / 2;
   stoneBlock(ctx, l, t, o.w, o.h, '#8d877a', '#aaa496', '#5f5a50');

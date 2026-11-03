@@ -1,3 +1,5 @@
+import { paintWaterSurface } from '@/maps/art/water';
+import { paintScenery } from '@/maps/art/renderedProps';
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, mirrored, paintLantern, paintLanternGlow, paintShadow, paintVignette,
@@ -127,6 +129,7 @@ function paintPond(ctx: Ctx, rand: () => number) {
   ctx.beginPath();
   ctx.roundRect(POND.x0, POND.y0, w, h, 24);
   ctx.fill();
+  paintWaterSurface(ctx, { x: CX, y: MID, w, h }, 'round', 'pond', rand);
   // Lily pads.
   for (let i = 0; i < 9; i++) {
     const x = POND.x0 + 20 + rand() * (w - 40);
@@ -229,6 +232,7 @@ function paintHedge(ctx: Ctx, o: Obstacle) {
 }
 
 function paintSakura(ctx: Ctx, o: Obstacle, rand: () => number) {
+  if (paintScenery(ctx, o)) return;
   blob(ctx, o.x + 8, o.y + 10, 46, 'rgba(30,40,20,0.45)');
   // Trunk peeking through, then clusters of blossom.
   ctx.fillStyle = '#4a2e1c';

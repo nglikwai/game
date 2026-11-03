@@ -1,3 +1,4 @@
+import { paintScenery } from '@/maps/art/renderedProps';
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, mirrored,
@@ -205,6 +206,7 @@ function paintBridges(ctx: Ctx) {
 }
 
 function paintObsidian(ctx: Ctx, o: Obstacle) {
+  if (paintScenery(ctx, o)) return;
   blob(ctx, o.x + 5, o.y + 7, o.w * 0.75, 'rgba(0,0,0,0.5)');
   const pts = [[0, -0.55], [0.45, -0.25], [0.5, 0.3], [0.05, 0.55], [-0.45, 0.35], [-0.5, -0.2]];
   ctx.fillStyle = '#1a1620';

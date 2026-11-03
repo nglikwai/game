@@ -1,3 +1,4 @@
+import { paintScenery } from '@/maps/art/renderedProps';
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, paintShadow, paintVignette,
@@ -86,6 +87,7 @@ function paintSeal(ctx: Ctx) {
 }
 
 function paintStandingStone(ctx: Ctx, o: Obstacle) {
+  if (paintScenery(ctx, o)) return;
   const g = ctx.createRadialGradient(o.x - 5, o.y - 6, 2, o.x, o.y, o.w * 0.7);
   g.addColorStop(0, '#a8a498');
   g.addColorStop(1, '#5a5850');

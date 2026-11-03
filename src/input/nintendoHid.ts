@@ -1,4 +1,5 @@
 import { type ActionValues } from '@/input/actions';
+import type { HomeLight, RumbleTone } from '@/input/contracts';
 import { padLabels, sidewaysMove, type PadSide, type PadState } from '@/input/gamepads';
 
 /**
@@ -43,6 +44,63 @@ const PRO_CONTROLLER = 0x2009;
 
 const api = (): HidApi | undefined => (navigator as unknown as { hid?: HidApi }).hid;
 
+/** No rumble: 160 Hz low band, 320 Hz high band, both silent. */
+const NEUTRAL_RUMBLE = [0x00, 0x01, 0x40, 0x40];
+
+/** HD rumble pitch for each tone: [high band Hz, low band Hz]. Deep thuds, crisp kicks, or the neutral buzz. */
+const TONES: Record<RumbleTone, [number, number]> = { deep: [160, 80], normal: [320, 160], sharp: [640, 320] };
+
+/**
+ * One motor's four HD-rumble bytes, for an amplitude of 0–1 at the tone's two frequencies.
+ * Follows the Switch encoding: frequency codes round(log2(Hz / 10) × 32), shifted per band; amplitude code
+ * round(log2(amp × 8.7) × 32), doubled for the high band and halved (+64) for the low band.
+ */
+export function rumbleBytes(amp: number, tone: RumbleTone = 'normal'): number[] {
+  if (amp <= 0) return [...NEUTRAL_RUMBLE];
+  const [high, low] = TONES[tone];
+  const hf = (Math.round(Math.log2(high / 10) * 32) - 0x60) * 4;
+  const lf = Math.round(Math.log2(low / 10) * 32) - 0x40;
+  const code = Math.round(Math.log2(Math.min(1, Math.max(0.25, amp)) * 8.7) * 32);
+  return [hf & 0xff, (hf >> 8) + code * 2, lf, 0x40 + (code >> 1)];
+}
+
+/** The Switch's own player-light patterns for players 1–8 (the four lights on the rail). */
+const PLAYER_LIGHTS = [0x1, 0x3, 0x7, 0xf, 0x9, 0xa, 0xb, 0x6];
+
+/** Subcommand 0x30 argument: player `slot`'s lights, steady or (low nibble moved up) flashing. */
+export const playerLightBits = (slot: number, flash = false) => {
+  const bits = PLAYER_LIGHTS[((slot % 8) + 8) % 8]!;
+  return flash ? bits << 4 : bits;
+};
+
+/**
+ * Subcommand 0x38 data for the HOME button ring: off, a slow breathing glow, or a fast pulse (both repeat forever).
+ * Bytes: mini-cycle count | step time, start intensity | repeats (0 = forever), the two intensities, then each
+ * mini cycle's fade | hold multipliers.
+ */
+export function homeLightPattern(mode: HomeLight): number[] {
+  if (mode === 'glow') return [0x2f, 0x00, 0xf2, 0x22, 0x22];
+  if (mode === 'pulse') return [0x28, 0x00, 0xf0, 0x11, 0x11];
+  return [0x00, 0x00, 0x00, 0x00, 0x00];
+}
+
+type Pad = { device: HidDevice; nextPacket(): number; rumbleStop?: ReturnType<typeof setTimeout> };
+
+/** Rumble both motors (report 0x10 carries rumble only); a later call replaces an unfinished one. */
+function playRumble(pad: Pad, amp: number, ms: number, tone: RumbleTone = 'normal') {
+  const send = (bytes: number[]) => pad.device.sendReport(0x10, new Uint8Array([pad.nextPacket(), ...bytes, ...bytes])).catch(() => undefined);
+  void send(rumbleBytes(amp, tone));
+  clearTimeout(pad.rumbleStop);
+  pad.rumbleStop = setTimeout(() => void send(NEUTRAL_RUMBLE), ms);
+}
+
+/** A subcommand (report 0x01) with silent rumble, padded to the full 48-byte report. */
+function sendSubcommand(pad: Pad, subcommand: number, args: number[]) {
+  const out = new Uint8Array(48);
+  out.set([pad.nextPacket(), ...NEUTRAL_RUMBLE, ...NEUTRAL_RUMBLE, subcommand, ...args]);
+  return pad.device.sendReport(0x01, out);
+}
+
 export const hidSupported = () => !!api();
 
 export type JoyButtons = Record<'up' | 'down' | 'left' | 'right' | 'a' | 'b' | 'x' | 'y' | 'sl' | 'sr' | 'l' | 'r' | 'zl' | 'zr' | 'minus' | 'plus' | 'stick' | 'home' | 'capture', boolean>;
@@ -69,20 +127,38 @@ export class HidJoyCon {
   private center: [number, number] | null = null;
   private samples: [number, number][] = [];
   private packet = 0;
+  rumbleStop?: ReturnType<typeof setTimeout>;
 
   constructor(readonly device: HidDevice, readonly side: PadSide) {}
 
-  /** Switch the Joy-Con to full reports. */
+  /** Switch the Joy-Con to full reports, and turn its vibration motor on. */
   async init() {
     await this.send(0x03, [0x30]);
     // A second nudge: some Joy-Cons miss the first one while they are still waking up.
     setTimeout(() => void this.send(0x03, [0x30]).catch(() => undefined), 400);
+    setTimeout(() => void this.send(0x48, [0x01]).catch(() => undefined), 600);
+  }
+
+  nextPacket() {
+    this.packet = (this.packet + 1) & 0x0f;
+    return this.packet;
+  }
+
+  rumble(amp: number, ms: number, tone?: RumbleTone) {
+    playRumble(this, amp, ms, tone);
+  }
+
+  setLights(slot: number, flash: boolean) {
+    void this.send(0x30, [playerLightBits(slot, flash)]).catch(() => undefined);
+  }
+
+  /** Only a right Joy-Con has a HOME button; the left one simply ignores this. */
+  setHomeLight(mode: HomeLight) {
+    if (this.side === 'R') void this.send(0x38, homeLightPattern(mode)).catch(() => undefined);
   }
 
   private async send(subcommand: number, args: number[]) {
-    const neutralRumble = [0x00, 0x01, 0x40, 0x40, 0x00, 0x01, 0x40, 0x40];
-    this.packet = (this.packet + 1) & 0x0f;
-    await this.device.sendReport(0x01, new Uint8Array([this.packet, ...neutralRumble, subcommand, ...args]));
+    await sendSubcommand(this, subcommand, args);
   }
 
   /** A "0x30" (or subcommand reply "0x21") report: buttons and sticks. */
@@ -258,19 +334,36 @@ export class HidPro {
   private edges = [false, false, false, false, false, false, false];
   private centers: { l: [number, number] | null; r: [number, number] | null } = { l: null, r: null };
   private samples: number[] = [];
+  private packet = 3;
+  rumbleStop?: ReturnType<typeof setTimeout>;
 
   constructor(readonly device: HidDevice) {}
 
-  /** Ask for full 0x30 reports. A clone that ignores this keeps sending 0x3f, which we still read. */
+  nextPacket() {
+    this.packet = (this.packet + 1) & 0x0f;
+    return this.packet;
+  }
+
+  rumble(amp: number, ms: number, tone?: RumbleTone) {
+    playRumble(this, amp, ms, tone);
+  }
+
+  setLights(slot: number, flash: boolean) {
+    void sendSubcommand(this, 0x30, [playerLightBits(slot, flash)]).catch(() => undefined);
+  }
+
+  setHomeLight(mode: HomeLight) {
+    void sendSubcommand(this, 0x38, homeLightPattern(mode)).catch(() => undefined);
+  }
+
+  /** Ask for full 0x30 reports, then turn vibration on. A clone that ignores this keeps sending 0x3f, which we still read. */
   async init() {
-    const out = new Uint8Array(49);
-    out[0] = 0x03;
-    out[10] = 0x03;
-    out[11] = 0x30;
-    try {
-      await this.device.sendReport(0x01, out);
-    } catch {
-      // Simple reports still arrive.
+    for (const [subcommand, arg] of [[0x03, 0x30], [0x48, 0x01]] as const) {
+      try {
+        await sendSubcommand(this, subcommand, [arg]);
+      } catch {
+        // Simple reports still arrive; a clone without a motor or lights just ignores these.
+      }
     }
   }
 

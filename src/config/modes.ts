@@ -14,9 +14,9 @@ export type QuestRule = 'heroes' | 'hell' | 'free';
 
 export const QUEST_RULES: QuestRule[] = ['heroes', 'hell', 'free'];
 
-export type GameMode = 'ffa' | 'team' | 'princess' | 'siege' | QuestMode;
+export type GameMode = 'ffa' | 'team' | 'princess' | 'siege' | 'expedition' | QuestMode;
 
-export const GAME_MODES: GameMode[] = ['ffa', 'team', 'princess', 'siege', 'quest'];
+export const GAME_MODES: GameMode[] = ['ffa', 'team', 'princess', 'siege', 'quest', 'expedition'];
 
 export const isQuestMode = (mode: GameMode): mode is QuestMode => mode === 'quest';
 
@@ -27,3 +27,6 @@ export const isQuestMode = (mode: GameMode): mode is QuestMode => mode === 'ques
 export type Difficulty = 'standard' | 'hard';
 
 export const DIFFICULTIES: Difficulty[] = ['standard', 'hard'];
+
+/** Both cooperative modes configure up to four heroes in the lobby. */
+export const isPartyMode = (mode: GameMode) => isQuestMode(mode) || mode === 'expedition';

@@ -38,7 +38,7 @@ export function renderQuestHud(this: QuestHudContext): void {
   const stageNo = T().questStage(questStageNumber(q.route ?? [], q.stage));
   const grove = q.stage === QUEST.groveStage ? this.grovePhase() : null;
   const candles = q.stage === QUEST.nightStage ? ` · ${T().nightCandles(this.nightCandles.filter((c) => c.lit).length)}` : '';
-  const spirits = this.spiritRelay ? T().spiritRelayProgress(this.spiritRelay.delivered, QUEST.beacons.required) : '';
+  const spirits = this.spiritRelay ? T().spiritRelayProgress(this.spiritRelay.delivered, QUEST.beacons.required, this.spiritRelay.timeLeft) : '';
   const status = this.isHell
     ? `${stageNo}  ${T().hellStatus(this.fighters.filter((f) => f.team === 0 && f.alive).length)}${q.stage === 0 ? ` · ${T().questWaveOf(this.wave, QUEST.waves)}` : q.stage === QUEST.wardenStage && this.wardenReviveT >= 0 ? ` · ${Math.ceil(this.wardenReviveT)}s` : ''}${candles}${spirits ? ` · ${spirits}` : ''}`
     : q.stage === 0
@@ -58,7 +58,7 @@ export function renderQuestHud(this: QuestHudContext): void {
             : q.stage === QUEST.beaconStage
               ? `${stageNo}  ${spirits}`
             : q.stage === QUEST.escortStage && this.lantern
-              ? `${stageNo}  ${T().escortProgress(Math.floor(this.lantern.progress * 100), this.lantern.push)}`
+              ? `${stageNo}  ${T().escortProgress(Math.floor(this.lantern.progress * 100), this.lantern.push, this.lantern.drifting)}`
               : q.stage === QUEST.wardenStage
                 ? `${stageNo}  ${T().wardenStatus(this.wardenReviveT < 0 ? -1 : Math.ceil(this.wardenReviveT))}`
                 : q.stage === QUEST.dragonStage

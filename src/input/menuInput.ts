@@ -4,6 +4,16 @@ import { isSplit, readController } from '@/input/padSettings';
 
 export type MenuPadKey = string | DirectPad;
 
+export type MenuDirection = '' | 'L' | 'R' | 'U' | 'D';
+
+/** Keep the chosen axis through small diagonal wobbles; release nearer the centre than the engage threshold. */
+export function menuDirection(x: number, y: number, previous: string): MenuDirection {
+  const held = previous === 'L' ? -x : previous === 'R' ? x : previous === 'U' ? -y : previous === 'D' ? y : 0;
+  if (held > .35) return previous as MenuDirection;
+  if (Math.max(Math.abs(x), Math.abs(y)) <= .6) return '';
+  return Math.abs(x) > Math.abs(y) ? x > 0 ? 'R' : 'L' : y > 0 ? 'D' : 'U';
+}
+
 /** Use one input path per Joy-Con, and the same split/grip settings as the fight. */
 export function menuPadSources(): { key: MenuPadKey; control: string; st: PadState }[] {
   const direct = hidPads().filter((p) => p.connected && p.ready);

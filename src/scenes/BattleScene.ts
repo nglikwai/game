@@ -1,3 +1,9 @@
+import { preloadMapProps } from '@/rendering/mapProps';
+import { EXPEDITION } from '@/config/expedition';
+import { createForest } from '@/maps/expedition/forest';
+import { createExpedition, expeditionCheckpoint } from '@/battle/expedition/rules';
+import * as expeditionSystem from '@/battle/expedition/runtime';
+import * as expeditionPresentation from '@/battle/expedition/presentation';
 import { createQuestLayout, layoutPoint } from '@/maps/layout';
 import * as Phaser from 'phaser';
 import { isQuestMode, prepareQuest, HARD_CPU_HP, QUEST_MAX_CHESTS, chestsWithinCap, randomChestInterval, startRandomChests, BATTLE_READY_SECONDS, COUNTDOWN, QUEST, QUEST_TACTICS, QUEST_BOSSES, EMPTY_CHEST_CHANCE, HEIGHT, HUD_HEIGHT, PLAYER_COLORS, RES, TEAM_COLORS, WIDTH } from '@/config';
@@ -6,7 +12,7 @@ import { Fighter, type Arena } from '@/gameplay/Fighter';
 import { hellSlots, hellBossSlots, questFactions, questSideOf } from '@/battle/quest/factions';
 import { SKILL_SLOTS, skillById } from '@/gameplay/skills';
 import { roleById, type Role } from '@/gameplay/roles';
-import { CPU_ENEMY_SKILLS, QUEST_ENEMY_BANNED, questBossSkills, randomCpuEquipment, rollCpuLoadouts } from '@/ai/loadouts';
+import { CPU_ENEMY_SKILLS, QUEST_ENEMY_BANNED, questBossSkills, questBossSkillPair, randomCpuEquipment, rollCpuLoadouts } from '@/ai/loadouts';
 import { WEAPONS, rollOniWeapon } from '@/gameplay/weapons';
 import { T } from '@/localization';
 import { sfx } from '@/audio/sfx';
@@ -38,6 +44,7 @@ import * as questEscortSystem from '@/battle/quest/escort';
 import * as questSealsSystem from '@/battle/quest/seals';
 import { questSealConfig } from '@/battle/quest/sealRules';
 import { createSpiritRelay, updateSpiritRelay, renderSpiritRelay } from '@/battle/quest/soulRelay';
+import { checkTeamElimination } from '@/battle/results/teamBattle';
 import * as questHudSystem from '@/battle/quest/hud';
 import * as combatSummonsSystem from '@/battle/combat/summons';
 import * as objectivesTowersSystem from '@/battle/objectives/towers';
@@ -73,7 +80,7 @@ export class BattleScene extends BattleState implements Arena {
 
   /** Versus keeps red then blue. In a quest the heroes are blue and the other side is red. */
   sideColor(team: number) {
-    if (!this.quest) return TEAM_COLORS[team] ?? TEAM_COLORS[0];
+    if (!this.quest && !this.expedition) return TEAM_COLORS[team] ?? TEAM_COLORS[0];
     return team === 0 ? TEAM_COLORS[1] : TEAM_COLORS[0];
   }
 
@@ -98,11 +105,14 @@ export class BattleScene extends BattleState implements Arena {
   init(data: BattleStartData) {
     this.lobbySlots = data.slots;
     this.mode = data.mode ?? 'ffa';
+    this.expedition = this.mode === 'expedition' ? createExpedition(data.expedition) : null;
+    this.expeditionView = null;
+    this.arenaRect = this.expedition ? new Phaser.Geom.Rectangle(22 * S, 22 * S, (EXPEDITION.width - 44) * S, (EXPEDITION.height - HUD_HEIGHT - 44) * S) : new Phaser.Geom.Rectangle(ARENA.x, ARENA.y, ARENA.w, ARENA.h);
     this.quest = isQuestMode(this.mode) ? { ...data.quest, ...prepareQuest(data.quest) } : null;
     if (this.quest && !Number.isInteger(this.quest.layoutSeed)) this.quest.layoutSeed = Math.floor(Math.random() * 0x100000000);
     // The underworld has its own music; the last stage gets the boss theme.
-    this.bgm = this.quest ? (this.quest.stage === QUEST.bossStage || this.quest.stage === QUEST.wardenStage || this.quest.stage === QUEST.dirgeStage || this.quest.stage === QUEST.dragonStage || this.quest.stage === QUEST.wyvernStage ? 'boss' : 'hell') : 'battle';
-    this.slots = this.hasHellPlayers ? hellSlots(data.slots, this.quest?.side ?? 'heroes') : this.quest ? questSlots(data.slots, this.quest.stage) : data.slots;
+    this.bgm = this.expedition ? 'hell' : this.quest ? (this.quest.stage === QUEST.bossStage || this.quest.stage === QUEST.wardenStage || this.quest.stage === QUEST.dirgeStage || this.quest.stage === QUEST.dragonStage || this.quest.stage === QUEST.wyvernStage ? 'boss' : 'hell') : 'battle';
+    this.slots = this.expedition ? expeditionSystem.expeditionSlots(data.slots) : this.hasHellPlayers ? hellSlots(data.slots, this.quest?.side ?? 'heroes') : this.quest ? questSlots(data.slots, this.quest.stage) : data.slots;
     // Hell fills every left seat. The Night Oni is an extra foe, so only two invaders walk in with him.
     if (this.quest?.stage === QUEST.nightStage && this.hasHellPlayers) {
       let foes = 0;
@@ -135,7 +145,7 @@ export class BattleScene extends BattleState implements Arena {
     this.barrierTick = new Map();
     this.barrierAnnounced = false;
     this.herbs = [];
-    this.map = this.mapChoice === 'random' ? MAPS[Math.floor(Math.random() * MAPS.length)] : getMap(this.mapChoice);
+    this.map = this.expedition ? createForest(this.expedition.seed) : this.mapChoice === 'random' ? MAPS[Math.floor(Math.random() * MAPS.length)] : getMap(this.mapChoice);
     if (this.quest) this.map = createQuestLayout(this.map, this.quest.layoutSeed!);
     this.spiritRelay = this.quest?.stage === QUEST.beaconStage ? createSpiritRelay(this.map) : null;
     this.shotBlockers = [];
@@ -232,10 +242,13 @@ export class BattleScene extends BattleState implements Arena {
 
   /** Party bonuses use a copy so enemies and later versus matches retain their role stats. */
   roleForSlot(base: Role, index: number): Role {
+    if (this.expedition) return { ...base, ...(index < EXPEDITION.partySlots ? { peRegen: base.peRegen * QUEST.partyPeRegen, speed: base.speed * QUEST.partySpeed } : {}) };
     return this.quest && (index < QUEST.partySlots || this.hasHellPlayers && !this.questBossSeats.includes(index))
       ? { ...base, peRegen: base.peRegen * QUEST.partyPeRegen, speed: base.speed * QUEST.partySpeed }
       : base;
   }
+
+  preload() { preloadMapProps(this); }
 
   create() {
     // The pause menu freezes the clock, tweens and physics. Leaving it by Restart / Back skips the unpause,
@@ -249,18 +262,23 @@ export class BattleScene extends BattleState implements Arena {
     // (The physics world is rebuilt for every round, so it never starts frozen.)
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.time.paused = false;
+      // Leaving the battle: Joy-Con lights back to a steady player number, HOME light off.
+      for (const f of this.fighters) f.resetPadLights();
     });
     this.setupUI();
-    this.physics.world.setBounds(ARENA.x, ARENA.y, ARENA.w, ARENA.h);
-    const world = this.add.container(0, HUD_HEIGHT).setScale(1 / S).setDepth(1);
+    this.physics.world.setBounds(this.arenaRect.x, this.arenaRect.y, this.arenaRect.width, this.arenaRect.height);
+    const world = this.worldLayer = this.add.container(0, HUD_HEIGHT).setScale(1 / S).setDepth(1);
     this.lFloor = this.add.container();
     this.lSprites = this.add.container();
     this.lOver = this.add.container();
     this.lTop = this.add.container();
     world.add([this.lFloor, this.lSprites, this.lOver, this.lTop]);
-    const arenaTexture = addArenaTexture(this, this.map);
-    if (this.map.layout) this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.textures.remove(arenaTexture));
-    this.lFloor.add(this.add.image(0, 0, arenaTexture).setOrigin(0, 0).setScale(S / MAP_RES));
+    if (this.expedition) this.paintExpeditionFloor();
+    else {
+      const arenaTexture = addArenaTexture(this, this.map);
+      if (this.map.layout) this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.textures.remove(arenaTexture));
+      this.lFloor.add(this.add.image(0, 0, arenaTexture).setOrigin(0, 0).setScale(S / MAP_RES));
+    }
 
     // Random each round: which side red starts on (team modes) and who starts where.
     const flip = this.mode !== 'ffa' && !this.quest && Math.random() < 0.5;
@@ -305,6 +323,7 @@ export class BattleScene extends BattleState implements Arena {
     if (this.quest?.stage === QUEST.wardenStage) WARDEN_GEAR.forEach((gear, k) => fixedRoles.set(this.questBossSeats[k], gear.role));
     const cpuGear = rollCpuLoadouts(this.mode, this.slots, fixedRoles);
     const oniWeapon = this.quest?.stage === QUEST.bossStage ? rollOniWeapon() : null;
+    const wardenSkills = this.quest?.stage === QUEST.wardenStage ? questBossSkillPair() : null;
     this.slots.forEach((slot, i) => {
       const controller = createController(this, slot.control, slot.binds, getSettings().difficulty);
       if (!controller) return;
@@ -324,7 +343,7 @@ export class BattleScene extends BattleState implements Arena {
       const middleFoe = !!this.quest && QUEST_TACTICS.includes(this.quest.stage) && slot.control === 'cpu' && !isBoss
         && (this.isHell ? slot.team === 0 : i >= QUEST.partySlots);
       // Tactic-stage enemies (in Hell, the hero side) roll the same four sensible skills as any CPU enemy.
-      const skillIds = finaleBoss ? questBossSkills()
+      const skillIds = finaleBoss ? warden >= 0 ? wardenSkills![warden] : questBossSkills()
         : middleFoe ? randomCpuEquipment(this.mode, gear.role, QUEST_ENEMY_BANNED, CPU_ENEMY_SKILLS).skills
           : isBoss && slot.control !== 'cpu' ? gear.skills.slice(0, SKILL_SLOTS) : gear.skills;
       const skills = skillIds.map(skillById);
@@ -341,7 +360,8 @@ export class BattleScene extends BattleState implements Arena {
       if (teams) f.team = slot.team;
       const nightFoe = this.quest?.stage === QUEST.nightStage && f.team === (this.isHell ? 0 : 1);
       // Quest: the party is sturdier than usual. The night squad is tougher than a normal wave.
-      if (nightFoe) {
+      if (this.expedition && i < EXPEDITION.partySlots) f.maxHp = f.hp = Math.round(role.maxHp * QUEST.partyHp);
+      else if (nightFoe) {
         const hard = slot.control === 'cpu' && getSettings().difficulty === 'hard' ? HARD_CPU_HP : 1;
         f.maxHp = f.hp = Math.round(role.maxHp * QUEST.night.hp * hard);
       } else if (this.quest && i < QUEST.partySlots) f.maxHp = f.hp = Math.round(role.maxHp * QUEST.partyHp * (this.isHell && getSettings().difficulty === 'hard' ? HARD_CPU_HP : 1));
@@ -382,7 +402,7 @@ export class BattleScene extends BattleState implements Arena {
         f.pocket.push(...carried.pocket);
         f.soul = carried.soul;
       }
-      this.sprites[i] = this.add.image(sp.x, sp.y, ninjaTexture(this, color)).setScale(r / 18 / RES);
+      this.sprites[i] = this.add.image(sp.x, sp.y, ninjaTexture(this, color, f.role.id)).setScale(r / 18 / RES);
       this.lSprites.add(this.sprites[i]);
       this.prevStates[i] = f.state;
       f.facing = Math.atan2(WORLD_CENTER.y - sp.y, WORLD_CENTER.x - sp.x);
@@ -418,7 +438,7 @@ export class BattleScene extends BattleState implements Arena {
         this.nightLights = this.add.graphics().setVisible(false);
         this.nightFlames = this.add.graphics().setDepth(4);
       }
-    } else if (teams) this.placeTowers(flip);
+    } else if (teams && !this.expedition) this.placeTowers(flip);
     this.setupMapFeatures();
     const spots = chestsFor(this.map, this.mode)
       .map((p) => ({ ...p, ...toWorld(p) }))
@@ -428,7 +448,7 @@ export class BattleScene extends BattleState implements Arena {
     // More fighters, more chests: a few random extras from the start, and more often during the fight.
     // Quest stops at QUEST_MAX_CHESTS, counting the map chests already placed.
     const n = this.fighters.length;
-    const extras = this.quest ? Math.max(0, QUEST_MAX_CHESTS - this.chests.length) : startRandomChests(n);
+    const extras = this.expedition ? 0 : this.quest ? Math.max(0, QUEST_MAX_CHESTS - this.chests.length) : startRandomChests(n);
     for (let k = 0; k < extras; k++) this.dropRandomChest(-0.5 - k * 0.3);
     this.chestTimer = randomChestInterval(n);
 
@@ -467,6 +487,7 @@ export class BattleScene extends BattleState implements Arena {
     if (this.walls.length > 0) this.showPrincessIntro();
     if (this.mode === 'siege') this.showBanner(T().siegeGoal);
     if (this.quest) this.createQuestHud();
+    if (this.expedition) { this.createExpeditionView(); this.setupExpedition(); }
     this.startCountdown();
 
     // Everything the HUD creates sits above the arena.
@@ -491,7 +512,9 @@ export class BattleScene extends BattleState implements Arena {
     };
     const active = this.slots.map((s, i) => ({ s, i })).filter(({ s }) => s.control !== 'off');
     const out: { x: number; y: number }[] = [];
-    if (this.quest?.stage === QUEST.ambushStage) {
+    if (this.expedition) {
+      active.forEach(({ i }) => { out[i] = this.expeditionStart(i); });
+    } else if (this.quest?.stage === QUEST.ambushStage) {
       for (const team of [0, 1]) {
         const spots = team === 0 ? QUEST.ambush.heroes : QUEST.ambush.enemies;
         shuffle(active.filter(({ s }) => s.team === team)).forEach(({ i }, k) => {
@@ -520,14 +543,15 @@ export class BattleScene extends BattleState implements Arena {
   /** The nearest point to `p` that's clear of obstacles and other fighters' starts. */
   freeSpot(p: { x: number; y: number }, taken: { x: number; y: number }[], r = 20) {
     const clear = (x: number, y: number) =>
-      x > ARENA.x + r && x < ARENA.x + ARENA.w - r && y > ARENA.y + r && y < ARENA.y + ARENA.h - r &&
+      x > this.arenaRect.x + r && x < this.arenaRect.right - r && y > this.arenaRect.y + r && y < this.arenaRect.bottom - r &&
       !this.obstacleRects.some((o) => x > o.x - r && x < o.right + r && y > o.y - r && y < o.bottom + r) &&
       !(this.map?.zones ?? []).some((zone) => sandPitContains(zone, x, y, r)) &&
       !taken.some((t) => Math.hypot(t.x - x, t.y - y) < r * 2.2);
     if (clear(p.x, p.y)) return p;
-    for (let d = 20; d < 300; d += 20) {
-      for (let k = 0; k < 12; k++) {
-        const a = (k / 12) * Math.PI * 2;
+    // Far enough to get out of the middle of a big sand pit.
+    for (let d = 20; d < 600; d += 20) {
+      for (let k = 0; k < 16; k++) {
+        const a = (k / 16) * Math.PI * 2;
         const x = p.x + Math.cos(a) * d;
         const y = p.y + Math.sin(a) * d;
         if (clear(x, y)) return { x, y };
@@ -550,21 +574,22 @@ export class BattleScene extends BattleState implements Arena {
       this.countdown -= dt;
       for (const f of this.fighters) f.body.setVelocity(0, 0);
     } else {
-      for (const f of this.fighters) f.update(dt, f.controller.read(f, this.world, dt));
+      for (const f of this.fighters) f.update(dt, this.expedition ? this.expeditionIntent(f, dt) : f.controller.read(f, this.world, dt));
     }
     if (!this.over) this.updateRescueGate();
     this.updateProjectiles(dt);
     this.updateCaltrops(dt);
     this.petals.update(dt);
     this.updateFx(dt);
-    if (this.mode !== 'ffa' && !this.over && this.countdown <= 0) this.updateTeamRespawns(dt);
+    checkTeamElimination.call(this);
+    if (this.mode !== 'ffa' && !this.expedition && !this.over && this.countdown <= 0) this.updateTeamRespawns(dt);
     if (this.countdown <= 0 && !this.over) {
       this.updateTowers(dt);
       this.updateTowerHealing(dt);
     }
     for (const tw of this.towers) tw.shakeT = Math.max(0, tw.shakeT - dt);
     for (const w of this.walls) w.shakeT = Math.max(0, w.shakeT - dt);
-    if (this.countdown <= 0 && !this.over) this.updateRandomChests(dt);
+    if (this.countdown <= 0 && !this.over && !this.expedition) this.updateRandomChests(dt);
     if (this.countdown <= 0 && !this.over) {
       this.updateStorm(dt);
       this.updateVents(dt);
@@ -590,8 +615,10 @@ export class BattleScene extends BattleState implements Arena {
       if (before < 0 && c.age >= 0) sfx.chestDrop();
     }
 
+    if (this.expedition) { this.updateExpedition(dt); this.updateExpeditionCamera(dt); }
     this.render();
     this.renderHud();
+    if (this.expedition) this.renderExpedition();
 
     // Free-for-all / Team: last team standing (in free-for-all every fighter is their own team).
     // Save the Princess ends when both of a team's princesses are free; Siege when its towers fall.
@@ -609,15 +636,8 @@ export class BattleScene extends BattleState implements Arena {
       const alive = this.fighters.filter((f) => f.alive);
       if (alive.length <= 1) this.endRound(alive[0]);
     }
-    // Team Battle: a team is out once it has nobody standing and no main tower left to bring anyone back.
-    if (!this.over && this.mode === 'team') {
-      for (const team of [0, 1]) {
-        const out = !this.fighters.some((f) => f.team === team && f.alive) && !this.towers.some((tw) => tw.team === team && tw.main && tw.alive);
-        if (!out) continue;
-        this.endRound(this.fighters.find((f) => f.team === 1 - team && f.alive) ?? this.fighters.find((f) => f.team === 1 - team));
-        break;
-      }
-    }
+    // Also resolve KOs from environmental hazards later in this frame.
+    checkTeamElimination.call(this);
     if (this.over) this.overT += dt;
   }
 
@@ -671,7 +691,7 @@ export class BattleScene extends BattleState implements Arena {
       build: (m) => {
         const items: [string, () => void][] = [
           [T().resume, () => m.close()],
-          [this.quest ? T().questRetry : T().restart, () => this.restartRound()],
+          [this.expedition ? T().expeditionRetry : this.quest ? T().questRetry : T().restart, () => this.expedition ? this.scene.start('Loading', { mode: this.mode, slots: this.lobbySlots, expedition: expeditionCheckpoint(this.expedition) }) : this.restartRound()],
           [T().toLobby, () => this.scene.start('Lobby')],
           [T().toTitle, () => this.scene.start('Title')],
         ];
@@ -705,6 +725,15 @@ export class BattleScene extends BattleState implements Arena {
     });
   }
 
+  paintExpeditionFloor = expeditionPresentation.paintExpeditionFloor.bind(this);
+  createExpeditionView = expeditionPresentation.createExpeditionView.bind(this);
+  updateExpeditionCamera = expeditionPresentation.updateExpeditionCamera.bind(this);
+  renderExpedition = expeditionPresentation.renderExpedition.bind(this);
+  expeditionStart = expeditionSystem.expeditionStart.bind(this);
+  setupExpedition = expeditionSystem.setupExpedition.bind(this);
+  expeditionIntent = expeditionSystem.expeditionIntent.bind(this);
+  updateExpedition = expeditionSystem.updateExpedition.bind(this);
+
   // Systems bind once per scene. Typed receivers verify every dependency at this boundary.
 
   // quest night
@@ -724,6 +753,9 @@ export class BattleScene extends BattleState implements Arena {
   reviveSpot: OmitThisParameter<typeof combatActionsSystem.reviveSpot> = combatActionsSystem.reviveSpot.bind(this);
   onSubstitute: OmitThisParameter<typeof combatActionsSystem.onSubstitute> = combatActionsSystem.onSubstitute.bind(this);
   teleportSafe: OmitThisParameter<typeof combatActionsSystem.teleportSafe> = combatActionsSystem.teleportSafe.bind(this);
+  shadowStepTarget: OmitThisParameter<typeof combatActionsSystem.shadowStepTarget> = combatActionsSystem.shadowStepTarget.bind(this);
+  shadowStep: OmitThisParameter<typeof combatActionsSystem.shadowStep> = combatActionsSystem.shadowStep.bind(this);
+  swapPlaces: OmitThisParameter<typeof combatActionsSystem.swapPlaces> = combatActionsSystem.swapPlaces.bind(this);
   forTeam: OmitThisParameter<typeof combatActionsSystem.forTeam> = combatActionsSystem.forTeam.bind(this);
   healTeam: OmitThisParameter<typeof combatActionsSystem.healTeam> = combatActionsSystem.healTeam.bind(this);
   onPillRevived: OmitThisParameter<typeof combatActionsSystem.onPillRevived> = combatActionsSystem.onPillRevived.bind(this);
@@ -817,7 +849,6 @@ export class BattleScene extends BattleState implements Arena {
   renderAltar: OmitThisParameter<typeof environmentTerrainSystem.renderAltar> = environmentTerrainSystem.renderAltar.bind(this);
   renderFog: OmitThisParameter<typeof environmentTerrainSystem.renderFog> = environmentTerrainSystem.renderFog.bind(this);
   renderTide: OmitThisParameter<typeof environmentTerrainSystem.renderTide> = environmentTerrainSystem.renderTide.bind(this);
-  renderStorm: OmitThisParameter<typeof environmentTerrainSystem.renderStorm> = environmentTerrainSystem.renderStorm.bind(this);
   renderWind: OmitThisParameter<typeof environmentTerrainSystem.renderWind> = environmentTerrainSystem.renderWind.bind(this);
   hazardSlow: OmitThisParameter<typeof environmentTerrainSystem.hazardSlow> = environmentTerrainSystem.hazardSlow.bind(this);
   zoneAt: OmitThisParameter<typeof environmentTerrainSystem.zoneAt> = environmentTerrainSystem.zoneAt.bind(this);

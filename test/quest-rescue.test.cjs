@@ -187,7 +187,7 @@ for (const spell of TREE_SUMMONS) test(`${spell.kind}: tree warning follows its 
   assert.equal(scene.questTreeCast, null);
 });
 
-test('light summons warn faster, heavy effects retain their timing, and warning graphics match each impact', () => {
+test('light summons charge faster, heavy effects retain their timing, and only the caster shows charge progress', () => {
   const warnings = Object.fromEntries(TREE_SUMMONS.map((spell) => [spell.kind, spell.warn]));
   assert.deepEqual(warnings, { soulFire: 0.8, soulThunder: 1.1, soulReaper: 1.6, soulTree: 1.6 });
   for (const spell of TREE_SUMMONS) {
@@ -196,10 +196,10 @@ test('light summons warn faster, heavy effects retain their timing, and warning 
     scene.g = scene.gGlow = scene.gOver = g;
     const progress = [];
     scene.fx.summonCircle = (_g, _glow, _x, _y, value) => progress.push(value);
-    scene.fx.targetMark = (_g, _x, _y, value) => progress.push(value);
+    scene.fx.targetMark = () => assert.fail('summons must not reveal the target area');
     scene.questTreeCast = { spell, target: party, x: party.x, y: party.y, elapsed: spell.warn * QUEST.rescue.tree.warnScale / 2 };
     scene.renderQuestTree(1);
-    assert.deepEqual(progress, [0.5, 0.5]);
+    assert.deepEqual(progress, [0.5]);
   }
 });
 
@@ -389,7 +389,7 @@ test('two guards stand until both princesses are free, then four come and do not
   const living = () => guards.filter((f) => f.alive).length;
   scene.updateTeamRespawns(0);
   scene.updateTeamRespawns(8);
-  assert.equal(living(), 1);
+  assert.equal(living(), 2);
   scene.teamRespawnT[1] = 0;
   scene.updateTeamRespawns(0);
   assert.equal(living(), 2);

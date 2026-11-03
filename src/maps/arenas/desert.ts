@@ -1,3 +1,5 @@
+import { paintWaterSurface } from '@/maps/art/water';
+import { paintScenery } from '@/maps/art/renderedProps';
 import { HEIGHT, HUD_HEIGHT, WIDTH } from '@/config';
 import {
   ARENA, ARENA_MID_Y, WALL, blob, cornerPile, paintShadow, paintVignette,
@@ -142,6 +144,7 @@ function paintOasis(ctx: Ctx, o: Obstacle, rand: () => number) {
   ctx.beginPath();
   ctx.ellipse(o.x, o.y, o.w / 2, o.h / 2, 0, 0, Math.PI * 2);
   ctx.fill();
+  paintWaterSurface(ctx, o, 'ellipse', 'pond', rand);
   for (let i = 0; i < 4; i++) blob(ctx, o.x + (rand() - 0.5) * o.w * 0.6, o.y + (rand() - 0.5) * o.h * 0.5, 10, 'rgba(255,255,255,0.2)');
 }
 
@@ -170,6 +173,7 @@ export function paintPalm(ctx: Ctx, o: Obstacle, rand: () => number) {
 }
 
 function paintRuin(ctx: Ctx, o: Obstacle, rand: () => number) {
+  if (paintScenery(ctx, o)) return;
   const l = o.x - o.w / 2;
   const t = o.y - o.h / 2;
   ctx.fillStyle = '#b8935a';

@@ -1,3 +1,5 @@
+import { mapPropSources, mapPropSignature } from '@/rendering/mapProps';
+import { withMapProps } from '@/maps/art/renderedProps';
 import * as Phaser from 'phaser';
 import { HEIGHT, HUD_HEIGHT, RES, WIDTH } from '@/config';
 import { mulberry32, type GameMap, type MapId } from '@/maps/common';
@@ -44,7 +46,7 @@ import { SUNKEN } from '@/maps/arenas/sunken';
 import { FROSTFIRE } from '@/maps/arenas/frostfire';
 import { ORCHARD } from '@/maps/arenas/orchard';
 import { ASTRAL } from '@/maps/arenas/astral';
-import { polishMapArt } from '@/maps/art/finish';
+import { MAP_ART, polishMapArt } from '@/maps/art/finish';
 
 export { QUEST_MAPS };
 
@@ -64,14 +66,18 @@ export const getMap = (id: MapId | undefined): GameMap => [...MAPS, ...QUEST_MAP
 
 /** Paints a map's texture the first time and returns its key (also used for menu backdrops and previews). */
 export function addArenaTexture(scene: Phaser.Scene, map: GameMap = COURTYARD): string {
-  const key = `arena-${map.id}${map.layout ? `-layout-${map.layout.seed}` : ''}`;
+  const props = mapPropSources(scene);
+  const key = `arena-${map.id}${map.layout ? `-layout-${map.layout.seed}` : ''}-props-${mapPropSignature(props)}`;
   if (scene.textures.exists(key)) return key;
   const tex = scene.textures.createCanvas(key, Math.round(WIDTH * MAP_RES), Math.round((HEIGHT - HUD_HEIGHT) * MAP_RES))!;
   const ctx = tex.getContext();
   ctx.scale(MAP_RES, MAP_RES);
   // Paint in game coordinates (y measured from the top of the game, not the canvas).
   ctx.translate(0, -HUD_HEIGHT);
-  map.paint(ctx, mulberry32(8));
+  const direction = map.id === 'expedition-forest' ? undefined : MAP_ART[map.id];
+  const dark = direction?.material === 'ash' || direction?.motif === 'spirit';
+  const filter = dark ? 'saturate(0.75) brightness(0.72)' : direction?.material === 'snow' ? 'saturate(0.6) brightness(1.12)' : 'saturate(1.18) brightness(0.83)';
+  withMapProps(ctx, map, props, filter, () => map.paint(ctx, mulberry32(8)));
   tex.refresh();
   return key;
 }
